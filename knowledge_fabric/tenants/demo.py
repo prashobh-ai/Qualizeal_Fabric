@@ -81,6 +81,34 @@ The protocol is governed by the department's clinical guideline board and review
     ],
 }
 
+# synthetic connector records — automated ingestion from GitHub + Jira (WS1).
+# Identifier-safe: invented org/repo/keys only.
+GITHUB_RECORDS = {
+    "acme-assurance": [
+        {"repo": "acme/assurance-platform", "path": "docs/release-runbook.md", "updated_at": 1700,
+         "commit": "a1b2c3", "mime": "text/markdown",
+         "content": "# Release Runbook\n\nA release is cut only after the regression suite is green and "
+                    "requirement traceability is complete. The runbook requires sign-off from the QA lead "
+                    "before promotion to production."},
+        {"repo": "acme/assurance-platform", "path": "CHANGELOG.md", "updated_at": 1710, "commit": "d4e5f6",
+         "mime": "text/markdown",
+         "content": "# Changelog\n\nR2026.1 closed the traceability gap on REQ-102 by adding automated "
+                    "coverage for the checkout component."},
+    ],
+}
+JIRA_RECORDS = {
+    "acme-assurance": [
+        {"project": "REL", "key": "REL-42", "summary": "Close traceability gap on REQ-102",
+         "status": "In Progress", "updated": 1720, "acl": ["public"],
+         "description": "REQ-102 has no linked test case. Add TC-4503 and link it to the requirement "
+                        "before the R2026.1 release can be promoted."},
+        {"project": "REL", "key": "REL-43", "summary": "Regression suite flakiness on payments",
+         "status": "Open", "updated": 1730, "acl": ["public"],
+         "description": "Intermittent failures in the payments regression pack are blocking a clean run. "
+                        "Owner is investigating a race in the test fixtures."},
+    ],
+}
+
 # question bank per tenant (measured, multi-doc where possible, distinct families)
 QUESTION_BANK = {
     "acme-assurance": [
@@ -109,6 +137,12 @@ DEMO_USERS = {
     ],
     "northwind-air": [("nia.asker", ["asker"], ["public"])],
     "meridian-health": [("mo.asker", ["asker"], ["public"])],
+    "qualizeal": [
+        ("asha.asker", ["asker"], ["public"]),
+        ("carl.curator", ["curator"], ["public", "restricted"]),
+        ("adar.admin", ["admin"], ["public", "restricted"]),
+        ("kf-agent", ["agent"], ["public"]),
+    ],
 }
 
 # identifier-safety: patterns that would indicate a REAL-resolvable identifier
@@ -160,6 +194,18 @@ def seed(platform, tenants: list[str] | None = None) -> dict:
         summary[cfg.tenant] = {"documents": len(CORPORA[cfg.tenant]),
                                "ingested": len([r for r in res if r["status"] in ("ok", "updated")]),
                                "passages": sum(r.get("passages", 0) for r in res)}
+        # automated multi-source ingestion from GitHub + Jira (WS1)
+        sources = []
+        if cfg.tenant in GITHUB_RECORDS:
+            sources.append({"source": "github", "config": {"repos": ["acme/assurance-platform"]},
+                            "records": GITHUB_RECORDS[cfg.tenant]})
+        if cfg.tenant in JIRA_RECORDS:
+            sources.append({"source": "jira", "config": {"projects": ["REL"]},
+                            "records": JIRA_RECORDS[cfg.tenant]})
+        if sources:
+            from ..ingestion.sync import SyncManager
+            syncs = SyncManager(platform).run_all(cfg.tenant, sources)
+            summary[cfg.tenant]["connectors"] = {s["source"]: s["ingested"] for s in syncs}
     return summary
 
 

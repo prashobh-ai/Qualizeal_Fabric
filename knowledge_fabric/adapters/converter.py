@@ -42,7 +42,30 @@ class DoclingLite:
             return self._code(text, raw.language)
         if uri.endswith(".ocr.txt") or "scan" in mime or "image" in mime:
             return self._scan(text, raw.language)
+        if uri.endswith(".docx") or "wordprocessingml" in mime:
+            return self._docx(raw.bytes_, raw.language)
         return self._text(text, raw.language)
+
+    def _docx(self, data: bytes, lang: str) -> ConvertedDocument:
+        """Extract paragraphs from a .docx (Office Open XML) with stdlib only."""
+        import io as _io
+        import zipfile
+        paras: list[str] = []
+        try:
+            z = zipfile.ZipFile(_io.BytesIO(data))
+            xml = z.read("word/document.xml").decode("utf-8", "replace")
+        except Exception:
+            return self._text(data.decode("utf-8", "replace"), lang)
+        for pm in re.findall(r"<w:p[ >].*?</w:p>", xml, re.S):
+            runs = re.findall(r"<w:t[^>]*>(.*?)</w:t>", pm, re.S)
+            para = re.sub(r"<[^>]+>", "", "".join(runs)).strip()
+            if para:
+                paras.append(para)
+        regions = []
+        for i, p in enumerate(paras):
+            regions.append(_region(p, CoordinateKind.PAGE_PARAGRAPH,
+                                   {"page": i // _PARAS_PER_PAGE + 1, "paragraph": i % _PARAS_PER_PAGE + 1}))
+        return ConvertedDocument(language=lang, regions=regions)
 
     def _text(self, text: str, lang: str) -> ConvertedDocument:
         paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]

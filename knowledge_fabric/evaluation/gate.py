@@ -23,6 +23,7 @@ def _eval_principal(platform, tenant: str) -> Principal:
 def run_bank(platform, tenant: str) -> dict:
     svc = AnswerService(platform)
     prin = _eval_principal(platform, tenant)
+    platform.cache.invalidate(tenant)     # evaluate the index itself, not cached answers
     rows = platform.db.query(
         "SELECT question, expected_docs FROM question_bank WHERE tenant=?", (tenant,))
     if not rows:
@@ -101,4 +102,5 @@ def corrupt_citation_coordinates(platform, tenant: str) -> int:
     """Test hook: break citation coordinates on a candidate to prove the gate blocks."""
     cur = platform.db.execute(
         "UPDATE passages SET coord_locator='{}' WHERE tenant=? AND superseded_by IS NULL", (tenant,))
+    platform.cache.invalidate(tenant)     # the corrupted index must be re-evaluated, not cached
     return cur.rowcount

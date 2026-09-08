@@ -25,10 +25,28 @@ retrieval, budget caps and a full audit trail — before any cloud exists.
 ## Quickstart (under a minute, no dependencies)
 
 ```bash
-make test            # 41 tests mapped to Build Plan Section 20
-make demo            # narrated end-to-end execution of every invariant
-make serve           # Ask console + JSON API at http://localhost:8080/
+make test            # 61 tests mapped to Build Plan Section 20 + roadmap WS1/WS2/WS3
+make demo            # narrated end-to-end execution of every invariant + capability
+make serve           # Ask console (/) + telemetry dashboard (/dashboard) + JSON API
+make dashboard       # build a self-contained dashboard snapshot with real seeded data
+make load-corpus DIR=<folder-of-docx>   # ingest QualiZeal's own .docx corpus
 ```
+
+## QualiZeal Core Build Roadmap coverage (QZ-KF-BLD-001)
+
+Aligned to the leadership roadmap's answer chain **Connect → Understand → Decide → Answer**
+and its three workstreams — see [`docs/ROADMAP_ALIGNMENT.md`](docs/ROADMAP_ALIGNMENT.md) for the
+capability-by-capability map. The three headline "things to show":
+
+1. **Automated multi-source ingestion** — GitHub + Jira (storyboard) connectors and a bulk-upload
+   door for admin/curator, all emitting one canonical record through the 7-step pipeline; read-only,
+   allow-listed, change-detecting, tombstoning; a connector **registry** makes new sources plug-and-play.
+2. **Power BI-style telemetry dashboard** at `/dashboard` — tabs for Overview / Trust / Sources /
+   Models / Usage / Cost & Caching, filterable by **last 24h / last 7d / all**, **user**, and **role**;
+   shows **which model ran when and why** (the 4-level selector's reason codes), tokens in/out, cost,
+   and **cost saved by cache technique**.
+3. **User-based access control from day one** — real signed-JWT identity, roles/scopes,
+   permission-before-ranking, per-agent identity, and per-tenant + per-user budget caps.
 
 Or drive it directly:
 
@@ -78,12 +96,15 @@ deployment shape it runs in.
 | Local adapters (SQLite, filesystem, hashing embedder, mock/hosted/off model, HS256 IdP) | `adapters/` |
 | Tenant-guarded stores | `stores/` |
 | 7-step ingestion pipeline | `ingestion/` |
-| Governed answer path (RRF · MMR · graph · grounding gate · clarify · router · post-check) | `answer/` |
+| Governed answer path (RRF · MMR · graph · grounding gate · clarify · post-check) | `answer/service.py` |
+| 4-level model selector with explainable "why" | `answer/selector.py` |
+| Five cache layers + savings-by-technique ledger | `answer/cache.py` |
+| Multilingual detect/translate EN·FR·ES·JA | `answer/lang.py` |
 | Identity / policy / budget / audit | `governance/` |
 | Ontology packs + typed extraction | `ontology/`, `ingestion/extract.py` |
-| Connectors (SDK + GitHub + Files) | `connectors/` |
-| Ask / Curator / Admin / **Agent (MCP)** surfaces | `surfaces/` |
-| Telemetry, cost accounting, `/metrics` | `telemetry/`, `adapters/telemetry.py` |
+| Connectors (SDK + registry: GitHub · Jira · Files) + auto-sync | `connectors/`, `ingestion/sync.py` |
+| Ask · Curator · Admin · **Dashboard** · **Agent (MCP)** surfaces | `surfaces/` |
+| Telemetry, cost accounting, `/metrics`, `/api/analytics` | `adapters/telemetry.py` |
 | Evaluation harness + promotion gate | `evaluation/` |
 | Knowledge health + risk register | `health/` |
 | Synthetic demo tenants + identifier-safety | `tenants/` |
@@ -105,6 +126,7 @@ a config change, zero code change. The demo users:
 | acme-assurance | `qa-agent` | agent | public (service principal) |
 
 ## Docs
+- [`docs/ROADMAP_ALIGNMENT.md`](docs/ROADMAP_ALIGNMENT.md) — QualiZeal Core Build Roadmap coverage map.
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — run/test/demo, mapped to the provided runbook.
 - [`docs/CHECKLIST.md`](docs/CHECKLIST.md) — Section 20 item-by-item status + tests.
 - [`docs/licences.md`](docs/licences.md) — licence posture (I14).

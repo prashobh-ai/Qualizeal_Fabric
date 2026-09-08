@@ -65,7 +65,11 @@ CREATE TABLE IF NOT EXISTS health_snapshots (
 CREATE TABLE IF NOT EXISTS spans (
     id INTEGER PRIMARY KEY AUTOINCREMENT, trace_id TEXT, tenant TEXT, name TEXT,
     attrs TEXT, started_at REAL, duration_ms REAL, cost REAL, tokens INTEGER,
-    tier TEXT, grounding REAL, citations_count INTEGER, stage TEXT
+    tier TEXT, grounding REAL, citations_count INTEGER, stage TEXT,
+    subject TEXT, roles TEXT, level TEXT, why TEXT,
+    tokens_in INTEGER DEFAULT 0, tokens_out INTEGER DEFAULT 0,
+    cache_hit INTEGER DEFAULT 0, cache_technique TEXT, cost_saved REAL DEFAULT 0,
+    lang TEXT, sources TEXT
 );
 CREATE TABLE IF NOT EXISTS budgets (
     tenant TEXT PRIMARY KEY, cap REAL, spent REAL DEFAULT 0
@@ -94,6 +98,10 @@ CREATE TABLE IF NOT EXISTS index_versions (
 CREATE TABLE IF NOT EXISTS curation_queue (
     id TEXT PRIMARY KEY, tenant TEXT NOT NULL, item TEXT, kind TEXT,
     status TEXT, assignee TEXT, resolution TEXT, at INTEGER
+);
+CREATE TABLE IF NOT EXISTS connector_cursors (
+    tenant TEXT NOT NULL, source TEXT NOT NULL, cursor TEXT, last_sync INTEGER,
+    items INTEGER DEFAULT 0, PRIMARY KEY (tenant, source)
 );
 CREATE TABLE IF NOT EXISTS rate_limit (
     tenant TEXT NOT NULL, subject TEXT NOT NULL, window_start REAL, count INTEGER,

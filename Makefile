@@ -38,6 +38,15 @@ serve: ## Serve the HTTP surfaces (Ask console at http://localhost:$(PORT)/)
 mcp: ## Run the MCP agent tool server (JSON-RPC over stdio)
 	@$(PY) -m knowledge_fabric.surfaces.agent_mcp
 
+dashboard: ## Build a self-contained telemetry-dashboard snapshot (real seeded data)
+	@KF_SNAPSHOT=$(or $(OUT),./data/kf_dashboard_snapshot.html) $(PY) scripts/dashboard_snapshot.py
+
+load-corpus: ## Ingest a folder of QualiZeal .docx into the 'qualizeal' tenant: make load-corpus DIR=path
+	@$(PY) scripts/load_qualizeal_corpus.py $(DIR)
+
+sync: ## Show connector source health + registry
+	@$(PY) -c "from knowledge_fabric.app import Platform;from knowledge_fabric.tenants import demo;from knowledge_fabric.ingestion.sync import SyncManager;from knowledge_fabric.connectors import registry;p=Platform(db_path='$(KF_DB)');print('connectors:',registry.available());print('sources:',SyncManager(p).source_health('acme-assurance'))"
+
 demo-reset: down seed ## One-command reset to a clean, seeded, known-good state
 	@echo "reset to seeded state"
 

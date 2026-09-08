@@ -43,7 +43,8 @@ def main():
 
     rule("1. SEED — synthetic demo tenants (identifier-safety validated)")
     print("  identifier-safety problems:", demo.validate_identifiers() or "NONE ✓")
-    print("  ingest summary:", demo.seed(p))
+    summary = demo.seed(p)
+    print("  ingest summary:", summary)
 
     svc = AnswerService(p)
     asker = demo.principal_for(p, "acme-assurance", "asha.asker")
@@ -105,13 +106,14 @@ def main():
           f"→ {'HELD ✓' if p.policy.spent('acme-assurance') <= 10 else 'BLOWN!'}")
 
     rule("10. PROMOTION GATE (I10) — a corrupted citation blocks going live")
-    p.policy.set_budget("acme-assurance", 100.0)      # restore headroom after the race in step 9
-    p.db.execute("UPDATE budgets SET spent=0 WHERE tenant=?", ("acme-assurance",))
-    good = gate.evaluate(p, "acme-assurance", 1)
+    # isolated throwaway platform so the destructive corruption never poisons the demo
+    gp = Platform(db_path=":memory:", blob_root="./data/demo-gate")
+    demo.seed(gp, ["acme-assurance"])
+    good = gate.evaluate(gp, "acme-assurance", 1)
     print("  clean index → passed:", good["passed"], "metrics:", good["metrics"]["citation_coverage"],
           "coverage /", good["metrics"]["recall"], "recall")
-    gate.corrupt_citation_coordinates(p, "acme-assurance")
-    bad = gate.promote_if_passes(p, "acme-assurance", 2)
+    gate.corrupt_citation_coordinates(gp, "acme-assurance")
+    bad = gate.promote_if_passes(gp, "acme-assurance", 2)
     print("  corrupted index → passed:", bad["passed"], " promoted:", bad["promoted"],
           " regressions:", bad["regressions"])
 
@@ -124,7 +126,50 @@ def main():
     print("  clarify-back rate:", m["clarify_back_rate"], " citation coverage:", m["citation_coverage"])
     print("  risk register:", health.risk_register(p, "acme-assurance"))
 
-    rule("DONE — every invariant demonstrated on hardware you can carry, no cloud.")
+    # ================= leadership-agreed capabilities (roadmap) =========
+    rule("12. WS1 CONNECT — automated ingestion from GitHub + Jira + files (one canonical record)")
+    from knowledge_fabric.ingestion.sync import SyncManager
+    from knowledge_fabric.connectors import registry as _reg
+    sm = SyncManager(p)
+    print("  seed already auto-synced:", summary["acme-assurance"].get("connectors"))
+    print("  registry (plug-and-play):", _reg.available())
+    # a NEW Jira issue arrives -> only the delta is ingested (change detection)
+    new_issue = dict(project="REL", key="REL-99", summary="Audit every promotion decision",
+                     status="Open", updated=999999, acl=["public"],
+                     description="The audit trail must capture every promotion decision with its trace id.")
+    delta = sm.sync("acme-assurance", "jira", {"projects": ["REL"]},
+                    records=demo.JIRA_RECORDS["acme-assurance"] + [new_issue])
+    print(f"  new Jira issue REL-99 → pulled {delta['pulled']} (delta only), ingested {delta['ingested']}")
+    print("  source health:", sm.source_health("acme-assurance"))
+
+    rule("13. WS2 DECIDE — 4-level model selector with an explainable WHY + EN/FR/ES/JA")
+    p.model = __import__("knowledge_fabric.adapters.model", fromlist=["MockModelClient"]).MockModelClient()
+    p.policy.set_budget("acme-assurance", 100.0)
+    p.db.execute("UPDATE budgets SET spent=0 WHERE tenant=?", ("acme-assurance",))
+    for q in ["what is the coverage target?",
+              "why does a component with an open defect block its dependent releases?",
+              "quel est le critère d acceptation pour la couverture?"]:
+        a = svc.ask(asker, q)
+        w = a.why or {}
+        print(f"  [{a.lang}] L{a.level} {w.get('level_name'):10s} tier={a.tier:5s} "
+              f"reasons={[r['code'] for r in w.get('reasons', [])]}")
+        print(f"     why: {w.get('explain')}")
+
+    rule("14. WS3 PROVE — caching savings by technique + filtered analytics (24h/7d, user, role)")
+    # repeat a question to show the answer cache saving model spend
+    svc.ask(asker, "what is the coverage target?")
+    a7 = p.telemetry.analytics("acme-assurance", "7d")
+    print(f"  answers={a7['answers']} tokens_in={a7['tokens_in']} tokens_out={a7['tokens_out']} "
+          f"cost=${a7['total_cost']} saved=${a7['total_cost_saved']} cache_hit_rate={a7['cache_hit_rate']}")
+    print("  routing by level:", a7["routing_by_level"])
+    print("  routing reasons (why):", a7["routing_reasons"])
+    print("  savings by technique:", a7["savings_by_technique"])
+    print("  per role:", a7["per_role"])
+    print("  by language:", a7["by_language"])
+    a24 = p.telemetry.analytics("acme-assurance", "24h", role="asker")
+    print(f"  filter[24h, role=asker]: answers={a24['answers']} users={list(a24['per_user'])}")
+
+    rule("DONE — Connect → Understand → Decide → Answer, every capability shown, no cloud.")
 
 
 if __name__ == "__main__":

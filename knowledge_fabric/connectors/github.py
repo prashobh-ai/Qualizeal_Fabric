@@ -22,6 +22,7 @@ class GitHubConnector(BaseConnector):
         # records: [{path, updated_at, content, deleted?}] — injectable for tests/offline
         self._records = records or []
         self.allow_repos = set(config.get("repos", []))
+        self.last_tombstones: list[str] = []
 
     def scopes(self) -> list[str]:
         return ["repo:read"]      # read-only repo scope only
@@ -36,7 +37,7 @@ class GitHubConnector(BaseConnector):
                 continue
             newest = max(newest, rec["updated_at"])
             if rec.get("deleted"):
-                tombstones.append(rec["path"])
+                tombstones.append(f"github://{rec.get('repo','repo')}/{rec['path']}")
                 continue
             items.append(RawItem(
                 tenant=self.tenant, source=self.source_name,
@@ -48,4 +49,5 @@ class GitHubConnector(BaseConnector):
                       "tombstones": tombstones, "provenance": {"repo": rec.get("repo"),
                                                                "path": rec["path"],
                                                                "commit": rec.get("commit")}}))
+        self.last_tombstones = tombstones
         return items, str(newest)

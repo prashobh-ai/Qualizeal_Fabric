@@ -206,11 +206,25 @@ class Answer:
     grounding_score: float = 0.0
     clarify_back: Optional[str] = None
     tenant: str = ""
+    level: int = 0                       # model-selector level (1..4)
+    why: Optional[dict] = None           # the why-card (selector decision)
+    lang: str = "en"
+    cache_hit: bool = False
+    cost_saved: float = 0.0
+    tokens_in: int = 0
+    tokens_out: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "kind": self.kind.value,
             "answer_text": self.answer_text,
+            "level": self.level,
+            "why": self.why,
+            "lang": self.lang,
+            "cache_hit": self.cache_hit,
+            "cost_saved": round(self.cost_saved, 6),
+            "tokens_in": self.tokens_in,
+            "tokens_out": self.tokens_out,
             "citations": [
                 {
                     "document_id": c.document_id,

@@ -19,6 +19,7 @@ from .adapters.objectstore import FileObjectStore
 from .adapters.queue import SqlQueue
 from .adapters.telemetry import SqlTelemetry
 from .adapters.vectorindex import SqlVectorIndex
+from .answer.cache import Cache
 from .governance.policy import PolicyEngine
 from .stores.db import Database
 from .stores.repositories import (
@@ -53,6 +54,7 @@ class Platform:
 
         self.idp = LocalIdP(idp_secret)
         self.stub = StubIdentity()
+        self.cache = Cache()   # WS3 five-layer cache with savings ledger
 
         # per-tenant tunables (Section 10 grounding threshold, Section 15 gate)
         self.grounding_threshold = float(os.environ.get("KF_GROUNDING_THRESHOLD", "0.50"))

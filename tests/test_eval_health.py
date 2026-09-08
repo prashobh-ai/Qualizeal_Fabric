@@ -17,6 +17,9 @@ class TestEvalHealth(unittest.TestCase):
         self.assertGreaterEqual(v["metrics"]["citation_coverage"], 0.75)
 
     def test_corrupted_citation_blocks_promotion(self):
+        # run a clean evaluate first so the answer cache is populated — the gate
+        # must still see the corruption (caches are invalidated on index change).
+        self.assertTrue(gate.evaluate(self.p, "acme-assurance", 1)["passed"])
         gate.corrupt_citation_coordinates(self.p, "acme-assurance")
         v = gate.promote_if_passes(self.p, "acme-assurance", candidate_version=2)
         self.assertFalse(v["passed"], "corrupt index must be blocked (I10)")

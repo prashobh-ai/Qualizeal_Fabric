@@ -70,7 +70,7 @@ class TestAnswer(unittest.TestCase):
         from knowledge_fabric.contracts.types import Candidate
         sel = [Candidate(passage=p) for p in self.p.passages.for_tenant("acme-assurance")[:3]]
         text = "Coverage is ninety five percent. Elephants live in the Arctic tundra always."
-        kept = self.svc._postcheck(text, sel, {})
+        kept = self.svc._postcheck(text, sel)
         self.assertNotIn("Elephants", kept)
 
     def test_hybrid_rrf_fuses_both_lists(self):
