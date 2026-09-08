@@ -78,6 +78,7 @@ ENV_SPEC: list[dict] = [
     {"var": "KF_MODEL_DEEP", "local": "kf-mock-mid", "aws": "named model per tier (optional)", "required_aws": False, "secret": False},
     {"var": "KF_MODEL_ESCALATION", "local": "kf-mock-large", "aws": "named model per tier (optional)", "required_aws": False, "secret": False},
     {"var": "KF_GROUNDING_THRESHOLD", "local": "0.50", "aws": "var.grounding_threshold", "required_aws": False, "secret": False},
+    {"var": "KF_BUDGET_CAP_USD", "local": "—", "aws": "var.budget_cap_usd (reserved: the cap is set via POST /admin/budget today)", "required_aws": False, "secret": False},
     {"var": "KF_PORT", "local": "8080", "aws": "8080 (var.container_port)", "required_aws": False, "secret": False},
     {"var": "KF_OTLP_ENDPOINT", "local": "—", "aws": "OTLP collector endpoint (optional)", "required_aws": False, "secret": False},
 ]

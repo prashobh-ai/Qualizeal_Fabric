@@ -438,4 +438,6 @@ def selection(env: dict) -> dict:
                        "adapter": "PostgresNotice" if db.get("engine") == "postgres" else "Database(sqlite)",
                        "ready": not missing, "missing": missing}
     out["ready"] = all(out[k]["ready"] for k in ("objectstore", "queue", "database"))
+    # Compact view for ``GET /health`` (adapter names only — no targets, no secrets).
+    out["selected"] = {k: out[k]["adapter"] for k in ("objectstore", "queue", "database")}
     return out
