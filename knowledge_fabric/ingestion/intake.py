@@ -75,4 +75,11 @@ class IngestWorker:
                 results.append(res)
             except Exception as e:  # pragma: no cover - defensive
                 self.p.queue.nack(job.id, str(e))
+        # a batch that changed the corpus is a new dataset version (data versioning)
+        changed = [r for r in results if r.get("status") in ("ok", "updated")]
+        if changed:
+            from ..stores import versioning
+            tenants = {r["tenant"] for r in changed}
+            for t in tenants:
+                versioning.bump_dataset(self.p, t, f"ingest batch: {len([r for r in changed if r['tenant']==t])} document(s)")
         return results

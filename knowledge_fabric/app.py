@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 
+from .adapters import cloud
 from .adapters.converter import DoclingLite
 from .adapters.embedder import HashingEmbedder
 from .adapters.graphstore import SqlGraphStore
@@ -34,9 +35,14 @@ class Platform:
         blob_root = blob_root or os.environ.get("KF_BLOBS", "./data/blobs")
         idp_secret = idp_secret or os.environ.get("KF_IDP_SECRET", "local-dev-secret-change-me")
 
-        self.db = Database(db_path)
-        self.objects = FileObjectStore(blob_root)
-        self.queue = SqlQueue(self.db)
+        env = dict(os.environ)
+        # AWS parity: the same code selects local or cloud adapters purely by env
+        # (KF_DB_URL / KF_OBJECTSTORE=s3 / KF_QUEUE=sqs); application code never
+        # learns which shape it runs in.
+        self.db = cloud.build_database(env, lambda path: Database(path)) if env.get("KF_DB_URL") \
+            else Database(db_path)
+        self.objects = cloud.build_objectstore(env, lambda: FileObjectStore(blob_root))
+        self.queue = cloud.build_queue(env, lambda: SqlQueue(self.db))
         self.embedder = HashingEmbedder()
         self.vindex = SqlVectorIndex(self.db, self.embedder.model_id())
         self.lindex = SqlLexicalIndex(self.db)

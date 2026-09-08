@@ -51,6 +51,12 @@ class SqlTelemetry:
     def _write(self, s: _Span, dur: float) -> None:
         a = s.attrs
         why = a.get("why")
+        if s.name.startswith("ingest."):          # mirror pipeline stages into the active run
+            try:
+                from ..ingestion import runs as _runs
+                _runs.step_from_span(self, s.name, a, dur)
+            except Exception:
+                pass
         self.db.execute(
             """INSERT INTO spans(trace_id,tenant,name,attrs,started_at,duration_ms,cost,
                tokens,tier,grounding,citations_count,stage,subject,roles,level,why,

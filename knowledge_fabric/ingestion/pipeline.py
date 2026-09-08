@@ -17,6 +17,7 @@ from ..contracts.types import (
     Document, GraphEdge, GraphNode, Passage, Provenance, RawItem, new_id, now_ms,
 )
 from ..ontology.packs import get_pack
+from ..stores import versioning
 from .extract import extract
 
 
@@ -102,6 +103,9 @@ class IngestionPipeline:
                         coordinate=region.coordinate, provenance=prov, version=version)
                     passages.append(pas)
                     self.p.passages.add(pas, live_v, acl)
+                # data versioning: immutable ledger row for this document version (I8)
+                versioning.record_version(self.p, tenant, doc_id, version, content_hash,
+                                          [p_.id for p_ in passages], raw.source_version)
 
             # ---- Step 4: Extract & type (curator queue on low conf) --
             all_mentions, all_relations, passage_mentions = [], [], []

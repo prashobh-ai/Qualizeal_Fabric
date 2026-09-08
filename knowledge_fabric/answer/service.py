@@ -1,21 +1,26 @@
 """Answer service — the single governed path for people, agents and apps (I7).
 
-Connect → Understand → Decide → Answer. Steps (Build Plan Section 10 + the
-QualiZeal roadmap WS2/WS3), each emitting a span on one answer trace:
+Connect → Understand → Decide → Answer. Steps (Build Plan Section 10 + roadmap
+WS2/WS3 + Stage-2), each emitting a span on one answer trace:
   A. identity & permission filter injected INSIDE retrieval (I6)
-  B. five-layer cache check (answer/embedding/retrieval/graph/prompt-memory)
-  C. hybrid retrieval (lexical + vector) fused with RRF, tiered, MMR
-  D. graph expansion for connected/cross-document evidence
-  E. grounding gate: five signals combined as a weighted geometric mean
-  F. clarify-back on weak/ambiguous evidence (first-class metric, I3)
-  G. 4-level model selector with an explainable "why" (WS2), budget-capped,
-     escalating only when confidence fails
-  H. extractive compose + citation post-check dropping unsupported claims (I1,
-     I2), language-tagged, with a replayable trajectory id
+  B. reasoning plan: multistep / conditional / compare questions are decomposed
+     and each step runs through this same governed path (Stage-2, Section A)
+  C. five-layer cache check (answer/embedding/retrieval/graph/prompt-memory)
+  D. hybrid retrieval (lexical + vector) fused with RRF, then AUTHORITY boost
+     (source rank × curator-marked authoritative), tiered, MMR
+  E. graph expansion for connected/cross-document evidence
+  F. grounding gate: five signals combined as a weighted geometric mean
+  G. clarify-back on weak/ambiguous evidence (first-class metric, I3)
+  H. 4-level model selector with an explainable "why" (WS2), budget-capped,
+     escalating only when confidence fails; the multi-model gateway names the
+     model that ran; complexity is labelled simple / medium / complex
+  I. extractive compose + citation post-check dropping unsupported claims (I1,
+     I2), language-tagged, with a replayable trajectory id, the authoritative
+     source among the citations, and the dataset version answered against
 
 With the model disabled the core still returns extractive, cited answers (I4).
-Every answer records subject/roles, level+why, tokens in/out, cache savings,
-language and sources to the telemetry spine for the WS3 dashboards.
+Every answer records subject/roles, level+why, model, complexity, tokens in/out,
+cache savings, language, sources, dataset version and any reasoning trace.
 """
 from __future__ import annotations
 
@@ -23,10 +28,14 @@ import math
 import re
 
 from ..adapters.embedder import cosine
+from ..adapters.model import COMPLEXITY_OF_TIER, model_for_tier
 from ..contracts.types import (
     Answer, AnswerKind, Candidate, Citation, Principal, new_id, now_ms,
 )
+from ..governance import authority
+from ..stores import versioning
 from . import lang as langmod
+from . import reasoning
 from . import selector as sel
 
 _TOKEN = re.compile(r"[a-z0-9]+")
@@ -40,6 +49,8 @@ _WEIGHTS = {"retrieval": 1.0, "semantic": 1.2, "coverage": 1.2,
             "agreement": 0.8, "resolvable": 1.0}
 _ESCALATE_FLOOR = 0.35
 _SYSTEM_PREAMBLE = "Rephrase the cited evidence faithfully; add nothing."
+_TIER_ORDER = {"none": 0, "fast": 1, "deep": 2, "escalation": 3}
+_CX_ORDER = {"simple": 0, "medium": 1, "complex": 2}
 
 
 def _qtokens(q: str) -> list[str]:
@@ -50,12 +61,17 @@ def _sentences(text: str) -> list[str]:
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
 
 
+def _max_cx(*labels: str) -> str:
+    return max((l for l in labels if l), key=lambda l: _CX_ORDER.get(l, 0), default="simple")
+
+
 class AnswerService:
     def __init__(self, platform):
         self.p = platform
 
+    # =================================================================
     def ask(self, principal: Principal, question: str, k: int = 6,
-            allow_model: bool = True) -> Answer:
+            allow_model: bool = True, _nested: bool = False) -> Answer:
         p = self.p
         tenant = principal.tenant
         trace_id = new_id("traj_")
@@ -63,22 +79,30 @@ class AnswerService:
         traj = {"selected": [], "graph_node_keys": []}
         qlang = langmod.detect(question)
         rq = langmod.translate_query_to_en(question, qlang, p.model, tenant)  # retrieve on English
+        plan = reasoning.plan(rq)
+        span_name = "answer.step" if _nested else "answer"
 
-        with p.telemetry.span("answer", {"tenant": tenant, "trace_id": trace_id, "stage": "answer",
-                                         "subject": principal.subject, "roles": principal.roles,
-                                         "lang": qlang}) as span:
-            # A. policy + rate limit ------------------------------------
-            if not p.policy.rate_check(tenant, principal.subject):
-                self._audit(principal, "ask", "rate_limited", trace_id)
-                return self._plain(AnswerKind.GAP, "Rate limit exceeded — retry shortly.",
-                                   trace_id, tenant, span, 0.0, qlang, principal)
-            pol = p.policy.check(principal, "ask", {})
-            if pol.decision.value == "deny":
-                self._audit(principal, "ask", f"denied:{pol.reason}", trace_id)
-                return self._plain(AnswerKind.GAP, f"Request denied: {pol.reason}",
-                                   trace_id, tenant, span, 0.0, qlang, principal)
+        with p.telemetry.span(span_name, {"tenant": tenant, "trace_id": trace_id, "stage": "answer",
+                                          "subject": principal.subject, "roles": principal.roles,
+                                          "lang": qlang}) as span:
+            # A. policy + rate limit (the parent request already did this for steps)
+            if not _nested:
+                if not p.policy.rate_check(tenant, principal.subject):
+                    self._audit(principal, "ask", "rate_limited", trace_id)
+                    return self._plain(AnswerKind.GAP, "Rate limit exceeded — retry shortly.",
+                                       trace_id, tenant, span, 0.0, qlang, principal)
+                pol = p.policy.check(principal, "ask", {})
+                if pol.decision.value == "deny":
+                    self._audit(principal, "ask", f"denied:{pol.reason}", trace_id)
+                    return self._plain(AnswerKind.GAP, f"Request denied: {pol.reason}",
+                                       trace_id, tenant, span, 0.0, qlang, principal)
 
-            # B. cache layer 1 — full answer cache ----------------------
+            # B. multistep / conditional / compare → decompose, run each step governed
+            if not _nested and plan["mode"] != "single":
+                return self._ask_reasoned(principal, question, plan, trace_id, span, qlang,
+                                          k, allow_model)
+
+            # C. cache layer 1 — full answer cache ----------------------
             cached = p.cache.get_answer(tenant, question, accessible)
             if cached:
                 pay = cached["payload"]
@@ -86,17 +110,19 @@ class AnswerService:
                 span.set(kind="answer", level="cache", tier=pay["tier"], cost=0.0, tokens=0,
                          cache_hit=1, cache_technique="answer_cache", cost_saved=saved,
                          grounding=pay["grounding_score"], citations_count=len(pay["citations"]),
-                         sources=[c["document_title"] for c in pay["citations"]], why=pay.get("why"))
-                self._audit(principal, "ask", "answered:cache", trace_id)
+                         sources=[c["document_title"] for c in pay["citations"]], why=pay.get("why"),
+                         model_name="cache", complexity=pay.get("complexity", ""),
+                         dataset_version=pay.get("dataset_version", 0))
+                if not _nested:
+                    self._audit(principal, "ask", "answered:cache", trace_id)
                 return self._from_cache(pay, trace_id, tenant, qlang, saved)
 
-            # embedding cache (layer 3)
             qvec = p.cache.get_embedding(rq)
             if qvec is None:
                 qvec = p.embedder.embed([rq])[0]
                 p.cache.put_embedding(rq, qvec)
 
-            # C. hybrid retrieval + RRF (retrieval cache, layer 2) ------
+            # D. hybrid retrieval + RRF (retrieval cache) + authority boost
             with p.telemetry.span("answer.retrieve",
                                   {"tenant": tenant, "trace_id": trace_id, "stage": "retrieve"}):
                 fused = p.cache.get_retrieval(tenant, rq, accessible)
@@ -105,6 +131,7 @@ class AnswerService:
                     lex_hits = p.lindex.search(tenant, rq, 20, accessible)
                     fused = self._rrf(vec_hits, lex_hits)
                     p.cache.put_retrieval(tenant, rq, accessible, fused)
+                fused = self._authority_boost(tenant, fused)
 
             candidates: list[Candidate] = []
             for pid, fscore in fused[: k * 3]:
@@ -112,51 +139,60 @@ class AnswerService:
                 if pas:
                     candidates.append(Candidate(passage=pas, fused_score=fscore))
 
-            # D. graph expansion (graph cache, layer 4) -----------------
+            # E. graph expansion -----------------------------------------
             graph_before = len(candidates)
             with p.telemetry.span("answer.graph",
                                   {"tenant": tenant, "trace_id": trace_id, "stage": "graph"}):
                 candidates = self._graph_expand(tenant, candidates, accessible, qvec, traj, rq)
             graph_used = len(candidates) > graph_before
 
+            dsv = versioning.current_dataset(p, tenant)
             if not candidates:
-                self._audit(principal, "ask", "gap:no-evidence", trace_id)
-                p.curation.add(tenant, question, "gap", now_ms())
-                span.set(level="gap", tier="none")
+                if not _nested:
+                    self._audit(principal, "ask", "gap:no-evidence", trace_id)
+                    p.curation.add(tenant, question, "gap", now_ms())
+                span.set(level="gap", tier="none", dataset_version=dsv)
                 return self._plain(AnswerKind.GAP,
                                    "No supporting evidence exists in your accessible corpus.",
-                                   trace_id, tenant, span, 0.0, qlang, principal)
+                                   trace_id, tenant, span, 0.0, qlang, principal, dsv)
 
             selected = self._mmr(qvec, candidates, k)
             traj["selected"] = [c.passage.id for c in selected]
 
-            # E. grounding gate -----------------------------------------
+            # F. grounding gate ------------------------------------------
             with p.telemetry.span("answer.ground",
                                   {"tenant": tenant, "trace_id": trace_id, "stage": "ground"}):
                 signals, g = self._grounding(rq, qvec, selected)
             threshold = p.grounding_threshold
-            span.set(grounding=g, signals=signals)
+            span.set(grounding=g, signals=signals, dataset_version=dsv)
 
-            # F. clarify-back / declared gap ----------------------------
+            # G. clarify-back / declared gap -----------------------------
             if g < threshold:
                 if g >= threshold * 0.5:
                     ambiguous = self._ambiguous(selected)
                     cq = self._clarify_question(question, selected, ambiguous)
-                    self._audit(principal, "ask", "clarify", trace_id)
-                    span.set(kind="clarify", level="clarify", citations_count=0, tier="none")
+                    if not _nested:
+                        self._audit(principal, "ask", "clarify", trace_id)
+                    span.set(kind="clarify", level="clarify", citations_count=0, tier="none",
+                             complexity=plan["complexity"])
                     return Answer(AnswerKind.CLARIFY, cq, [], round(g, 3), trace_id, 0.0, 0, "none",
                                   grounding_score=g, clarify_back=cq, tenant=tenant, lang=qlang,
+                                  complexity=plan["complexity"], dataset_version=dsv,
+                                  model_name=model_for_tier("none"),
                                   why={"level_name": "clarify", "explain": "Evidence too weak/ambiguous to answer."})
-                self._audit(principal, "ask", "gap:below-threshold", trace_id)
-                p.curation.add(tenant, question, "gap", now_ms())
-                span.set(kind="gap", level="gap", citations_count=0, tier="none")
+                if not _nested:
+                    self._audit(principal, "ask", "gap:below-threshold", trace_id)
+                    p.curation.add(tenant, question, "gap", now_ms())
+                span.set(kind="gap", level="gap", citations_count=0, tier="none",
+                         complexity=plan["complexity"])
                 return Answer(AnswerKind.GAP,
                               "The corpus does not contain enough grounded evidence to answer this. "
                               "Logged to the gap backlog.", [], round(g, 3), trace_id, 0.0, 0, "none",
-                              grounding_score=g, tenant=tenant, lang=qlang,
+                              grounding_score=g, tenant=tenant, lang=qlang, complexity=plan["complexity"],
+                              dataset_version=dsv, model_name=model_for_tier("none"),
                               why={"level_name": "gap", "explain": "Below the grounding threshold."})
 
-            # G. model selector (4 levels, explainable why) -------------
+            # H. model selector (4 levels, explainable why) -------------
             decision = sel.classify(rq, selected, g, graph_used)
             tier = decision["tier"]
             if tier != "none" and (not allow_model or not p.model.available()):
@@ -164,7 +200,6 @@ class AnswerService:
                 decision = {**decision, "tier": "none",
                             "reasons": decision["reasons"] + [{"code": "model_disabled",
                                 "detail": "model unavailable — extractive core", "signal": True}]}
-            # budget: reserve atomically or degrade to the free extractive tier
             if tier != "none":
                 est = self._estimate_cost(question, selected, tier)
                 agent = principal.subject if principal.agent else None
@@ -174,47 +209,132 @@ class AnswerService:
                                 "reasons": decision["reasons"] + [{"code": "budget_degrade",
                                     "detail": "tenant budget cap reached — degraded to extractive", "signal": True}]}
 
-            # H. compose from passages only + citation post-check -------
+            # I. compose from passages only + citation post-check -------
             with p.telemetry.span("answer.compose",
                                   {"tenant": tenant, "trace_id": trace_id, "stage": "compose"}):
-                text, citations, cost, tin, tout, saved = self._compose(principal, rq, selected, tier)
+                text, citations, cost, tin, tout, saved, model_name = self._compose(
+                    principal, rq, selected, tier)
             confidence = self._confidence(g, citations, selected)
 
-            # escalation only when confidence fails (roadmap guardrail)
             if (decision["level"] < 4 and confidence < _ESCALATE_FLOOR and tier != "none"
                     and p.model.available()):
                 decision = sel.escalate(decision, confidence, _ESCALATE_FLOOR)
                 tier = decision["tier"]
                 est = self._estimate_cost(question, selected, tier)
                 if p.policy.try_spend(tenant, est, principal.subject if principal.agent else None):
-                    text, citations, cost, tin, tout, saved = self._compose(
-                        principal, question, selected, tier)
+                    text, citations, cost, tin, tout, saved, model_name = self._compose(
+                        principal, rq, selected, tier)
                     confidence = self._confidence(g, citations, selected)
 
+            complexity = _max_cx(plan["complexity"], COMPLEXITY_OF_TIER.get(tier, "simple"))
+            decision = {**decision, "complexity": complexity, "model_name": model_name}
+
             if not citations:
-                self._audit(principal, "ask", "gap:post-check", trace_id)
+                if not _nested:
+                    self._audit(principal, "ask", "gap:post-check", trace_id)
                 span.set(kind="gap", level="gap", tier=tier, cost=cost, tokens=tin + tout,
-                         citations_count=0)
+                         citations_count=0, model_name=model_name, complexity=complexity)
                 return Answer(AnswerKind.GAP, "No claim could be grounded to a citation.", [],
                               round(g, 3), trace_id, cost, tin + tout, tier, grounding_score=g,
-                              tenant=tenant, lang=qlang)
+                              tenant=tenant, lang=qlang, model_name=model_name, complexity=complexity,
+                              dataset_version=dsv)
 
             text = self._localize(text, qlang, principal, tier)
             sources = [c.document_title for c in citations]
+            auth = self._authority_card(tenant, citations)
 
-            # cache the composed answer for identical future queries
             answer = Answer(AnswerKind.ANSWER, text, citations, confidence, trace_id, cost,
                             tin + tout, tier, grounding_score=g, tenant=tenant,
                             level=decision["level"], why=decision, lang=qlang,
-                            cost_saved=saved, tokens_in=tin, tokens_out=tout)
+                            cost_saved=saved, tokens_in=tin, tokens_out=tout,
+                            model_name=model_name, complexity=complexity,
+                            authoritative_source=auth, dataset_version=dsv)
             p.cache.put_answer(tenant, question, accessible, answer.to_dict(), cost)
 
-            self._audit(principal, "ask", "answered", trace_id)
+            if not _nested:
+                self._audit(principal, "ask", "answered", trace_id)
             span.set(kind="answer", tier=tier, cost=cost, tokens=tin + tout, tokens_in=tin,
                      tokens_out=tout, citations_count=len(citations), level=decision["level_name"],
                      why=decision, cost_saved=saved, cache_technique="prompt_memory" if saved else "",
-                     cache_hit=1 if saved else 0, sources=sources, trajectory=traj)
+                     cache_hit=1 if saved else 0, sources=sources, trajectory=traj,
+                     model_name=model_name, complexity=complexity, dataset_version=dsv)
             return answer
+
+    # ================= multistep / conditional reasoning =============
+    def _ask_reasoned(self, principal, question, plan, trace_id, span, qlang, k, allow_model):
+        """Run a decomposed plan: every step goes through ask(_nested=True), i.e. the
+        same permission filter, retrieval, grounding gate, selector and budget."""
+        p = self.p
+        tenant = principal.tenant
+        collected: list[Answer] = []
+
+        def ask_fn(sub_q: str) -> Answer:
+            a = self.ask(principal, sub_q, k=k, allow_model=allow_model, _nested=True)
+            collected.append(a)
+            return a
+
+        res = reasoning.execute(plan, ask_fn)
+        cost = sum(a.cost for a in collected)
+        tin = sum(a.tokens_in for a in collected)
+        tout = sum(a.tokens_out for a in collected)
+        saved = sum(a.cost_saved for a in collected)
+        answered = [a for a in collected if a.kind == AnswerKind.ANSWER]
+        tier = max((a.tier for a in collected), key=lambda t: _TIER_ORDER.get(t, 0), default="none")
+        models = sorted({a.model_name for a in answered if a.model_name})
+        model_name = models[0] if len(models) == 1 else (", ".join(models) if models else model_for_tier("none"))
+        level = max((a.level for a in collected), default=0)
+        grounding = min((a.grounding_score for a in answered), default=0.0)
+        complexity = _max_cx(res.get("complexity", plan["complexity"]),
+                             *[a.complexity for a in collected])
+        dsv = versioning.current_dataset(p, tenant)
+        surface = reasoning.to_surface(res)
+        why = {"level_name": f"reasoning:{res['mode']}", "explain": res.get("explain", ""),
+               "reasons": [{"code": f"reasoning_{res['mode']}", "detail": res.get("explain", ""),
+                            "signal": len(res["steps"])}]
+                          + [r for a in answered for r in (a.why or {}).get("reasons", [])][:6],
+               "complexity": complexity, "model_name": model_name, "level": level}
+
+        kind = res.get("kind", "answer")
+        if kind == "clarify":
+            cq = res.get("clarify_back") or "One step of this question needs clarification."
+            self._audit(principal, "ask", "clarify", trace_id)
+            span.set(kind="clarify", level="clarify", citations_count=0, tier=tier, cost=cost,
+                     tokens=tin + tout, tokens_in=tin, tokens_out=tout, model_name=model_name,
+                     complexity=complexity, dataset_version=dsv, reasoning=surface, why=why)
+            return Answer(AnswerKind.CLARIFY, cq, [], round(grounding, 3), trace_id, cost, tin + tout,
+                          tier, grounding_score=grounding, clarify_back=cq, tenant=tenant, lang=qlang,
+                          level=level, why=why, model_name=model_name, complexity=complexity,
+                          dataset_version=dsv, reasoning=surface, tokens_in=tin, tokens_out=tout,
+                          cost_saved=saved)
+        if kind == "gap" or not res.get("citations"):
+            self._audit(principal, "ask", f"gap:step:{res.get('gap_step')}", trace_id)
+            p.curation.add(tenant, question, "gap", now_ms())
+            span.set(kind="gap", level="gap", citations_count=0, tier=tier, cost=cost,
+                     tokens=tin + tout, tokens_in=tin, tokens_out=tout, model_name=model_name,
+                     complexity=complexity, dataset_version=dsv, reasoning=surface, why=why)
+            return Answer(AnswerKind.GAP, res.get("final_text") or
+                          "A step of this question has no grounded evidence in the corpus.",
+                          [], round(grounding, 3), trace_id, cost, tin + tout, tier,
+                          grounding_score=grounding, tenant=tenant, lang=qlang, level=level, why=why,
+                          model_name=model_name, complexity=complexity, dataset_version=dsv,
+                          reasoning=surface, tokens_in=tin, tokens_out=tout, cost_saved=saved)
+
+        citations = res["citations"]
+        text = self._localize(res["final_text"], qlang, principal, tier)
+        auth = self._authority_card(tenant, citations)
+        self._audit(principal, "ask", f"answered:{res['mode']}", trace_id)
+        span.set(kind="answer", tier=tier, cost=cost, tokens=tin + tout, tokens_in=tin,
+                 tokens_out=tout, citations_count=len(citations), level=f"reasoning:{res['mode']}",
+                 why=why, cost_saved=saved, cache_hit=1 if saved else 0,
+                 cache_technique="prompt_memory" if saved else "",
+                 sources=[c.document_title for c in citations], grounding=grounding,
+                 model_name=model_name, complexity=complexity, dataset_version=dsv,
+                 reasoning=surface)
+        return Answer(AnswerKind.ANSWER, text, citations, round(res["confidence"], 3), trace_id,
+                      cost, tin + tout, tier, grounding_score=grounding, tenant=tenant,
+                      level=level, why=why, lang=qlang, cost_saved=saved, tokens_in=tin,
+                      tokens_out=tout, model_name=model_name, complexity=complexity,
+                      authoritative_source=auth, dataset_version=dsv, reasoning=surface)
 
     # ================= step helpers =================================
     def _rrf(self, vec_hits, lex_hits) -> list[tuple[str, float]]:
@@ -224,6 +344,28 @@ class AnswerService:
         for rank, (pid, _) in enumerate(lex_hits):
             scores[pid] = scores.get(pid, 0.0) + 1.0 / (_RRF_K + rank + 1)
         return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    def _authority_boost(self, tenant, fused):
+        """Re-weight fused hits by source rank and curator-marked authority."""
+        passage_doc = {}
+        for pid, _ in fused:
+            pas = self.p.passages.get(tenant, pid)
+            if pas:
+                passage_doc[pid] = (pas.document_id, pas.provenance.source)
+        try:
+            return authority.boost(self.p, tenant, fused, passage_doc)
+        except Exception:
+            return fused
+
+    def _authority_card(self, tenant, citations):
+        try:
+            card = authority.authoritative_source(self.p, tenant, citations)
+            if card is not None:
+                card = dict(card)
+                card["conflicts"] = authority.conflicts(self.p, tenant, citations)
+            return card
+        except Exception:
+            return None
 
     def _graph_expand(self, tenant, candidates, accessible, qvec, traj, question):
         if not candidates:
@@ -353,14 +495,16 @@ class AnswerService:
         cost = tin = tout = 0
         saved = 0.0
         text = extractive
+        model_name = model_for_tier("none")
         if tier != "none" and self.p.model.available():
             msg = [{"role": "system", "content": _SYSTEM_PREAMBLE},
                    {"role": "user", "content": extractive}]
             out = self.p.model.complete(principal.tenant, tier, msg, {"temperature": 0.0})
             cost = out["cost"]
-            tout = out["usage"]["tokens"]
-            tin = len(_SYSTEM_PREAMBLE.split()) + len(extractive.split())
-            # cache layer 5: provider prompt memory discount on the repeated preamble
+            usage = out.get("usage", {})
+            tin = int(usage.get("in") or (len(_SYSTEM_PREAMBLE.split()) + len(extractive.split())))
+            tout = int(usage.get("out") or max(1, len(out.get("text", "").split())))
+            model_name = out.get("model_name") or model_for_tier(tier)
             input_cost = tin * (5e-6 if tier in ("deep", "escalation") else 1e-6)
             saved = self.p.cache.prompt_discount(_SYSTEM_PREAMBLE, input_cost)
             cost = max(0.0, cost - saved)
@@ -368,7 +512,7 @@ class AnswerService:
                                     principal.subject if principal.agent else None)
             checked = self._postcheck(out["text"], selected)
             text = checked or extractive
-        return text, citations, cost, tin, tout, saved
+        return text, citations, cost, tin, tout, saved, model_name
 
     def _postcheck(self, text, selected):
         corpus = [set(_TOKEN.findall(c.passage.text.lower())) for c in selected]
@@ -387,8 +531,6 @@ class AnswerService:
     def _localize(self, text, qlang, principal, tier):
         if qlang == "en":
             return text
-        # With a real translation model this renders in-language; offline we tag
-        # honestly and keep the grounded English text cited to the English source.
         return f"[{langmod.label(qlang)} — cited to the English source of truth]\n{text}"
 
     # ================= plumbing =====================================
@@ -404,10 +546,14 @@ class AnswerService:
         return Answer(AnswerKind.ANSWER, pay["answer_text"], cites, pay["confidence"], trace_id,
                       0.0, 0, pay["tier"], grounding_score=pay["grounding_score"], tenant=tenant,
                       level=pay.get("level", 0), why=pay.get("why"), lang=qlang,
-                      cache_hit=True, cost_saved=saved)
+                      cache_hit=True, cost_saved=saved, model_name=pay.get("model_name", "cache"),
+                      complexity=pay.get("complexity", ""),
+                      authoritative_source=pay.get("authoritative_source"),
+                      dataset_version=pay.get("dataset_version", 0), reasoning=pay.get("reasoning"))
 
-    def _plain(self, kind, text, trace_id, tenant, span, g, qlang, principal):
+    def _plain(self, kind, text, trace_id, tenant, span, g, qlang, principal, dsv=0):
         span.set(kind=kind.value, grounding=g, citations_count=0, tier="none",
-                 subject=principal.subject, roles=principal.roles, lang=qlang)
+                 subject=principal.subject, roles=principal.roles, lang=qlang, dataset_version=dsv)
         return Answer(kind, text, [], round(g, 3), trace_id, 0.0, 0, "none",
-                      grounding_score=g, tenant=tenant, lang=qlang)
+                      grounding_score=g, tenant=tenant, lang=qlang, dataset_version=dsv,
+                      model_name=model_for_tier("none"))
