@@ -54,8 +54,9 @@ class SqlTelemetry:
         self.db.execute(
             """INSERT INTO spans(trace_id,tenant,name,attrs,started_at,duration_ms,cost,
                tokens,tier,grounding,citations_count,stage,subject,roles,level,why,
-               tokens_in,tokens_out,cache_hit,cache_technique,cost_saved,lang,sources)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               tokens_in,tokens_out,cache_hit,cache_technique,cost_saved,lang,sources,
+               model_name,complexity,dataset_version,reasoning)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (s.trace_id, a.get("tenant", ""), s.name, json.dumps(a, default=str),
              s._start or time.time(), dur, float(a.get("cost", 0.0)), int(a.get("tokens", 0)),
              a.get("tier", ""), float(a.get("grounding", 0.0)),
@@ -65,7 +66,10 @@ class SqlTelemetry:
              int(a.get("tokens_in", 0)), int(a.get("tokens_out", 0)),
              int(a.get("cache_hit", 0)), a.get("cache_technique", ""),
              float(a.get("cost_saved", 0.0)), a.get("lang", ""),
-             json.dumps(a.get("sources", []), default=str)))
+             json.dumps(a.get("sources", []), default=str),
+             a.get("model_name", ""), a.get("complexity", ""),
+             int(a.get("dataset_version", 0) or 0),
+             json.dumps(a.get("reasoning"), default=str) if a.get("reasoning") is not None else None))
 
     # ---------------- read side ----------------------------------------
     def trace(self, trace_id: str) -> list[dict]:
@@ -133,6 +137,12 @@ class SqlTelemetry:
         by_tier = {}
         for r in rows:
             by_tier[r["tier"] or "none"] = by_tier.get(r["tier"] or "none", 0) + 1
+        by_complexity, models_used = {}, {}
+        for r in rows:
+            c = r["complexity"] or "n/a"
+            by_complexity[c] = by_complexity.get(c, 0) + 1
+            m = r["model_name"] or ("none (extractive)" if (r["tier"] in ("", "none")) else "?")
+            models_used[m] = models_used.get(m, 0) + 1
 
         # savings by cache technique
         savings, cache_hits = {}, 0
@@ -189,6 +199,7 @@ class SqlTelemetry:
             "citation_coverage": round(sum(1 for r in rows if r["citations_count"] > 0) / n, 4),
             "clarify_back_rate": round(sum(1 for r in rows if r["level"] == "clarify") / n, 4),
             "routing_by_level": by_level, "routing_reasons": reason_counts, "routing_by_tier": by_tier,
+            "routing_by_complexity": by_complexity, "models_used": models_used,
             "savings_by_technique": savings, "per_user": per_user, "per_role": per_role,
             "by_language": by_lang, "timeseries": timeseries, "bucket_seconds": bucket,
         }

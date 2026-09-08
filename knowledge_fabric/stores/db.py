@@ -21,7 +21,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY, tenant TEXT NOT NULL, source TEXT, source_version TEXT,
     content_hash TEXT, type TEXT, language TEXT, title TEXT, uri TEXT,
-    ingested_at INTEGER, status TEXT, current_version INTEGER, acl TEXT
+    ingested_at INTEGER, status TEXT, current_version INTEGER, acl TEXT,
+    authoritative INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS passages (
     id TEXT PRIMARY KEY, tenant TEXT NOT NULL, document_id TEXT NOT NULL,
@@ -69,7 +70,8 @@ CREATE TABLE IF NOT EXISTS spans (
     subject TEXT, roles TEXT, level TEXT, why TEXT,
     tokens_in INTEGER DEFAULT 0, tokens_out INTEGER DEFAULT 0,
     cache_hit INTEGER DEFAULT 0, cache_technique TEXT, cost_saved REAL DEFAULT 0,
-    lang TEXT, sources TEXT
+    lang TEXT, sources TEXT,
+    model_name TEXT, complexity TEXT, dataset_version INTEGER DEFAULT 0, reasoning TEXT
 );
 CREATE TABLE IF NOT EXISTS budgets (
     tenant TEXT PRIMARY KEY, cap REAL, spent REAL DEFAULT 0
@@ -102,6 +104,35 @@ CREATE TABLE IF NOT EXISTS curation_queue (
 CREATE TABLE IF NOT EXISTS connector_cursors (
     tenant TEXT NOT NULL, source TEXT NOT NULL, cursor TEXT, last_sync INTEGER,
     items INTEGER DEFAULT 0, PRIMARY KEY (tenant, source)
+);
+CREATE TABLE IF NOT EXISTS dataset_versions (
+    tenant TEXT NOT NULL, version INTEGER NOT NULL, created_at INTEGER, reason TEXT,
+    doc_count INTEGER, passage_count INTEGER, PRIMARY KEY (tenant, version)
+);
+CREATE TABLE IF NOT EXISTS document_versions (
+    id TEXT PRIMARY KEY, tenant TEXT NOT NULL, document_id TEXT NOT NULL, version INTEGER,
+    content_hash TEXT, created_at INTEGER, passage_ids TEXT, source_version TEXT
+);
+CREATE TABLE IF NOT EXISTS source_authority (
+    tenant TEXT NOT NULL, source TEXT NOT NULL, rank INTEGER, weight REAL,
+    PRIMARY KEY (tenant, source)
+);
+CREATE TABLE IF NOT EXISTS refresh_schedules (
+    tenant TEXT NOT NULL, source TEXT NOT NULL, interval_s INTEGER, next_run REAL,
+    last_run REAL, last_status TEXT, error_count INTEGER DEFAULT 0, enabled INTEGER DEFAULT 1,
+    config TEXT, PRIMARY KEY (tenant, source)
+);
+CREATE TABLE IF NOT EXISTS connector_config (
+    tenant TEXT NOT NULL, source TEXT NOT NULL, enabled INTEGER DEFAULT 1, config TEXT,
+    allow TEXT, scopes TEXT, updated_at INTEGER, PRIMARY KEY (tenant, source)
+);
+CREATE TABLE IF NOT EXISTS curation_decisions (
+    id TEXT PRIMARY KEY, tenant TEXT NOT NULL, document_id TEXT, decision TEXT, reason TEXT,
+    by_subject TEXT, at INTEGER
+);
+CREATE TABLE IF NOT EXISTS ingest_runs (
+    id TEXT PRIMARY KEY, tenant TEXT NOT NULL, source TEXT, started_at INTEGER,
+    finished_at INTEGER, status TEXT, steps TEXT, items INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS rate_limit (
     tenant TEXT NOT NULL, subject TEXT NOT NULL, window_start REAL, count INTEGER,

@@ -18,6 +18,22 @@ import time
 
 _TIER_PRICE = {"fast": 1e-6, "deep": 5e-6, "escalation": 1e-5}
 
+# ---- multi-model gateway: one gateway in front of several models/providers ----
+# Each tier maps to a NAMED model (roadmap WS2: "one gateway in front of three AI
+# providers"). Names are env-overridable so local / AWS / client differ by config
+# only. The answer records model_name so the Ask card and dashboard can show
+# "which model ran, when, and why".
+def model_for_tier(tier: str) -> str:
+    defaults = {"fast": "kf-mock-small", "deep": "kf-mock-mid", "escalation": "kf-mock-large"}
+    env = {"fast": os.environ.get("KF_MODEL_FAST"), "deep": os.environ.get("KF_MODEL_DEEP"),
+           "escalation": os.environ.get("KF_MODEL_ESCALATION")}
+    if tier in ("", "none", None):
+        return "none (extractive core)"
+    return env.get(tier) or defaults.get(tier, "kf-mock-small")
+
+
+COMPLEXITY_OF_TIER = {"none": "simple", "fast": "medium", "deep": "complex", "escalation": "complex"}
+
 
 class MockModelClient:
     def __init__(self, latency_ms: float = 5.0):
@@ -39,7 +55,8 @@ class MockModelClient:
         in_tokens = sum(len(m.get("content", "").split()) for m in messages)
         tokens = in_tokens + out_tokens
         cost = tokens * _TIER_PRICE.get(tier, 1e-6)
-        return {"text": draft, "usage": {"tokens": tokens}, "cost": cost}
+        return {"text": draft, "usage": {"tokens": tokens, "in": in_tokens, "out": out_tokens},
+                "cost": cost, "model_name": model_for_tier(tier)}
 
 
 class DisabledModelClient:
@@ -54,7 +71,7 @@ class HostedModelClient:
     def __init__(self):
         self.base = os.environ.get("KF_MODEL_BASE_URL", "")
         self.key = os.environ.get("KF_MODEL_API_KEY", "")
-        self.model = os.environ.get("KF_MODEL_NAME", "gpt-4o-mini")
+        self.model = os.environ.get("KF_MODEL_NAME", "gpt-4o-mini")   # fallback when a tier has no name
 
     def available(self) -> bool:
         return bool(self.base and self.key)
@@ -62,7 +79,9 @@ class HostedModelClient:
     def complete(self, tenant: str, tier: str, messages: list[dict], opts: dict) -> dict:
         import json
         import urllib.request
-        body = json.dumps({"model": self.model, "messages": messages,
+        model = os.environ.get({"fast": "KF_MODEL_FAST", "deep": "KF_MODEL_DEEP",
+                                "escalation": "KF_MODEL_ESCALATION"}.get(tier, ""), "") or self.model
+        body = json.dumps({"model": model, "messages": messages,
                            "temperature": opts.get("temperature", 0.0)}).encode()
         req = urllib.request.Request(
             self.base.rstrip("/") + "/chat/completions", data=body,
@@ -72,7 +91,9 @@ class HostedModelClient:
         text = data["choices"][0]["message"]["content"]
         usage = data.get("usage", {})
         tokens = usage.get("total_tokens", len(text.split()))
-        return {"text": text, "usage": {"tokens": tokens}, "cost": tokens * _TIER_PRICE.get(tier, 5e-6)}
+        return {"text": text, "usage": {"tokens": tokens, "in": usage.get("prompt_tokens", 0),
+                                        "out": usage.get("completion_tokens", 0)},
+                "cost": tokens * _TIER_PRICE.get(tier, 5e-6), "model_name": model}
 
 
 def build_model_client() -> object:
