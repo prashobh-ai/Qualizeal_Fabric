@@ -1,0 +1,275 @@
+"""Core domain types shared across the platform.
+
+These are plain, serialisable data structures. They deliberately carry no
+behaviour and no engine-specific detail so that every layer (ingestion,
+answer, surfaces, governance) can depend on them without depending on any
+concrete adapter. Every type that touches stored data carries ``tenant``
+so tenant isolation (invariant I5) is expressible everywhere.
+"""
+from __future__ import annotations
+
+import time
+import uuid
+from dataclasses import dataclass, field, asdict
+from enum import Enum
+from typing import Any, Optional
+
+
+def new_id(prefix: str = "") -> str:
+    return f"{prefix}{uuid.uuid4().hex}"
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+# --------------------------------------------------------------------------
+# Provenance & coordinates (invariant I2: every citation resolves to a place)
+# --------------------------------------------------------------------------
+class CoordinateKind(str, Enum):
+    PAGE_PARAGRAPH = "page_paragraph"   # text documents
+    BBOX = "bbox"                       # scans / images
+    TIMESTAMP = "timestamp"             # audio / video
+    CELL = "cell"                       # tables
+    SYMBOL_LINE = "symbol_line"         # code
+
+
+@dataclass
+class Coordinate:
+    """A precise, resolvable location inside a source document."""
+    kind: CoordinateKind
+    # A free-form locator payload interpreted by surfaces to open the exact place.
+    # e.g. {"page": 3, "paragraph": 2} or {"start_s": 12.4, "end_s": 18.0}
+    locator: dict[str, Any] = field(default_factory=dict)
+
+    def render(self) -> str:
+        if self.kind == CoordinateKind.PAGE_PARAGRAPH:
+            return f"p.{self.locator.get('page')} ¶{self.locator.get('paragraph')}"
+        if self.kind == CoordinateKind.TIMESTAMP:
+            return f"@{self.locator.get('start_s')}s–{self.locator.get('end_s')}s"
+        if self.kind == CoordinateKind.CELL:
+            return f"cell[{self.locator.get('row')},{self.locator.get('col')}]"
+        if self.kind == CoordinateKind.SYMBOL_LINE:
+            return f"{self.locator.get('symbol')}:{self.locator.get('line')}"
+        if self.kind == CoordinateKind.BBOX:
+            return f"p.{self.locator.get('page')} bbox{self.locator.get('bbox')}"
+        return str(self.locator)
+
+
+@dataclass
+class Provenance:
+    """Immutable link from a derived artefact back to its origin (I8)."""
+    content_hash: str
+    source: str
+    source_version: str
+    coordinate: Optional[Coordinate] = None
+
+
+# --------------------------------------------------------------------------
+# Raw intake & converted documents
+# --------------------------------------------------------------------------
+@dataclass
+class RawItem:
+    """A canonical record emitted by any connector or intake door."""
+    tenant: str
+    source: str
+    source_version: str
+    uri: str
+    mime: str
+    title: str
+    bytes_: bytes
+    language: str = "en"
+    meta: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Region:
+    """A converted, addressable region of a document."""
+    text: str
+    coordinate: Coordinate
+    media_ref: Optional[str] = None
+
+
+@dataclass
+class ConvertedDocument:
+    language: str
+    regions: list[Region]
+    media_refs: list[str] = field(default_factory=list)
+
+
+# --------------------------------------------------------------------------
+# Passages (the retrieval unit) — Section 8
+# --------------------------------------------------------------------------
+@dataclass
+class Passage:
+    id: str
+    tenant: str
+    document_id: str
+    text: str
+    abstract: str            # one sentence (tiered retrieval)
+    overview: str            # one paragraph
+    coordinate: Coordinate
+    provenance: Provenance
+    version: int = 1
+    superseded_by: Optional[str] = None
+    embedding_ref: Optional[str] = None
+    lexical_ref: Optional[str] = None
+
+
+@dataclass
+class Document:
+    id: str
+    tenant: str
+    source: str
+    source_version: str
+    content_hash: str
+    type: str
+    language: str
+    title: str
+    uri: str
+    ingested_at: int
+    status: str = "active"
+    current_version: int = 1
+    # scope label used by permission-before-ranking (I6). A passage inherits it.
+    acl: list[str] = field(default_factory=lambda: ["public"])
+
+
+# --------------------------------------------------------------------------
+# Graph — Section 11
+# --------------------------------------------------------------------------
+@dataclass
+class GraphNode:
+    id: str
+    tenant: str
+    canonical_key: str
+    type: str
+    labels: list[str] = field(default_factory=list)
+    provenance: list[Provenance] = field(default_factory=list)
+
+
+@dataclass
+class GraphEdge:
+    id: str
+    tenant: str
+    src: str
+    dst: str
+    relation: str
+    typed_fact: Optional[dict[str, Any]] = None
+    weight: float = 1.0
+    contextual_weight: float = 0.0
+    provenance: list[Provenance] = field(default_factory=list)
+    conflict_flag: bool = False
+
+
+# --------------------------------------------------------------------------
+# Retrieval & answers — Section 10
+# --------------------------------------------------------------------------
+@dataclass
+class Candidate:
+    passage: Passage
+    lexical_score: float = 0.0
+    vector_score: float = 0.0
+    fused_score: float = 0.0
+    graph_hops: int = 0     # 0 = came from direct retrieval
+    source_of: str = "hybrid"  # hybrid | graph
+
+
+@dataclass
+class Citation:
+    document_id: str
+    document_title: str
+    coordinate: Coordinate
+    passage_id: str
+    snippet: str
+
+    def render(self) -> str:
+        return f"{self.document_title} ({self.coordinate.render()})"
+
+
+class AnswerKind(str, Enum):
+    ANSWER = "answer"
+    CLARIFY = "clarify"
+    GAP = "gap"
+
+
+@dataclass
+class Answer:
+    """The single output contract of the answer service (Section 10)."""
+    kind: AnswerKind
+    answer_text: str
+    citations: list[Citation]
+    confidence: float
+    trajectory_id: str
+    cost: float
+    tokens: int
+    tier: str
+    grounding_score: float = 0.0
+    clarify_back: Optional[str] = None
+    tenant: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind.value,
+            "answer_text": self.answer_text,
+            "citations": [
+                {
+                    "document_id": c.document_id,
+                    "document_title": c.document_title,
+                    "coordinate": {"kind": c.coordinate.kind.value, "locator": c.coordinate.locator},
+                    "coordinate_render": c.coordinate.render(),
+                    "passage_id": c.passage_id,
+                    "snippet": c.snippet,
+                }
+                for c in self.citations
+            ],
+            "confidence": round(self.confidence, 4),
+            "grounding_score": round(self.grounding_score, 4),
+            "trajectory_id": self.trajectory_id,
+            "cost": round(self.cost, 6),
+            "tokens": self.tokens,
+            "tier": self.tier,
+            "clarify_back": self.clarify_back,
+        }
+
+
+# --------------------------------------------------------------------------
+# Identity & policy — Section 12
+# --------------------------------------------------------------------------
+@dataclass
+class Principal:
+    subject: str
+    tenant: str
+    roles: list[str] = field(default_factory=list)
+    scopes: list[str] = field(default_factory=list)   # accessible ACL labels
+    agent: bool = False
+
+    def accessible_acls(self) -> list[str]:
+        acls = set(self.scopes) | {"public"}
+        return sorted(acls)
+
+
+class Decision(str, Enum):
+    ALLOW = "allow"
+    DENY = "deny"
+    CLARIFY = "clarify"
+
+
+@dataclass
+class PolicyResult:
+    decision: Decision
+    reason: str = ""
+
+
+# --------------------------------------------------------------------------
+# Jobs / queue — Section 7 & 8
+# --------------------------------------------------------------------------
+@dataclass
+class Job:
+    id: str
+    tenant: str
+    kind: str
+    payload: dict[str, Any]
+    state: str = "pending"
+    attempts: int = 0
+    lease: Optional[float] = None
+    dead_letter_reason: Optional[str] = None

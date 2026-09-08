@@ -1,0 +1,33 @@
+name: ci
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Test suite (Section 20 checklist)
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Identifier-safety gate (Section 19)
+        run: python -c "from knowledge_fabric.tenants import demo; assert demo.validate_identifiers()==[], demo.validate_identifiers()"
+      - name: Promotion gate proves it blocks a corrupt index (Section 15)
+        run: |
+          python - <<'PY'
+          from knowledge_fabric.app import Platform
+          from knowledge_fabric.tenants import demo
+          from knowledge_fabric.evaluation import gate
+          p = Platform(); demo.seed(p, ["acme-assurance"])
+          assert gate.evaluate(p, "acme-assurance", 1)["passed"], "clean index must pass"
+          gate.corrupt_citation_coordinates(p, "acme-assurance")
+          v = gate.promote_if_passes(p, "acme-assurance", 2)
+          assert not v["passed"] and v["promoted"] is None, "corrupt index must be blocked"
+          print("promotion gate proven")
+          PY
+      - name: End-to-end execution demo
+        run: python scripts/demo.py
