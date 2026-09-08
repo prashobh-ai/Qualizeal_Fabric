@@ -56,8 +56,8 @@ sync: ## Show connector source health + registry
 demo-reset: down seed ## One-command reset to a clean, seeded, known-good state
 	@echo "reset to seeded state"
 
-licences: ## Print the dependency licence posture (I14)
-	@cat docs/licences.md
+licences: ## Licence gate (I14): fails on any non-permissive runtime dependency
+	@$(PY) scripts/licence_gate.py
 
 ci: test licences ## What CI runs
 	@$(PY) -c "from knowledge_fabric.tenants import demo; assert demo.validate_identifiers()==[]; print('identifier-safety: PASS')"

@@ -82,4 +82,5 @@ class IngestWorker:
             tenants = {r["tenant"] for r in changed}
             for t in tenants:
                 versioning.bump_dataset(self.p, t, f"ingest batch: {len([r for r in changed if r['tenant']==t])} document(s)")
+                self.p.cache.invalidate(t)   # new content must not be masked by cached answers
         return results

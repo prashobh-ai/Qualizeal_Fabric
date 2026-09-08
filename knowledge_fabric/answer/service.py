@@ -50,6 +50,7 @@ _WEIGHTS = {"retrieval": 1.0, "semantic": 1.2, "coverage": 1.2,
 _ESCALATE_FLOOR = 0.35
 _SYSTEM_PREAMBLE = "Rephrase the cited evidence faithfully; add nothing."
 _TIER_ORDER = {"none": 0, "fast": 1, "deep": 2, "escalation": 3}
+_LEVEL_CX = {1: "simple", 2: "medium", 3: "complex", 4: "complex"}   # selector level -> query complexity
 _CX_ORDER = {"simple": 0, "medium": 1, "complex": 2}
 
 
@@ -97,12 +98,7 @@ class AnswerService:
                     return self._plain(AnswerKind.GAP, f"Request denied: {pol.reason}",
                                        trace_id, tenant, span, 0.0, qlang, principal)
 
-            # B. multistep / conditional / compare → decompose, run each step governed
-            if not _nested and plan["mode"] != "single":
-                return self._ask_reasoned(principal, question, plan, trace_id, span, qlang,
-                                          k, allow_model)
-
-            # C. cache layer 1 — full answer cache ----------------------
+            # B. cache layer 1 — full answer cache (also serves repeated reasoned questions)
             cached = p.cache.get_answer(tenant, question, accessible)
             if cached:
                 pay = cached["payload"]
@@ -116,6 +112,11 @@ class AnswerService:
                 if not _nested:
                     self._audit(principal, "ask", "answered:cache", trace_id)
                 return self._from_cache(pay, trace_id, tenant, qlang, saved)
+
+            # C. multistep / conditional / compare → decompose, run each step governed
+            if not _nested and plan["mode"] != "single":
+                return self._ask_reasoned(principal, question, plan, trace_id, span, qlang,
+                                          k, allow_model)
 
             qvec = p.cache.get_embedding(rq)
             if qvec is None:
@@ -195,6 +196,9 @@ class AnswerService:
             # H. model selector (4 levels, explainable why) -------------
             decision = sel.classify(rq, selected, g, graph_used)
             tier = decision["tier"]
+            # complexity describes the QUERY (form + evidence spread), so it is fixed here from
+            # the selector's level and never lowered by a later budget/model-off degradation
+            complexity = _max_cx(plan["complexity"], _LEVEL_CX.get(decision["level"], "simple"))
             if tier != "none" and (not allow_model or not p.model.available()):
                 tier = "none"
                 decision = {**decision, "tier": "none",
@@ -226,7 +230,6 @@ class AnswerService:
                         principal, rq, selected, tier)
                     confidence = self._confidence(g, citations, selected)
 
-            complexity = _max_cx(plan["complexity"], COMPLEXITY_OF_TIER.get(tier, "simple"))
             decision = {**decision, "complexity": complexity, "model_name": model_name}
 
             if not citations:
@@ -323,6 +326,12 @@ class AnswerService:
         text = self._localize(res["final_text"], qlang, principal, tier)
         auth = self._authority_card(tenant, citations)
         self._audit(principal, "ask", f"answered:{res['mode']}", trace_id)
+        answer = Answer(AnswerKind.ANSWER, text, citations, round(res["confidence"], 3), trace_id,
+                        cost, tin + tout, tier, grounding_score=grounding, tenant=tenant,
+                        level=level, why=why, lang=qlang, cost_saved=saved, tokens_in=tin,
+                        tokens_out=tout, model_name=model_name, complexity=complexity,
+                        authoritative_source=auth, dataset_version=dsv, reasoning=surface)
+        p.cache.put_answer(tenant, question, principal.accessible_acls(), answer.to_dict(), cost)
         span.set(kind="answer", tier=tier, cost=cost, tokens=tin + tout, tokens_in=tin,
                  tokens_out=tout, citations_count=len(citations), level=f"reasoning:{res['mode']}",
                  why=why, cost_saved=saved, cache_hit=1 if saved else 0,
@@ -330,11 +339,7 @@ class AnswerService:
                  sources=[c.document_title for c in citations], grounding=grounding,
                  model_name=model_name, complexity=complexity, dataset_version=dsv,
                  reasoning=surface)
-        return Answer(AnswerKind.ANSWER, text, citations, round(res["confidence"], 3), trace_id,
-                      cost, tin + tout, tier, grounding_score=grounding, tenant=tenant,
-                      level=level, why=why, lang=qlang, cost_saved=saved, tokens_in=tin,
-                      tokens_out=tout, model_name=model_name, complexity=complexity,
-                      authoritative_source=auth, dataset_version=dsv, reasoning=surface)
+        return answer
 
     # ================= step helpers =================================
     def _rrf(self, vec_hits, lex_hits) -> list[tuple[str, float]]:

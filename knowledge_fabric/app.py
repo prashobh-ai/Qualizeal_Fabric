@@ -13,7 +13,7 @@ from .adapters import cloud
 from .adapters.converter import DoclingLite
 from .adapters.embedder import HashingEmbedder
 from .adapters.graphstore import SqlGraphStore
-from .adapters.identity import LocalIdP, StubIdentity
+from .adapters.identity import LocalIdP, StubIdentity, build_identity
 from .adapters.lexicalindex import SqlLexicalIndex
 from .adapters.model import build_model_client
 from .adapters.objectstore import FileObjectStore
@@ -58,7 +58,7 @@ class Platform:
         self.curation = CurationRepo(self.db)
         self.policy = PolicyEngine(self.db)
 
-        self.idp = LocalIdP(idp_secret)
+        self.idp = build_identity(env, idp_secret)   # local HS256 or OIDC (KF_IDENTITY=oidc)
         self.stub = StubIdentity()
         self.cache = Cache()   # WS3 five-layer cache with savings ledger
 

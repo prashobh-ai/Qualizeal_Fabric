@@ -17,8 +17,9 @@ What it checks
    copyleft (AGPL MinIO/Grafana) because its code is never linked.
 3. The code: every non-stdlib import under the scanned packages must be
    declared in the manifest (``import_names``); an import of a *rejected*
-   component fails; an ``optional-runtime`` import must be guarded by
-   ``try/except ImportError`` so the shipped process never hard-depends on it.
+   component fails; an ``optional-runtime`` import must be guarded — inside
+   ``try/except ImportError`` or deferred into a function body — so the
+   shipped process never hard-depends on it at import time.
 4. Requirements files (if any exist): every distribution listed must be a
    declared, approved component.
 
@@ -144,8 +145,10 @@ def _local_packages(repo_root: str) -> set[str]:
 def _guarded_imports(tree: ast.AST) -> list[tuple[str, int, bool]]:
     """``(top_level_module, lineno, guarded)`` for every absolute import.
 
-    ``guarded`` is True when the import sits inside a ``try`` whose handlers
-    catch ImportError/ModuleNotFoundError (or a bare/broad except).
+    ``guarded`` is True when the import cannot break module load: it sits
+    inside a ``try`` whose handlers catch ImportError/ModuleNotFoundError (or
+    a bare/broad except), or it is deferred into a function body (a lazy
+    import that only runs when the cloud adapter is actually used).
     """
     found: list[tuple[str, int, bool]] = []
 
@@ -164,7 +167,7 @@ def _guarded_imports(tree: ast.AST) -> list[tuple[str, int, bool]]:
 
     def walk(node: ast.AST, guarded: bool) -> None:
         for child in ast.iter_child_nodes(node):
-            g = guarded
+            g = guarded or isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
             if isinstance(child, ast.Try):
                 g = guarded or handler_guards(child)
                 # only the try-body is protected; handlers/else/finally are not

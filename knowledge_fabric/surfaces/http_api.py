@@ -58,6 +58,10 @@ def platform() -> Platform:
         _platform = Platform(db_path=os.environ.get("KF_DB", "./data/kf.db"))
         if not _platform.documents.list("acme-assurance"):
             demo.seed(_platform)
+        cap = os.environ.get("KF_BUDGET_CAP_USD")          # injected by the AWS module
+        if cap:
+            for t in demo.DEMO_TENANTS:
+                _platform.policy.set_budget(t.tenant, float(cap))
         _svc = AnswerService(_platform)
     return _platform
 
@@ -207,7 +211,15 @@ class Handler(BaseHTTPRequestHandler):
             prin = self._require("curate")
             if not prin: return
             doc_id = first("document_id", "")
-            return self._send(200, {"document_id": doc_id,
+            diff = None
+            if doc_id and first("from") and first("to"):
+                try:
+                    diff = versioning.diff(p, prin.tenant, doc_id, int(first("from")), int(first("to")))
+                except KeyError as e:
+                    return self._send(404, {"error": str(e)})
+                except ValueError as e:
+                    return self._send(400, {"error": str(e)})
+            return self._send(200, {"document_id": doc_id, "diff": diff,
                                     "history": versioning.history(p, prin.tenant, doc_id) if doc_id else [],
                                     "dataset_version": versioning.current_dataset(p, prin.tenant),
                                     "dataset_versions": versioning.list_dataset_versions(p, prin.tenant, 20)})
@@ -242,21 +254,29 @@ class Handler(BaseHTTPRequestHandler):
             prin = self._require("admin")
             if not prin: return
             return self._send(200, {"ranks": authority.list_ranks(p, prin.tenant)})
+        if u.path == "/admin/otlp":                 # OTLP/JSON dry-run of this tenant's spans
+            prin = self._require("admin")
+            if not prin: return
+            from ..adapters import otel_export
+            try:
+                return self._send(200, otel_export.export(p, prin.tenant, None))
+            except TypeError:
+                return self._send(200, otel_export.export(p, prin.tenant))
         if u.path == "/admin/doctor":
             prin = self._require("admin")
             if not prin: return
+            from ..ops import readiness
             target = first("target", "local")
-            report = {"target": target, "selection": cloud.selection(dict(os.environ))}
-            script = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__)))), "scripts", "doctor.py")
-            if os.path.exists(script):
+            if target not in readiness.TARGETS:
+                return self._send(400, {"error": f"target must be one of {readiness.TARGETS}"})
+            report = readiness.report(target=target, run_tests=False, live_health=False)
+            render = getattr(readiness, "render", None) or getattr(readiness, "format_report", None)
+            if render:
                 try:
-                    r = subprocess.run([sys.executable, script, "--target", target],
-                                       capture_output=True, text=True, timeout=60)
-                    report["exit_code"] = r.returncode
-                    report["report"] = (r.stdout or r.stderr)[-6000:]
-                except Exception as e:  # pragma: no cover
-                    report["error"] = str(e)
+                    report["rendered"] = render(report)
+                except Exception:  # pragma: no cover
+                    pass
+            report["selection"] = cloud.selection(dict(os.environ))
             return self._send(200, report)
         return self._send(404, {"error": "not found"})
 
@@ -300,7 +320,13 @@ class Handler(BaseHTTPRequestHandler):
                 authority.mark_authoritative(p, prin.tenant, doc_id, decision == "authoritative", prin.subject)
                 p.cache.invalidate(prin.tenant)
             elif decision == "rollback":
-                out["rollback"] = versioning.rollback(p, prin.tenant, doc_id, int(b.get("to_version", 1)), prin.subject)
+                try:
+                    out["rollback"] = versioning.rollback(p, prin.tenant, doc_id,
+                                                          int(b.get("to_version", 1)), prin.subject)
+                except KeyError as e:
+                    return self._send(404, {"error": str(e)})
+                except (ValueError, TypeError) as e:
+                    return self._send(400, {"error": f"invalid to_version: {e}"})
                 p.cache.invalidate(prin.tenant)
                 versioning.bump_dataset(p, prin.tenant, f"rollback {doc_id} -> v{b.get('to_version')}")
             elif decision != "keep":
@@ -337,8 +363,9 @@ class Handler(BaseHTTPRequestHandler):
             row = conn_admin.upsert(p, prin.tenant, b["source"], enabled=b.get("enabled"),
                                     config=b.get("config"), allow=b.get("allow"), scopes=b.get("scopes"))
             if b.get("interval_s") is not None:
-                scheduler.set_schedule(p, prin.tenant, b["source"], int(b["interval_s"]),
-                                       b.get("config") or (row.get("config") or {}),
+                existing = ((scheduler.get_schedule(p, prin.tenant, b["source"]) or {}).get("config") or {})
+                cfg = b["config"] if b.get("config") is not None else (existing or row.get("config") or {})
+                scheduler.set_schedule(p, prin.tenant, b["source"], int(b["interval_s"]), cfg,
                                        enabled=bool(b.get("enabled", True)), now=time.time())
             self._audit(prin, "connector_config", b["source"], json.dumps({k: v for k, v in b.items() if k != "source"}))
             return self._send(200, {"connector": row, "health": scheduler.health_for(p, prin.tenant, b["source"])})
@@ -346,13 +373,22 @@ class Handler(BaseHTTPRequestHandler):
             prin = self._require("admin")
             if not prin: return
             b = self._body()
-            source = b["source"]
+            source = b.get("source", "")
+            if source not in registry.available():
+                return self._send(404, {"error": f"unknown connector '{source}'; registered: {registry.available()}"})
             if not conn_admin.is_enabled(p, prin.tenant, source):
                 return self._send(409, {"error": f"connector '{source}' is disabled by admin"})
             records = b.get("records")
             if records is None and b.get("demo_delta", True):
                 records = _demo_delta(prin.tenant, source)
-            summary = scheduler.sync_now(p, prin.tenant, source, config=b.get("config"), records=records)
+            cfg = b.get("config")
+            if source == "files" and not ((cfg or {}).get("folder")):
+                sched = scheduler.get_schedule(p, prin.tenant, source)
+                folder = (((sched or {}).get("config") or {}).get("folder")
+                          or os.path.join(os.environ.get("KF_DROP_ROOT", "./data/drop"), prin.tenant))
+                os.makedirs(folder, exist_ok=True)
+                cfg = {**(cfg or {}), "folder": folder}     # tenant default drop folder
+            summary = scheduler.sync_now(p, prin.tenant, source, config=cfg, records=records)
             self._audit(prin, "sync_now", source, summary.get("last_status", "ok"))
             return self._send(200, summary)
         if u.path == "/admin/refresh/run-due":
@@ -379,10 +415,34 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
 
+_loops: list = []
+
+
+def start_refresh_loops(p: Platform) -> list:
+    """Continuous refresh: one RefreshLoop per tenant (KF_REFRESH_TICK_S, default 5s).
+    Demo tenants get their offline connector records so scheduled syncs pull deltas."""
+    tick = float(os.environ.get("KF_REFRESH_TICK_S", "5"))
+    if os.environ.get("KF_REFRESH", "1") != "1":
+        return []
+    loops = []
+    for t in demo.DEMO_TENANTS:
+        rec = {}
+        if t.tenant in demo.JIRA_RECORDS:
+            rec["jira"] = demo.JIRA_RECORDS[t.tenant]
+        if t.tenant in demo.GITHUB_RECORDS:
+            rec["github"] = demo.GITHUB_RECORDS[t.tenant]
+        loop = scheduler.RefreshLoop(p, t.tenant, tick_s=tick, records_by_source=rec or None)
+        loop.start()
+        loops.append(loop)
+    return loops
+
+
 def serve(host="0.0.0.0", port=8080):
-    platform()
+    p = platform()
+    _loops.extend(start_refresh_loops(p))
     srv = ThreadingHTTPServer((host, port), Handler)
-    print(f"Knowledge Fabric on http://{host}:{port}  (Ask: /  ·  Curator: /curator  ·  Admin: /admin  ·  Dashboard: /dashboard)")
+    print(f"Knowledge Fabric on http://{host}:{port}  (Ask: /  ·  Curator: /curator  ·  Admin: /admin  ·  Dashboard: /dashboard)"
+          f"  refresh loops: {len(_loops)}")
     srv.serve_forever()
 
 
