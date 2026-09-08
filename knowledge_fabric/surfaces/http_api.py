@@ -165,7 +165,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/health":
             return self._send(200, {"status": "ok", "model": p.model_available(),
                                     "connectors": registry.available(),
-                                    "adapters": cloud.selection(dict(os.environ)).get("selected", {})})
+                                    "adapters": {k: v.get("adapter") for k, v in cloud.selection(dict(os.environ)).items()
+                                                 if isinstance(v, dict) and "adapter" in v}})
         if u.path == "/connectors":
             return self._send(200, {"connectors": registry.available()})
         if u.path == "/metrics":

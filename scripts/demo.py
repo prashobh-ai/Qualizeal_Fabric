@@ -169,7 +169,102 @@ def main():
     a24 = p.telemetry.analytics("acme-assurance", "24h", role="asker")
     print(f"  filter[24h, role=asker]: answers={a24['answers']} users={list(a24['per_user'])}")
 
-    rule("DONE — Connect → Understand → Decide → Answer, every capability shown, no cloud.")
+
+    # ================= Stage 2 — Rasool's list ==========================
+    from knowledge_fabric.answer import reasoning as _reasoning
+    from knowledge_fabric.governance import authority as _auth
+    from knowledge_fabric.stores import versioning as _ver
+    from knowledge_fabric.ingestion import scheduler as _sched, runs as _runs
+    from knowledge_fabric.connectors import admin as _cadmin
+    from knowledge_fabric.health import kb_eval as _kb
+    from knowledge_fabric.ingestion.intake import Intake as _Intake, IngestWorker as _Worker
+    T = "acme-assurance"
+    p.cache.invalidate(T)   # fresh numbers for the Stage-2 sections (no answer-cache replay)
+
+    rule("15. MULTISTEP & CONDITIONAL REASONING — decomposed, every step governed")
+    for q in ["what must a release achieve before promotion and which requirement has a traceability gap?",
+              "if a critical defect is open, what happens to the release?",
+              "compare the acceptance criteria in the test strategy and the release runbook"]:
+        a = svc.ask(asker, q)
+        r = a.reasoning or {}
+        print(f"  [{r.get('mode','single'):11s}] {a.kind.value:7s} cx={a.complexity:7s} steps={len(r.get('steps', []))} "
+              f"cites={len(a.citations)} model={a.model_name} tokens={a.tokens_in}/{a.tokens_out}")
+        for st in r.get("steps", []):
+            cond = "" if st.get("condition") is None else f" condition={st['condition']}"
+            print(f"      {st['id']} {st['kind']:9s}{cond}{' SKIPPED' if st.get('skipped') else ''}: {st['question'][:70]}")
+        print(f"      why: {r.get('explain','')[:120]}")
+
+    rule("16. QUERY COMPLEXITY (simple / medium / complex) → MULTI-MODEL ROUTING, tokens in/out")
+    p.cache.invalidate(T)
+    mo = demo.principal_for(p, "meridian-health", "mo.asker")
+    for prin, q in [(mo, "what does triage category 1 require?"),
+                    (asker, "what is the acceptance criteria for coverage?"),
+                    (asker, "why does a component with an open defect block its dependent releases and what must a release achieve?")]:
+        a = svc.ask(prin, q)
+        print(f"  {a.complexity:7s} → tier={a.tier:5s} model={a.model_name:18s} tokens in/out={a.tokens_in}/{a.tokens_out} "
+              f"cost=${a.cost:.6f} level={a.level}")
+
+    rule("17. AUTHORITATIVE SOURCE — ranks per source, curator-marked docs win, conflicts flagged")
+    print("  source ranks:", [(r["source"], r["rank"]) for r in _auth.list_ranks(p, T)])
+    strat = p.documents.by_source_uri(T, "files", "file://qa/test-strategy.md")
+    _auth.mark_authoritative(p, T, strat["id"], True, "carl.curator"); p.cache.invalidate(T)
+    a = svc.ask(asker, "what must a release achieve before promotion?")
+    card = a.authoritative_source or {}
+    print(f"  authoritative for this answer: {card.get('document_title')} ({card.get('source')}) — {card.get('reason')}")
+    print(f"  conflicts among cited sources: {len(card.get('conflicts', []))}")
+
+    rule("18. DATA VERSIONING — history · diff · rollback · dataset versions · lineage")
+    intake, worker = _Intake(p), _Worker(p, None); worker.intake = intake
+    v2 = demo.CORPORA[T][0][4].replace("95% automated coverage", "97% automated coverage")
+    intake.submit(intake.canonical(T, "files", "file://qa/test-strategy.md", "Test Strategy v3", v2.encode(), mime="text/markdown"))
+    worker.drain()
+    hist = _ver.history(p, T, strat["id"])
+    print("  history:", [(h["version"], h["passages"]) for h in hist])
+    d = _ver.diff(p, T, strat["id"], 1, 2)
+    print(f"  diff v1→v2: +{len(d['added'])} −{len(d['removed'])} ={d['unchanged']} | added: {d['added'][0][:60] if d['added'] else ''}")
+    rb = _ver.rollback(p, T, strat["id"], 1, "carl.curator"); p.cache.invalidate(T)
+    print("  rollback to v1 →", rb)
+    print("  dataset versions:", [(x["version"], x["reason"][:28]) for x in _ver.list_dataset_versions(p, T, 3)])
+    pid = p.passages.by_document(T, strat["id"])[0].id
+    print("  lineage of one passage:", {k: v for k, v in (_ver.lineage(p, T, pid) or {}).items() if k in ("version", "source", "content_hash")})
+
+    rule("19. CONTINUOUS REFRESH — schedule · due · delta-only run · 7-stage run record · SLA health")
+    t0 = 1_800_000_000.0
+    _sched.set_schedule(p, T, "jira", 60, {"projects": ["REL"]}, enabled=True, now=t0)
+    fresh = demo.JIRA_RECORDS[T] + [{"project": "REL", "key": "REL-777", "summary": "Refresh demo issue",
+                                     "status": "Open", "updated": 999_999_999, "acl": ["public"],
+                                     "description": "Picked up by the scheduled refresh; only the delta is ingested."}]
+    ran = _sched.run_due(p, T, now=t0 + 61, records_by_source={"jira": fresh})
+    for r in ran:
+        print(f"  ran {r.get('source')}: pulled={r.get('pulled')} ingested={r.get('ingested')} "
+              f"status={r.get('status') or r.get('last_status') or 'ok'} errors={r.get('error_count')} "
+              f"next_run=+{int((r.get('next_run') or t0)-t0)}s run_id={str(r.get('run_id'))[:12]}")
+    print("  health:", [{k: h[k] for k in ("source", "enabled", "last_status", "error_count", "sla_breach")} for h in _sched.health(p, T, now=t0 + 62)])
+    last = _runs.list_runs(p, T, 1)[0]
+    print("  last run steps:", [s["name"] for s in last["steps"]])
+
+    rule("20. CURATOR — knowledge-base evaluation suggests what to delete / review / keep")
+    intake.upload(T, "duplicate-strategy.md", demo.CORPORA[T][0][4].encode()); worker.drain()
+    dq = _kb.data_quality(p, T)
+    print("  data quality:", {k: dq[k] for k in ("coverage", "freshness", "contradictions", "gaps", "connectedness",
+                                                  "traceability", "readability_avg", "duplicate_rate", "citation_coverage")})
+    print("  suggestions:", dq["suggestions"], "| risk register:", [r["risk"] for r in dq["risk_register"]][:4])
+    for doc in _kb.document_quality(p, T)[:3]:
+        print(f"   {doc['suggestion'].upper():7s} score={doc['score']:.2f} {doc['title'][:34]:34s} — {'; '.join(doc['reasons'])[:80]}")
+
+    rule("21. ADMIN — connector permissions, bulk delete, AWS readiness")
+    _cadmin.disable(p, T, "github", "adar.admin")
+    print("  github enabled after admin disable:", _cadmin.is_enabled(p, T, "github"), "| allow/scopes:", {k: _cadmin.get(p, T, 'github')[k] for k in ('allow', 'scopes')})
+    ups = [d for d in p.documents.list(T) if d["source"] == "upload"]
+    for d in ups:
+        p.vindex.delete(T, p.passages.delete_document_passages(T, d["id"])); p.documents.tombstone(T, d["id"])
+    print(f"  bulk delete by source='upload': removed {len(ups)} document(s); dataset v{_ver.bump_dataset(p, T, 'bulk delete')}")
+    from knowledge_fabric.adapters import cloud as _cloud
+    sel = _cloud.selection({})
+    print("  adapter selection (env-driven, AWS parity):", {k: sel[k]["adapter"] for k in ("objectstore", "queue", "database")})
+    print("  readiness: run `python3 scripts/doctor.py --target aws` for the exact AWS gap list")
+
+    rule("DONE — Stage 2 complete: Connect → Understand → Decide → Answer, every capability shown, no cloud.")
 
 
 if __name__ == "__main__":

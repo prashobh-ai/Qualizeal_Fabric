@@ -44,6 +44,12 @@ dashboard: ## Build a self-contained telemetry-dashboard snapshot (real seeded d
 load-corpus: ## Ingest a folder of QualiZeal .docx into the 'qualizeal' tenant: make load-corpus DIR=path
 	@$(PY) scripts/load_qualizeal_corpus.py $(DIR)
 
+doctor: ## AWS/local deployment readiness report: make doctor TARGET=aws|local
+	@$(PY) scripts/doctor.py --target $(or $(TARGET),local)
+
+consoles: ## Print the console URLs (Ask / Curator / Admin / Dashboard)
+	@echo "Ask: http://localhost:$(PORT)/   Curator: /curator   Admin: /admin   Dashboard: /dashboard"
+
 sync: ## Show connector source health + registry
 	@$(PY) -c "from knowledge_fabric.app import Platform;from knowledge_fabric.tenants import demo;from knowledge_fabric.ingestion.sync import SyncManager;from knowledge_fabric.connectors import registry;p=Platform(db_path='$(KF_DB)');print('connectors:',registry.available());print('sources:',SyncManager(p).source_health('acme-assurance'))"
 
