@@ -197,8 +197,9 @@ def main():
     rule("16. QUERY COMPLEXITY (simple / medium / complex) → MULTI-MODEL ROUTING, tokens in/out")
     p.cache.invalidate(T)
     mo = demo.principal_for(p, "meridian-health", "mo.asker")
+    nia = demo.principal_for(p, "northwind-air", "nia.asker")
     for prin, q in [(mo, "what does triage category 1 require?"),
-                    (asker, "what is the acceptance criteria for coverage?"),
+                    (nia, "which aircraft system was deferred?"),
                     (asker, "why does a component with an open defect block its dependent releases and what must a release achieve?")]:
         a = svc.ask(prin, q)
         print(f"  {a.complexity:7s} → tier={a.tier:5s} model={a.model_name:18s} tokens in/out={a.tokens_in}/{a.tokens_out} "
