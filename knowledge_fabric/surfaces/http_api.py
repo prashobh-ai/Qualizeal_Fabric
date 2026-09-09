@@ -35,6 +35,18 @@ from ..stores import versioning
 from ..tenants import demo
 from .dashboard import DASHBOARD_HTML
 
+# Static asset root — served under /static/* with cache headers. Nothing outside
+# this directory is reachable; served HTML holds no external URLs (P1.1).
+_STATIC_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "static"))
+_STATIC_TYPES = {
+    ".css": "text/css; charset=utf-8", ".js": "application/javascript; charset=utf-8",
+    ".svg": "image/svg+xml", ".png": "image/png",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".ico": "image/x-icon",
+    ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf",
+    ".json": "application/json; charset=utf-8", ".txt": "text/plain; charset=utf-8",
+    ".md": "text/plain; charset=utf-8",
+}
+
 try:  # Stage-2 pages (Section G); fall back to minimal pages if absent
     from .ask_ui import ASK_HTML
 except Exception:  # pragma: no cover
@@ -97,6 +109,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _serve_static(self, rel: str):
+        """Serve a file from ``surfaces/static/`` with a public cache header.
+
+        Path traversal is refused: the resolved path must live inside
+        ``_STATIC_ROOT`` (``../`` and absolute paths therefore fall out).
+        """
+        rel = rel.split("?", 1)[0].split("#", 1)[0]
+        full = os.path.realpath(os.path.join(_STATIC_ROOT, rel))
+        if not full.startswith(_STATIC_ROOT + os.sep) or not os.path.isfile(full):
+            return self._send(404, {"error": "not found"})
+        ext = os.path.splitext(full)[1].lower()
+        ctype = _STATIC_TYPES.get(ext, "application/octet-stream")
+        with open(full, "rb") as fh:
+            body = fh.read()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _principal(self):
         return platform().idp.authenticate({"Authorization": self.headers.get("Authorization", "")})
 
@@ -154,6 +187,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path); q = parse_qs(u.query); p = platform()
         first = lambda key, default=None: q.get(key, [default])[0]
+
+        # static assets (brand, vendored JS/CSS, self-hosted fonts) — served
+        # from ``surfaces/static/`` with cache headers; no path outside that
+        # root is reachable, so ``/static/../etc/passwd`` returns 404.
+        if u.path.startswith("/static/"):
+            return self._serve_static(u.path[len("/static/"):])
 
         # pages
         if u.path in ("/", "/ask"):
