@@ -637,6 +637,11 @@ class TestSuggestedQuestions(unittest.TestCase):
         self.assertIn("how fast must critical defects be triaged?", elev)
         self.assertNotIn("how fast must critical defects be triaged?", pub)
 
+    def test_enter_submits_shift_enter_newlines(self):
+        # L0.5 — Enter sends; Shift+Enter inserts a newline.
+        self.assertIn("e.key==='Enter'&&!e.shiftKey", ASK_HTML)
+        self.assertNotIn("(e.ctrlKey||e.metaKey)&&e.key==='Enter'", ASK_HTML)
+
     def test_ui_slices_to_six(self):
         # The API returns every accessible suggestion (so the ACL subset
         # relation stays provable without the cap dropping earlier common

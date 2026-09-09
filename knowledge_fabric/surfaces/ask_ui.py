@@ -270,7 +270,8 @@ async function corpusTiles(){if(!KF.session)return;
 window.KF_ON_SESSION=s=>{gate(null);samples();corpusTiles();if(s)$('#ask-status').textContent='ready for '+s.subject};
 KF.initBar({preferRole:'asker'});samples();corpusTiles();
 $('#ask-form').addEventListener('submit',ask);
-$('#question').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')ask(e)});
+// L0.5 — Enter submits, Shift+Enter inserts a newline.
+$('#question').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask(e)}});
 if(!KF.session)gate({status:401,message:''},'asker');
 """
 
