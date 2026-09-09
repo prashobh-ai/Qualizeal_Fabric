@@ -456,17 +456,27 @@ class TestStaticAssets(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.headers, e.read()
 
-    def test_brand_mark_served(self):
-        code, headers, body = self._get("/static/brand/qualizeal-mark.jpg")
+    def test_brand_lockup_served(self):
+        code, headers, body = self._get("/static/assets/brand/logo/qualizeal-lockup.png")
         self.assertEqual(code, 200)
-        self.assertEqual(headers.get("Content-Type"), "image/jpeg")
+        self.assertEqual(headers.get("Content-Type"), "image/png")
         self.assertGreater(len(body), 512)
         self.assertIn("public", (headers.get("Cache-Control") or "").lower())
 
-    def test_brand_wordmark_served(self):
-        code, headers, _ = self._get("/static/brand/qualizeal-wordmark.jpeg")
+    def test_brand_mark_served(self):
+        code, headers, _ = self._get("/static/assets/brand/logo/qualizeal-mark.png")
         self.assertEqual(code, 200)
-        self.assertEqual(headers.get("Content-Type"), "image/jpeg")
+        self.assertEqual(headers.get("Content-Type"), "image/png")
+
+    def test_favicon_served(self):
+        code, headers, _ = self._get("/static/assets/brand/logo/favicon-32.png")
+        self.assertEqual(code, 200)
+        self.assertEqual(headers.get("Content-Type"), "image/png")
+
+    def test_old_demo_jpegs_gone(self):
+        # The demo-era JPEGs with white backgrounds are removed (L0.1).
+        code, _, _ = self._get("/static/brand/qualizeal-mark.jpg")
+        self.assertEqual(code, 404)
 
     def test_missing_asset_returns_404(self):
         code, _, _ = self._get("/static/vendor/nonexistent-bundle.js")

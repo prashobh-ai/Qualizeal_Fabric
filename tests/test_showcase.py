@@ -22,11 +22,13 @@ class TestShowcaseBuilder(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(out, ".nojekyll")))
         self.assertTrue(os.path.isfile(os.path.join(out, "index.html")))
         self.assertTrue(os.path.isfile(os.path.join(out, "assets", "brand",
-                                                     "qualizeal-mark.jpg")))
+                                                     "logo", "qualizeal-lockup.png")))
+        self.assertTrue(os.path.isfile(os.path.join(out, "assets", "brand",
+                                                     "logo", "qualizeal-mark.png")))
         with open(os.path.join(out, "index.html"), encoding="utf-8") as fh:
             html = fh.read()
         # relative paths only; no external URLs; base-path agnostic
-        self.assertIn("./assets/brand/qualizeal-mark.jpg", html)
+        self.assertIn("./assets/brand/logo/qualizeal-lockup.png", html)
         self.assertNotIn("http://", html)
         self.assertNotIn("https://", html)
         # copyright + wordmark + banner

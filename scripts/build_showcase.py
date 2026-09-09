@@ -23,7 +23,7 @@ import sys
 
 
 ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-BRAND_SRC = os.path.join(ROOT, "knowledge_fabric", "surfaces", "static", "brand")
+BRAND_SRC = os.path.join(ROOT, "knowledge_fabric", "surfaces", "static", "assets", "brand")
 
 PLACEHOLDER_INDEX = """<!doctype html>
 <html lang="en">
@@ -31,7 +31,7 @@ PLACEHOLDER_INDEX = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>QualiZeal Knowledge Fabric</title>
-<link rel="icon" href="./assets/brand/qualizeal-mark.jpg">
+<link rel="icon" href="./assets/brand/logo/favicon-32.png">
 <style>
   :root{
     --ink:#0D1523;--body:#2B3B4A;--mut:#5A6B7C;--line:#CFE0F0;--panel:#F4F8FC;
@@ -43,10 +43,7 @@ PLACEHOLDER_INDEX = """<!doctype html>
        font-variant-numeric:tabular-nums}
   header{height:56px;border-bottom:1px solid var(--line);display:flex;align-items:center;
          gap:14px;padding:0 22px;background:#FFF;position:sticky;top:0;z-index:5}
-  header .mark{height:28px;width:28px;border-radius:6px;background:#EAF4FF;
-               display:inline-flex;align-items:center;justify-content:center}
-  header .mark img{height:22px;width:22px;object-fit:contain}
-  header .wordmark{font-weight:700;color:var(--ink);letter-spacing:.2px;font-size:15px}
+  header .lockup{height:18px;width:auto}
   header .sub{color:var(--mut);font-size:12px}
   main{max-width:1080px;margin:0 auto;padding:24px 22px}
   .banner{background:var(--blue-tint);border:1px solid var(--line);border-left:4px solid var(--blue);
@@ -69,8 +66,7 @@ PLACEHOLDER_INDEX = """<!doctype html>
 </head>
 <body>
 <header>
-  <span class="mark"><img src="./assets/brand/qualizeal-mark.jpg" alt=""></span>
-  <span class="wordmark">QualiZeal Knowledge Fabric</span>
+  <img class="lockup" src="./assets/brand/logo/qualizeal-lockup.png" alt="QualiZeal Knowledge Fabric">
   <span class="sub">Internal · Showcase</span>
 </header>
 
@@ -107,7 +103,7 @@ PLACEHOLDER_INDEX = """<!doctype html>
   </div>
 </main>
 
-<div class="watermark"><img src="./assets/brand/qualizeal-mark.jpg" alt=""></div>
+<div class="watermark"><img src="./assets/brand/logo/qualizeal-mark.png" alt=""></div>
 
 <footer>
   <span>&copy; QualiZeal. All rights reserved.</span>
@@ -129,13 +125,10 @@ def build(out_dir: str) -> None:
     with open(os.path.join(out, ".nojekyll"), "w") as fh:
         fh.write("")
 
-    # Brand assets (relative path used by index.html)
+    # Brand assets (relative path used by index.html) — copied whole, so the
+    # transparent PNG lockup/mark and favicons under logo/ come along.
     brand_dst = os.path.join(out, "assets", "brand")
-    os.makedirs(brand_dst, exist_ok=True)
-    for name in os.listdir(BRAND_SRC):
-        src = os.path.join(BRAND_SRC, name)
-        if os.path.isfile(src):
-            shutil.copy2(src, os.path.join(brand_dst, name))
+    shutil.copytree(BRAND_SRC, brand_dst)
 
     # The placeholder index
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as fh:

@@ -1,1 +1,1 @@
-Current: F0.4
+Current: L0.1
