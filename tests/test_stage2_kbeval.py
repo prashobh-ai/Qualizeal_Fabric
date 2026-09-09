@@ -7,13 +7,13 @@ from knowledge_fabric.ingestion.intake import Intake, IngestWorker
 from knowledge_fabric.tenants import demo
 from tests.util import seeded
 
-T = "q-quality"
-OTHER = "q-airlines"
+T = "qualizeal"
+OTHER = "isolation-check"
 DAY_MS = 86_400_000
 
 
 class KbEvalBase(unittest.TestCase):
-    """Seed two tenants, ask three questions in acme, keep handles to the docs."""
+    """Seed two tenants, ask three questions in the product tenant, keep handles to the docs."""
 
     def setUp(self):
         self.p = seeded([T, OTHER])
@@ -26,7 +26,7 @@ class KbEvalBase(unittest.TestCase):
 
     def _upload_duplicate(self, filename="test-strategy-copy.md", acl=None) -> str:
         """Upload the Test Strategy body again through the upload door; returns the new doc id."""
-        body = next(b for uri, _, _, _, b in demo.CORPORA[T] if uri == "qa/test-strategy.md")
+        body = next(b for uri, _, _, _, _, b in demo.CORPORA[T] if uri == "qa/test-strategy.md")
         intake = Intake(self.p)
         intake.upload(T, filename, body.encode(), acl=acl)
         results = IngestWorker(self.p, intake).drain()
@@ -59,9 +59,9 @@ class TestCitationUsage(KbEvalBase):
         self.assertNotIn(self.restricted["id"], usage)
 
     def test_usage_is_tenant_scoped(self):
-        acme_ids = {d["id"] for d in self.p.documents.list(T)}
+        product_ids = {d["id"] for d in self.p.documents.list(T)}
         other = kb_eval.citation_usage(self.p, OTHER)
-        self.assertFalse(set(other) & acme_ids)
+        self.assertFalse(set(other) & product_ids)
         with self.assertRaises(PermissionError):
             kb_eval.citation_usage(self.p, "")
 
@@ -217,10 +217,10 @@ class TestDocumentQuality(KbEvalBase):
         self.assertTrue(any("unanswered" in r for r in row["reasons"]))
 
     def test_tenant_scoped(self):
-        acme_ids = {d["id"] for d in self.p.documents.list(T)}
+        product_ids = {d["id"] for d in self.p.documents.list(T)}
         other = kb_eval.document_quality(self.p, OTHER)
         self.assertTrue(other)
-        self.assertFalse({r["document_id"] for r in other} & acme_ids)
+        self.assertFalse({r["document_id"] for r in other} & product_ids)
         with self.assertRaises(PermissionError):
             kb_eval.document_quality(self.p, "")
 

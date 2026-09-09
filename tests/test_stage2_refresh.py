@@ -6,8 +6,8 @@ from knowledge_fabric.connectors import admin, registry
 from knowledge_fabric.ingestion import runs, scheduler
 from tests.util import seeded
 
-T = "q-quality"
-OTHER = "q-airlines"
+T = "qualizeal"
+OTHER = "isolation-check"
 INTERVAL = 600
 # a fixed "now" far past the seed's real wall-clock syncs, so freshness maths is exact
 NOW = 4_000_000_000.0
@@ -20,7 +20,7 @@ NEW_JIRA = [
                     "report freshness for the release readiness review."},
 ]
 NEW_GITHUB = [
-    {"repo": "acme/assurance-platform", "path": "docs/refresh.md", "updated_at": 1800,
+    {"repo": "qualizeal/kf-platform", "path": "docs/refresh.md", "updated_at": 1800,
      "commit": "0f0f0f", "mime": "text/markdown",
      "content": "# Refresh\n\nConnectors are refreshed on a schedule; a failing sync backs off."},
 ]
@@ -189,28 +189,28 @@ class TestConnectorAdmin(Base):
 
     def test_list_all_merges_registry_and_configured(self):
         admin.upsert(self.p, T, "confluence", enabled=True, allow=["QA"], scopes=["confluence:read"])
-        admin.upsert(self.p, T, "github", allow=["acme/assurance-platform"])
+        admin.upsert(self.p, T, "github", allow=["qualizeal/kf-platform"])
         listed = {c["source"]: c for c in admin.list_all(self.p, T)}
         self.assertEqual(sorted(listed), sorted(set(registry.available()) | {"confluence"}))
         self.assertFalse(listed["confluence"]["registered"])
         self.assertEqual(listed["confluence"]["declared_scopes"], [])
         self.assertEqual(listed["confluence"]["scopes"], ["confluence:read"])
         self.assertTrue(listed["github"]["registered"])
-        self.assertEqual(listed["github"]["allow"], ["acme/assurance-platform"])
+        self.assertEqual(listed["github"]["allow"], ["qualizeal/kf-platform"])
         self.assertTrue(listed["files"]["enabled"])           # untouched registry entry
 
     def test_effective_config_applies_admin_allow_list_last(self):
         admin.upsert(self.p, T, "github", config={"token_ref": "secret://gh"},
-                     allow=["acme/assurance-platform"])
-        cfg = admin.effective_config(self.p, T, "github", {"repos": ["acme/other"], "depth": 2})
+                     allow=["qualizeal/kf-platform"])
+        cfg = admin.effective_config(self.p, T, "github", {"repos": ["qualizeal/other-repo"], "depth": 2})
         self.assertEqual(cfg, {"token_ref": "secret://gh", "depth": 2,
-                               "repos": ["acme/assurance-platform"]})
+                               "repos": ["qualizeal/kf-platform"]})
         self.assertEqual(admin.allow_key("jira"), "projects")
         self.assertEqual(admin.allow_key("confluence"), "allow")
         # an empty admin allow-list imposes no restriction
         admin.upsert(self.p, T, "github", allow=[])
-        self.assertEqual(admin.effective_config(self.p, T, "github", {"repos": ["acme/other"]}),
-                         {"token_ref": "secret://gh", "repos": ["acme/other"]})
+        self.assertEqual(admin.effective_config(self.p, T, "github", {"repos": ["qualizeal/other-repo"]}),
+                         {"token_ref": "secret://gh", "repos": ["qualizeal/other-repo"]})
 
     def test_check_scopes_reports_missing(self):
         admin.upsert(self.p, T, "jira", scopes=[])
@@ -428,13 +428,13 @@ class TestScheduler(Base):
 
     def test_sync_now_with_and_without_schedule(self):
         # without a schedule: runs, records a run, touches no schedule
-        r = scheduler.sync_now(self.p, T, "github", {"repos": ["acme/assurance-platform"]},
+        r = scheduler.sync_now(self.p, T, "github", {"repos": ["qualizeal/kf-platform"]},
                                records=NEW_GITHUB, now=NOW)
         self.assertEqual((r["status"], r["ingested"]), ("ok", 1))
         self.assertIsNone(r["next_run"])
         self.assertEqual(runs.get_run(self.p, T, r["run_id"])["source"], "github")
         self.assertIsNone(scheduler.get_schedule(self.p, T, "github"))
-        self.assertIsNotNone(self.p.documents.by_source_uri(T, "github", "github://acme/assurance-platform/docs/refresh.md"))
+        self.assertIsNotNone(self.p.documents.by_source_uri(T, "github", "github://qualizeal/kf-platform/docs/refresh.md"))
         # with a schedule: behaves like a due run (last_run/next_run updated)
         self._schedule_jira()
         r2 = scheduler.sync_now(self.p, T, "jira", records=NEW_JIRA, now=NOW + 5)

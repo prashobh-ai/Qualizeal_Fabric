@@ -1,10 +1,18 @@
-"""Synthetic demo tenants (Section 19).
+"""QualiZeal Knowledge Fabric — the single in-house tenant (F0.1).
 
-A tenant = configuration + ontology pack + source set. NO customer-specific
-code. Every identifier is drawn from ranges the issuing authorities RESERVE
-for documentation (RFC 2606 domains, RFC 5737 IPs, 555-01xx phone numbers,
-ISO 3166 user-assigned country codes), and ``validate_identifiers`` FAILS the
-build if any identifier could resolve to a real entity.
+There is exactly one tenant, ``qualizeal`` (display name *QualiZeal*). The
+tenant guard mechanism (invariant I5) and the ``tenant`` column stay in
+place everywhere, but no Q-* vertical tenants are shipped. Departments,
+teams and roles are attributes of *users* (F2.3), not tenants.
+
+Test-only fixtures that need to prove cross-tenant isolation use an
+ad-hoc, unseeded tenant string (see the test files); nothing shipped in
+this module is user-visible beyond ``qualizeal``.
+
+Every identifier here is drawn from ranges the issuing authorities
+reserve for documentation (RFC 2606 domains, RFC 5737 IPs, 555-01xx
+phone numbers), and ``validate_identifiers`` fails the build if a
+shipped identifier could resolve to a real entity.
 """
 from __future__ import annotations
 
@@ -22,28 +30,17 @@ class TenantConfig:
     budget: float
 
 
+# The one and only product tenant (F0.1).
 DEMO_TENANTS = [
-    # Q-domain tenants (P0.3). Slugs are the canonical identifier used
-    # everywhere; every corpus is synthetic and every user is a role, never a
-    # person. The first three carry demo corpora today; the rest are declared
-    # so they can be selected, seeded and demoed without any code change.
-    TenantConfig("q-quality", "Q-Quality (synthetic)", "quality-assurance", 5.0),
-    TenantConfig("q-airlines", "Q-Airlines (synthetic)", "aviation-ops", 5.0),
-    TenantConfig("q-health", "Q-Health (synthetic)", "health", 5.0),
-    TenantConfig("q-aerotech", "Q-Aerotech (synthetic)", "aviation-ops", 5.0),
-    TenantConfig("q-assure-claims", "Q-Assure Claims (synthetic)", "quality-assurance", 5.0),
-    TenantConfig("q-pharma", "Q-Pharma (synthetic)", "health", 5.0),
-    TenantConfig("q-devicelab", "Q-DeviceLab (synthetic)", "quality-assurance", 5.0),
-    TenantConfig("q-bank", "Q-Bank (synthetic)", "quality-assurance", 5.0),
-    TenantConfig("q-assurance", "Q-Assurance (synthetic)", "quality-assurance", 5.0),
-    TenantConfig("q-cruise", "Q-Cruise (synthetic)", "aviation-ops", 5.0),
-    TenantConfig("q-retail", "Q-Retail (synthetic)", "quality-assurance", 5.0),
+    TenantConfig("qualizeal", "QualiZeal", "quality-assurance", 5.0),
 ]
 
-# --- synthetic corpora: realistic SHAPES, wholly invented content ---------
+# One corpus, three ontology packs represented through the document mix.
+# The `ontology` per document lets the graph extractor apply the right
+# entity/relation vocabulary even though all documents live in one tenant.
 CORPORA = {
-    "q-quality": [
-        ("qa/test-strategy.md", "Test Strategy v3", "text/markdown", ["public"],
+    "qualizeal": [
+        ("qa/test-strategy.md", "Test Strategy v3", "text/markdown", ["public"], "quality-assurance",
          """# Test Strategy
 
 The release regression suite must achieve full requirement traceability before promotion.
@@ -54,20 +51,18 @@ The strategy complies with ISO 29119 for software testing documentation.
 
 Regression scope is selected by impact analysis on the changed components. A component with an open defect blocks its dependent releases until the defect is resolved.
 """),
-        ("qa/traceability-matrix.csv", "Requirement Traceability Matrix", "text/csv", ["public"],
+        ("qa/traceability-matrix.csv", "Requirement Traceability Matrix", "text/csv", ["public"], "quality-assurance",
          "requirement,test_case,release,status\nREQ-100,TC-4501,R2026.1,covered\nREQ-101,TC-4502,R2026.1,covered\nREQ-102,TC-4503,R2026.1,gap\n"),
-        ("qa/defect-policy.md", "Defect Management Policy", "text/markdown", ["restricted"],
+        ("qa/defect-policy.md", "Defect Management Policy", "text/markdown", ["restricted"], "quality-assurance",
          """# Defect Management Policy (Restricted)
 
 Critical defects must be triaged within 4 business hours. A critical defect blocks the affected release.
 Severity is assigned by the QA lead and reviewed at the daily defect council.
 This restricted policy is visible only to curators and admins, not to general askers.
 """),
-        ("qa/standup.transcript", "Release Standup Recording", "audio/transcript", ["public"],
+        ("qa/standup.transcript", "Release Standup Recording", "audio/transcript", ["public"], "quality-assurance",
          "[00:03] The traceability gap on REQ-102 is the last blocker for the release.\n[00:15] We agreed to add test case TC-4503 before promotion.\n[00:41] Coverage sits at ninety four percent, one point short of the acceptance bar.\n"),
-    ],
-    "q-airlines": [
-        ("ops/turnaround.md", "Aircraft Turnaround Procedure", "text/markdown", ["public"],
+        ("ops/turnaround.md", "Aircraft Turnaround Procedure", "text/markdown", ["public"], "aviation-ops",
          """# Turnaround Procedure
 
 The turnaround checklist applies to every narrow-body aircraft between arrival and departure.
@@ -76,11 +71,9 @@ Ground crew requires a completed walkaround inspection before boarding begins.
 Pushback clearance requires confirmation from the flight deck and the ramp coordinator.
 The procedure complies with the operator's airworthiness maintenance program.
 """),
-        ("ops/inspection-log.csv", "Daily Inspection Log", "text/csv", ["public"],
+        ("ops/inspection-log.csv", "Daily Inspection Log", "text/csv", ["public"], "aviation-ops",
          "aircraft,system,check,result\nNW-101,hydraulics,pre-flight,pass\nNW-101,brakes,pre-flight,pass\nNW-102,hydraulics,pre-flight,defer\n"),
-    ],
-    "q-health": [
-        ("clin/triage-protocol.md", "Emergency Triage Protocol", "text/markdown", ["public"],
+        ("clin/triage-protocol.md", "Emergency Triage Protocol", "text/markdown", ["public"], "health",
          """# Triage Protocol
 
 Triage assigns each patient a priority category on arrival. Category 1 requires immediate clinician review.
@@ -88,28 +81,28 @@ Consent must be obtained before any non-emergency procedure.
 
 The protocol is governed by the department's clinical guideline board and reviewed annually.
 """),
-        ("clin/medication-guide.csv", "Medication Dosage Guide", "text/csv", ["restricted"],
+        ("clin/medication-guide.csv", "Medication Dosage Guide", "text/csv", ["restricted"], "health",
          "medication,guideline,max_daily,note\nDrugA,GL-12,200mg,contraindicated with DrugB\nDrugB,GL-13,50mg,monitor renal function\n"),
     ],
 }
 
-# synthetic connector records — automated ingestion from GitHub + Jira (WS1).
-# Identifier-safe: invented org/repo/keys only.
+# Automated ingestion sources for the single tenant. Identifier-safe: invented
+# org/repo/key names only.
 GITHUB_RECORDS = {
-    "q-quality": [
-        {"repo": "acme/assurance-platform", "path": "docs/release-runbook.md", "updated_at": 1700,
+    "qualizeal": [
+        {"repo": "qualizeal/kf-platform", "path": "docs/release-runbook.md", "updated_at": 1700,
          "commit": "a1b2c3", "mime": "text/markdown",
          "content": "# Release Runbook\n\nA release is cut only after the regression suite is green and "
                     "requirement traceability is complete. The runbook requires sign-off from the QA lead "
                     "before promotion to production."},
-        {"repo": "acme/assurance-platform", "path": "CHANGELOG.md", "updated_at": 1710, "commit": "d4e5f6",
+        {"repo": "qualizeal/kf-platform", "path": "CHANGELOG.md", "updated_at": 1710, "commit": "d4e5f6",
          "mime": "text/markdown",
          "content": "# Changelog\n\nR2026.1 closed the traceability gap on REQ-102 by adding automated "
                     "coverage for the checkout component."},
     ],
 }
 JIRA_RECORDS = {
-    "q-quality": [
+    "qualizeal": [
         {"project": "REL", "key": "REL-42", "summary": "Close traceability gap on REQ-102",
          "status": "In Progress", "updated": 1720, "acl": ["public"],
          "description": "REQ-102 has no linked test case. Add TC-4503 and link it to the requirement "
@@ -121,45 +114,37 @@ JIRA_RECORDS = {
     ],
 }
 
-# question bank per tenant (measured, multi-doc where possible, distinct families)
+# One question bank for the fabric; the family tag drives the eval mix.
 QUESTION_BANK = {
-    "q-quality": [
+    "qualizeal": [
         ("what must a release achieve before promotion?", ["qa/test-strategy.md"], "policy"),
         ("what is the acceptance criteria for coverage?", ["qa/test-strategy.md"], "threshold"),
         ("which requirement has a traceability gap?", ["qa/traceability-matrix.csv"], "lookup"),
         ("what blocks the release according to the standup?", ["qa/standup.transcript"], "evidence"),
-        # A restricted-only question so P1.6 suggestions can distinguish
-        # `asker.public` (no `restricted` scope, cannot see it) from
-        # `asker.restricted` (has `restricted` scope, sees it in the chip row).
         ("how fast must critical defects be triaged?", ["qa/defect-policy.md"], "policy"),
-    ],
-    "q-airlines": [
         ("what is required before boarding begins?", ["ops/turnaround.md"], "procedure"),
         ("which aircraft system was deferred?", ["ops/inspection-log.csv"], "lookup"),
-    ],
-    "q-health": [
         ("what does triage category 1 require?", ["clin/triage-protocol.md"], "procedure"),
     ],
 }
 
-# Role-based user ids (P0.3). No people's names anywhere — the subject IS
-# the role. Every tenant carries the same five ids so any script/test/console
-# can address a given role with a stable string.
+# Role-based user ids (F0.1 keeps P0.3's role slugs). No people's names —
+# the subject is the role. `asker.public` cannot see `restricted`;
+# `asker.restricted` is the elevated asker who can (P1.6 direction).
 _ROLE_USERS = [
-    ("asker.public",     ["asker"],   ["public"]),               # base asker, cannot see restricted
-    ("asker.restricted", ["asker"],   ["public", "restricted"]), # elevated asker (test I6 positive path)
+    ("asker.public",     ["asker"],   ["public"]),
+    ("asker.restricted", ["asker"],   ["public", "restricted"]),
     ("curator",          ["curator"], ["public", "restricted"]),
     ("admin",            ["admin"],   ["public", "restricted"]),
-    ("qa-agent",         ["agent"],   ["public"]),               # service principal
+    ("qa-agent",         ["agent"],   ["public"]),
 ]
-DEMO_USERS = {cfg.tenant: list(_ROLE_USERS) for cfg in DEMO_TENANTS}
-DEMO_USERS["qualizeal"] = list(_ROLE_USERS)
+DEMO_USERS = {"qualizeal": list(_ROLE_USERS)}
 
 # identifier-safety: patterns that would indicate a REAL-resolvable identifier
 _UNSAFE = [
     (re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?(?!01[0-9]{2})\d{3}[-.\s]?\d{4}\b"), "real-looking phone"),
     (re.compile(r"@(?!example\.(?:com|org|net)\b)[a-z0-9.-]+\.(?:com|org|net|io|gov)", re.I), "real domain email"),
-    (re.compile(r"\b(?:192\.0\.2\.|198\.51\.100\.|203\.0\.113\.)"), None),   # RFC5737 -> SAFE (ignore)
+    (re.compile(r"\b(?:192\.0\.2\.|198\.51\.100\.|203\.0\.113\.)"), None),   # RFC5737 -> SAFE
 ]
 
 
@@ -167,7 +152,7 @@ def validate_identifiers() -> list[str]:
     """Fail the build if any shipped identifier could resolve to a real entity."""
     problems = []
     for tenant, docs in CORPORA.items():
-        for uri, title, mime, acl, body in docs:
+        for uri, title, mime, acl, ontology, body in docs:
             for pat, label in _UNSAFE:
                 if label is None:
                     continue
@@ -177,7 +162,7 @@ def validate_identifiers() -> list[str]:
 
 
 def seed(platform, tenants: list[str] | None = None) -> dict:
-    """Load demo tenants, users, budgets, corpora and question banks."""
+    """Load the QualiZeal tenant, users, budget, corpus and question bank."""
     from ..ingestion.intake import Intake, IngestWorker
 
     problems = validate_identifiers()
@@ -192,15 +177,12 @@ def seed(platform, tenants: list[str] | None = None) -> dict:
         if cfg.tenant not in chosen:
             continue
         platform.policy.set_budget(cfg.tenant, cfg.budget)
-        # Tenants without a preloaded corpus stay budget-configured and can
-        # receive ingests from bulk upload / connectors just like the seeded
-        # ones — the point of DEMO_TENANTS is that every Q-* slug is valid.
         if cfg.tenant not in CORPORA:
             summary[cfg.tenant] = {"documents": 0, "ingested": 0, "passages": 0}
             continue
-        for uri, title, mime, acl, body in CORPORA[cfg.tenant]:
+        for uri, title, mime, acl, ontology, body in CORPORA[cfg.tenant]:
             raw = intake.canonical(cfg.tenant, "files", f"file://{uri}", title,
-                                   body.encode(), mime=mime, acl=acl, ontology=cfg.ontology)
+                                   body.encode(), mime=mime, acl=acl, ontology=ontology)
             intake.submit(raw)
         for qid, (q, docs, fam) in enumerate(QUESTION_BANK.get(cfg.tenant, [])):
             platform.db.execute(
@@ -210,10 +192,9 @@ def seed(platform, tenants: list[str] | None = None) -> dict:
         summary[cfg.tenant] = {"documents": len(CORPORA[cfg.tenant]),
                                "ingested": len([r for r in res if r["status"] in ("ok", "updated")]),
                                "passages": sum(r.get("passages", 0) for r in res)}
-        # automated multi-source ingestion from GitHub + Jira (WS1)
         sources = []
         if cfg.tenant in GITHUB_RECORDS:
-            sources.append({"source": "github", "config": {"repos": ["acme/assurance-platform"]},
+            sources.append({"source": "github", "config": {"repos": ["qualizeal/kf-platform"]},
                             "records": GITHUB_RECORDS[cfg.tenant]})
         if cfg.tenant in JIRA_RECORDS:
             sources.append({"source": "jira", "config": {"projects": ["REL"]},
@@ -226,9 +207,23 @@ def seed(platform, tenants: list[str] | None = None) -> dict:
 
 
 def principal_for(platform, tenant: str, subject: str) -> Principal:
+    """Mint a signed principal for ``tenant/subject``.
+
+    For the product tenant the roles/scopes come from ``DEMO_USERS``. Any
+    other tenant is treated as a test-only isolation fixture: the same
+    role slugs are honoured (matched by prefix — ``asker.public``,
+    ``asker.restricted``, ``curator``, ``admin``, ``qa-agent``), so the
+    isolation tests never need to mutate the shipped directory.
+    """
     for s, roles, scopes in DEMO_USERS.get(tenant, []):
         if s == subject:
             token = platform.idp.mint(Principal(subject=s, tenant=tenant, roles=roles,
                                                 scopes=scopes, agent="agent" in roles))
+            return platform.idp.authenticate({"token": token})
+    # test-only isolation path — synthesize from the role template
+    for s, roles, scopes in _ROLE_USERS:
+        if s == subject:
+            token = platform.idp.mint(Principal(subject=s, tenant=tenant, roles=list(roles),
+                                                scopes=list(scopes), agent="agent" in roles))
             return platform.idp.authenticate({"token": token})
     raise KeyError(f"no demo user {subject} in {tenant}")

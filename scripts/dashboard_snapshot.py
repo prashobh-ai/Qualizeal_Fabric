@@ -20,7 +20,7 @@ from knowledge_fabric.ingestion.sync import SyncManager
 from knowledge_fabric.surfaces.dashboard import DASHBOARD_HTML
 from knowledge_fabric.tenants import demo
 
-TENANT = "q-quality"
+TENANT = "qualizeal"
 SCRIPT = [
     ("asker.public", "what must a release achieve before promotion?"),
     ("asker.public", "why does a component with an open defect block dependent releases?"),

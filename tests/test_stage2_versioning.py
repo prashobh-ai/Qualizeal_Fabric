@@ -6,7 +6,7 @@ from knowledge_fabric.ingestion.intake import Intake, IngestWorker
 from knowledge_fabric.stores import versioning as ver
 from tests.util import seeded
 
-T = "q-quality"
+T = "qualizeal"
 V1 = ("# Release Gate\n\nA release needs zero open critical defects before promotion.\n\n"
       "Coverage of priority-1 requirements must reach 95 percent.\n")
 V2 = ("# Release Gate\n\nA release needs zero open critical defects before promotion.\n\n"
@@ -113,7 +113,7 @@ class TestHistoryAndDiff(VersioningBase):
 
     def test_history_is_tenant_scoped(self):
         doc_id = self._two_versions()
-        self.assertEqual(ver.history(self.p, "q-airlines", doc_id), [])
+        self.assertEqual(ver.history(self.p, "isolation-check", doc_id), [])
         with self.assertRaises(PermissionError):
             ver.history(self.p, "", doc_id)
 
@@ -211,7 +211,7 @@ class TestRollback(VersioningBase):
         with self.assertRaises(KeyError):
             ver.rollback(self.p, T, "doc_missing", 1, by_subject="curator")
         with self.assertRaises(KeyError):                 # wrong tenant cannot touch it
-            ver.rollback(self.p, "q-airlines", doc_id, 1, by_subject="asker.public")
+            ver.rollback(self.p, "isolation-check", doc_id, 1, by_subject="asker.public")
         with self.assertRaises(ValueError):
             ver.rollback(self.p, T, doc_id, 1, by_subject="")
         # nothing changed
@@ -237,7 +237,7 @@ class TestDatasetAndLineage(VersioningBase):
         self.assertEqual(rows[0]["passage_count"], self.p.passages.count(T))
         self.assertEqual(rows[0]["doc_count"], len(self.p.documents.list(T)))
         # other tenant is untouched
-        self.assertEqual(ver.current_dataset(self.p, "q-airlines"), 0)
+        self.assertEqual(ver.current_dataset(self.p, "isolation-check"), 0)
 
     def test_lineage_resolves_passage_to_origin(self):
         doc_id = self._two_versions()
@@ -259,7 +259,7 @@ class TestDatasetAndLineage(VersioningBase):
         self.assertEqual(lin_old["superseded_by"], "v2")
         self.assertEqual(lin_old["source_version"], "1")
         # tenant isolation: another tenant cannot resolve it
-        self.assertIsNone(ver.lineage(self.p, "q-airlines", live.id))
+        self.assertIsNone(ver.lineage(self.p, "isolation-check", live.id))
         self.assertIsNone(ver.lineage(self.p, T, "pas_nope"))
 
 

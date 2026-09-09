@@ -7,7 +7,7 @@ from knowledge_fabric.governance import authority as auth
 from knowledge_fabric.tenants import demo
 from tests.util import seeded
 
-T = "q-quality"
+T = "qualizeal"
 
 
 def _cite(doc: dict, passage_id: str = "pas_x") -> Citation:
@@ -43,7 +43,7 @@ class TestRanksAndWeights(AuthorityBase):
         self.assertEqual(auth.weight_for(self.p, T, "jira"), 1.0)
         auth.set_source_rank(self.p, T, "jira", 3)                       # upsert
         self.assertEqual(auth.rank_for(self.p, T, "jira"), 3)
-        self.assertEqual(auth.rank_for(self.p, "q-airlines", "jira"), 4)   # other tenant untouched
+        self.assertEqual(auth.rank_for(self.p, "isolation-check", "jira"), 4)   # other tenant untouched
         with self.assertRaises(ValueError):
             auth.set_source_rank(self.p, T, "jira", 0)
         with self.assertRaises(ValueError):
@@ -83,13 +83,13 @@ class TestAuthoritativeFlag(AuthorityBase):
     def test_mark_is_tenant_scoped_and_validated(self):
         doc = self._doc("files")
         with self.assertRaises(KeyError):
-            auth.mark_authoritative(self.p, "q-airlines", doc["id"], True, "asker.public")
+            auth.mark_authoritative(self.p, "isolation-check", doc["id"], True, "asker.public")
         self.assertFalse(auth.is_authoritative(self.p, T, doc["id"]))
         with self.assertRaises(KeyError):
             auth.mark_authoritative(self.p, T, "doc_missing", True, "curator")
         with self.assertRaises(ValueError):
             auth.mark_authoritative(self.p, T, doc["id"], True, "")
-        self.assertFalse(auth.is_authoritative(self.p, "q-airlines", doc["id"]))
+        self.assertFalse(auth.is_authoritative(self.p, "isolation-check", doc["id"]))
 
 
 class TestBoost(AuthorityBase):
@@ -148,8 +148,8 @@ class TestCitationExplanations(AuthorityBase):
 
     def test_citations_from_other_tenant_are_ignored(self):
         files = self._doc("files")
-        self.assertIsNone(auth.authoritative_source(self.p, "q-airlines", [_cite(files)]))
-        self.assertEqual(auth.conflicts(self.p, "q-airlines", [_cite(files)]), [])
+        self.assertIsNone(auth.authoritative_source(self.p, "isolation-check", [_cite(files)]))
+        self.assertEqual(auth.conflicts(self.p, "isolation-check", [_cite(files)]), [])
 
     def test_conflicts_between_sources_of_different_rank(self):
         files, jira, gh = self._doc("files"), self._doc("jira"), self._doc("github")

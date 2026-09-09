@@ -80,7 +80,7 @@ conflicts(platform, tenant, citations) -> [ {"a": doc_id, "b": doc_id, "preferre
    # pairs of cited docs from different sources whose rank differs; preferred = higher authority
 list_ranks(platform, tenant) -> [ {source, rank, weight} ]
 ```
-Tests for all of the above with a seeded platform (`tests.util.seeded(["q-quality"])`).
+Tests for all of the above with a seeded platform (`tests.util.seeded(["qualizeal"])`).
 
 ### C. `knowledge_fabric/ingestion/scheduler.py` + `knowledge_fabric/ingestion/runs.py` + `knowledge_fabric/connectors/admin.py`
 runs (pipeline progress for the UI):

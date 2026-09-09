@@ -31,15 +31,15 @@ from knowledge_fabric.contracts.types import Job
 from knowledge_fabric.ops import readiness
 
 REPO = Path(__file__).resolve().parents[1]
-T = "q-quality"
-OTHER = "q-airlines"
+T = "qualizeal"
+OTHER = "isolation-check"
 
 # A complete, well-shaped AWS environment (no real endpoints are contacted).
 AWS_ENV = {
-    "KF_DB_URL": "postgresql://fabric:s3cr3t-pw@kf-acme-db.abc.eu-west-1.rds.amazonaws.com:5432/fabric?sslmode=require",
-    "KF_OBJECTSTORE": "s3", "KF_S3_BUCKET": "kf-acme-originals-123456789012", "KF_S3_PREFIX": "originals",
-    "KF_QUEUE": "sqs", "KF_SQS_URL": "https://sqs.eu-west-1.amazonaws.com/123456789012/kf-acme-ingest",
-    "KF_SQS_DLQ_URL": "https://sqs.eu-west-1.amazonaws.com/123456789012/kf-acme-ingest-dlq",
+    "KF_DB_URL": "postgresql://fabric:s3cr3t-pw@kf-qualizeal-db.abc.eu-west-1.rds.amazonaws.com:5432/fabric?sslmode=require",
+    "KF_OBJECTSTORE": "s3", "KF_S3_BUCKET": "kf-qualizeal-originals-123456789012", "KF_S3_PREFIX": "originals",
+    "KF_QUEUE": "sqs", "KF_SQS_URL": "https://sqs.eu-west-1.amazonaws.com/123456789012/kf-qualizeal-ingest",
+    "KF_SQS_DLQ_URL": "https://sqs.eu-west-1.amazonaws.com/123456789012/kf-qualizeal-ingest-dlq",
     "AWS_REGION": "eu-west-1",
     "KF_IDP_SECRET": "a" * 48,
     "KF_OIDC_ISSUER": "https://cognito-idp.eu-west-1.amazonaws.com/eu-west-1_abc123",
@@ -189,12 +189,12 @@ class TestFactories(unittest.TestCase):
         pg = database_target({"KF_DB_URL": AWS_ENV["KF_DB_URL"]})
         self.assertEqual(pg["engine"], "postgres")
         self.assertEqual((pg["host"], pg["port"], pg["database"], pg["user"], pg["sslmode"]),
-                         ("kf-acme-db.abc.eu-west-1.rds.amazonaws.com", 5432, "fabric", "fabric", "require"))
+                         ("kf-qualizeal-db.abc.eu-west-1.rds.amazonaws.com", 5432, "fabric", "fabric", "require"))
         self.assertIn("vector", pg["extensions_required"])
         self.assertNotIn("s3cr3t-pw", json.dumps(pg))            # password never leaves the adapter
         db = build_database({"KF_DB_URL": AWS_ENV["KF_DB_URL"]}, lambda path: self.fail("sqlite factory must not run"))
         self.assertIsInstance(db, PostgresNotice)
-        self.assertEqual(db.redacted(), "postgresql://fabric:***@kf-acme-db.abc.eu-west-1.rds.amazonaws.com:5432/fabric")
+        self.assertEqual(db.redacted(), "postgresql://fabric:***@kf-qualizeal-db.abc.eu-west-1.rds.amazonaws.com:5432/fabric")
 
     def test_selection_reports_exactly_what_is_missing(self):
         with mock.patch.object(cloud, "_boto3", None), mock.patch.object(cloud, "pg_driver", lambda: None):

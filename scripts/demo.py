@@ -47,10 +47,10 @@ def main():
     print("  ingest summary:", summary)
 
     svc = AnswerService(p)
-    asker = demo.principal_for(p, "q-quality", "asker.public")
-    curator = demo.principal_for(p, "q-quality", "curator")
-    restricted = demo.principal_for(p, "q-quality", "asker.public")
-    agent = demo.principal_for(p, "q-quality", "qa-agent")
+    asker = demo.principal_for(p, "qualizeal", "asker.public")
+    curator = demo.principal_for(p, "qualizeal", "curator")
+    restricted = demo.principal_for(p, "qualizeal", "asker.public")
+    agent = demo.principal_for(p, "qualizeal", "qa-agent")
 
     rule("2. GROUNDED ANSWER — cited to exact coordinates across modalities")
     show(svc.ask(asker, "what must a release achieve before promotion?"))
@@ -63,8 +63,8 @@ def main():
     rule("4. IDEMPOTENCY (I9) — re-ingesting identical content is a no-op")
     from knowledge_fabric.ingestion.intake import Intake, IngestWorker
     intake, worker = Intake(p), IngestWorker(p, None); worker.intake = intake
-    raw = intake.canonical("q-quality", "files", "file://qa/test-strategy.md", "Test Strategy v3",
-                           demo.CORPORA["q-quality"][0][4].encode(), mime="text/markdown")
+    raw = intake.canonical("qualizeal", "files", "file://qa/test-strategy.md", "Test Strategy v3",
+                           demo.CORPORA["qualizeal"][0][5].encode(), mime="text/markdown")
     intake.submit(raw)
     print("  re-ingest result (same content-hash):", [r["status"] for r in worker.drain()])
 
@@ -76,8 +76,8 @@ def main():
 
     rule("6. PERMISSION-BEFORE-RANKING (I6) — restricted policy never retrieved for an asker")
     qv = p.embedder.embed(["how fast must critical defects be triaged"])[0]
-    hits = p.vindex.search("q-quality", qv, 20, restricted.accessible_acls())
-    leaked = [pid for pid, _ in hits if "restricted" in p.passages.acl_of("q-quality", pid)]
+    hits = p.vindex.search("qualizeal", qv, 20, restricted.accessible_acls())
+    leaked = [pid for pid, _ in hits if "restricted" in p.passages.acl_of("qualizeal", pid)]
     print("  restricted passages in asker's retrieval set:", leaked, "→", "NONE ✓" if not leaked else "LEAK!")
     show(svc.ask(restricted, "how fast must critical defects be triaged?"))
     print("  (same question as curator, who MAY see the restricted policy:)")
@@ -91,61 +91,61 @@ def main():
     rule("8. AGENT PARITY (I7) — an agent uses the SAME gate and is audited")
     a = svc.ask(agent, "what must a release achieve before promotion?")
     show(a)
-    rows = p.audit.for_trace("q-quality", a.trajectory_id)
+    rows = p.audit.for_trace("qualizeal", a.trajectory_id)
     print("  audit row:", {"subject": rows[0]["subject"], "is_agent": rows[0]["is_agent"],
                            "decision": rows[0]["decision"]})
 
     rule("9. BUDGET CAP UNDER A 100-WAY RACE (I12) — atomic, never exceeded")
-    p.policy.set_budget("q-quality", 10.0)
-    p.db.execute("UPDATE budgets SET spent=0 WHERE tenant=?", ("q-quality",))
+    p.policy.set_budget("qualizeal", 10.0)
+    p.db.execute("UPDATE budgets SET spent=0 WHERE tenant=?", ("qualizeal",))
     ok = []
-    ts = [threading.Thread(target=lambda: ok.append(p.policy.try_spend("q-quality", 1.0)))
+    ts = [threading.Thread(target=lambda: ok.append(p.policy.try_spend("qualizeal", 1.0)))
           for _ in range(100)]
     [t.start() for t in ts]; [t.join() for t in ts]
-    print(f"  cap=10  requests=100  granted={sum(ok)}  spent=${p.policy.spent('q-quality')}  "
-          f"→ {'HELD ✓' if p.policy.spent('q-quality') <= 10 else 'BLOWN!'}")
+    print(f"  cap=10  requests=100  granted={sum(ok)}  spent=${p.policy.spent('qualizeal')}  "
+          f"→ {'HELD ✓' if p.policy.spent('qualizeal') <= 10 else 'BLOWN!'}")
 
     rule("10. PROMOTION GATE (I10) — a corrupted citation blocks going live")
     # isolated throwaway platform so the destructive corruption never poisons the demo
     gp = Platform(db_path=":memory:", blob_root="./data/demo-gate")
-    demo.seed(gp, ["q-quality"])
-    good = gate.evaluate(gp, "q-quality", 1)
+    demo.seed(gp, ["qualizeal"])
+    good = gate.evaluate(gp, "qualizeal", 1)
     print("  clean index → passed:", good["passed"], "metrics:", good["metrics"]["citation_coverage"],
           "coverage /", good["metrics"]["recall"], "recall")
-    gate.corrupt_citation_coordinates(gp, "q-quality")
-    bad = gate.promote_if_passes(gp, "q-quality", 2)
+    gate.corrupt_citation_coordinates(gp, "qualizeal")
+    bad = gate.promote_if_passes(gp, "qualizeal", 2)
     print("  corrupted index → passed:", bad["passed"], " promoted:", bad["promoted"],
           " regressions:", bad["regressions"])
 
     rule("11. ECONOMICS & HEALTH — one trace per answer; cost by tier/stage; risk register")
-    m = p.telemetry.metrics("q-quality")
+    m = p.telemetry.metrics("qualizeal")
     print("  answers:", m["answers"], " p95 latency(ms):", m["latency_p95_ms"],
           " total cost:$", m["total_cost"])
     print("  cost by tier:", m["cost_by_tier"])
     print("  cost by stage:", m["cost_by_stage"])
     print("  clarify-back rate:", m["clarify_back_rate"], " citation coverage:", m["citation_coverage"])
-    print("  risk register:", health.risk_register(p, "q-quality"))
+    print("  risk register:", health.risk_register(p, "qualizeal"))
 
     # ================= leadership-agreed capabilities (roadmap) =========
     rule("12. WS1 CONNECT — automated ingestion from GitHub + Jira + files (one canonical record)")
     from knowledge_fabric.ingestion.sync import SyncManager
     from knowledge_fabric.connectors import registry as _reg
     sm = SyncManager(p)
-    print("  seed already auto-synced:", summary["q-quality"].get("connectors"))
+    print("  seed already auto-synced:", summary["qualizeal"].get("connectors"))
     print("  registry (plug-and-play):", _reg.available())
     # a NEW Jira issue arrives -> only the delta is ingested (change detection)
     new_issue = dict(project="REL", key="REL-99", summary="Audit every promotion decision",
                      status="Open", updated=999999, acl=["public"],
                      description="The audit trail must capture every promotion decision with its trace id.")
-    delta = sm.sync("q-quality", "jira", {"projects": ["REL"]},
-                    records=demo.JIRA_RECORDS["q-quality"] + [new_issue])
+    delta = sm.sync("qualizeal", "jira", {"projects": ["REL"]},
+                    records=demo.JIRA_RECORDS["qualizeal"] + [new_issue])
     print(f"  new Jira issue REL-99 → pulled {delta['pulled']} (delta only), ingested {delta['ingested']}")
-    print("  source health:", sm.source_health("q-quality"))
+    print("  source health:", sm.source_health("qualizeal"))
 
     rule("13. WS2 DECIDE — 4-level model selector with an explainable WHY + EN/FR/ES/JA")
     p.model = __import__("knowledge_fabric.adapters.model", fromlist=["MockModelClient"]).MockModelClient()
-    p.policy.set_budget("q-quality", 100.0)
-    p.db.execute("UPDATE budgets SET spent=0 WHERE tenant=?", ("q-quality",))
+    p.policy.set_budget("qualizeal", 100.0)
+    p.db.execute("UPDATE budgets SET spent=0 WHERE tenant=?", ("qualizeal",))
     for q in ["what is the coverage target?",
               "why does a component with an open defect block its dependent releases?",
               "quel est le critère d acceptation pour la couverture?"]:
@@ -158,7 +158,7 @@ def main():
     rule("14. WS3 PROVE — caching savings by technique + filtered analytics (24h/7d, user, role)")
     # repeat a question to show the answer cache saving model spend
     svc.ask(asker, "what is the coverage target?")
-    a7 = p.telemetry.analytics("q-quality", "7d")
+    a7 = p.telemetry.analytics("qualizeal", "7d")
     print(f"  answers={a7['answers']} tokens_in={a7['tokens_in']} tokens_out={a7['tokens_out']} "
           f"cost=${a7['total_cost']} saved=${a7['total_cost_saved']} cache_hit_rate={a7['cache_hit_rate']}")
     print("  routing by level:", a7["routing_by_level"])
@@ -166,7 +166,7 @@ def main():
     print("  savings by technique:", a7["savings_by_technique"])
     print("  per role:", a7["per_role"])
     print("  by language:", a7["by_language"])
-    a24 = p.telemetry.analytics("q-quality", "24h", role="asker")
+    a24 = p.telemetry.analytics("qualizeal", "24h", role="asker")
     print(f"  filter[24h, role=asker]: answers={a24['answers']} users={list(a24['per_user'])}")
 
 
@@ -178,7 +178,7 @@ def main():
     from knowledge_fabric.connectors import admin as _cadmin
     from knowledge_fabric.health import kb_eval as _kb
     from knowledge_fabric.ingestion.intake import Intake as _Intake, IngestWorker as _Worker
-    T = "q-quality"
+    T = "qualizeal"
     p.cache.invalidate(T)   # fresh numbers for the Stage-2 sections (no answer-cache replay)
 
     rule("15. MULTISTEP & CONDITIONAL REASONING — decomposed, every step governed")
@@ -196,8 +196,8 @@ def main():
 
     rule("16. QUERY COMPLEXITY (simple / medium / complex) → MULTI-MODEL ROUTING, tokens in/out")
     p.cache.invalidate(T)
-    mo = demo.principal_for(p, "q-health", "asker.public")
-    nia = demo.principal_for(p, "q-airlines", "asker.public")
+    mo = demo.principal_for(p, "isolation-check", "asker.public")
+    nia = demo.principal_for(p, "isolation-check", "asker.public")
     for prin, q in [(mo, "what does triage category 1 require?"),
                     (nia, "which aircraft system was deferred?"),
                     (asker, "why does a component with an open defect block its dependent releases and what must a release achieve?")]:
@@ -216,7 +216,7 @@ def main():
 
     rule("18. DATA VERSIONING — history · diff · rollback · dataset versions · lineage")
     intake, worker = _Intake(p), _Worker(p, None); worker.intake = intake
-    v2 = demo.CORPORA[T][0][4].replace("95% automated coverage", "97% automated coverage")
+    v2 = demo.CORPORA[T][0][5].replace("95% automated coverage", "97% automated coverage")
     intake.submit(intake.canonical(T, "files", "file://qa/test-strategy.md", "Test Strategy v3", v2.encode(), mime="text/markdown"))
     worker.drain()
     hist = _ver.history(p, T, strat["id"])
@@ -245,7 +245,7 @@ def main():
     print("  last run steps:", [s["name"] for s in last["steps"]])
 
     rule("20. CURATOR — knowledge-base evaluation suggests what to delete / review / keep")
-    intake.upload(T, "duplicate-strategy.md", demo.CORPORA[T][0][4].encode()); worker.drain()
+    intake.upload(T, "duplicate-strategy.md", demo.CORPORA[T][0][5].encode()); worker.drain()
     dq = _kb.data_quality(p, T)
     print("  data quality:", {k: dq[k] for k in ("coverage", "freshness", "contradictions", "gaps", "connectedness",
                                                   "traceability", "readability_avg", "duplicate_rate", "citation_coverage")})

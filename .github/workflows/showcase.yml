@@ -1,0 +1,58 @@
+# F0.2 — GitHub Pages showcase workflow.
+#
+# Builds `dist/showcase/` on every push to main and deploys it to Pages.
+# Until F8.1 lands, the build assembles a placeholder shell — the product
+# chrome with a "showcase build pending" banner — so the URL stops rendering
+# the README through Jekyll. F8.1 replaces the placeholder builder with the
+# real static snapshot of the product.
+#
+# One manual step for the repository owner (in the GitHub web UI):
+#   Settings → Pages → Build and deployment → Source: GitHub Actions.
+# Until that toggle is flipped, this workflow deploys but the branch build
+# still wins.
+name: showcase
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  pages: write
+  id-token: write
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build showcase (placeholder until F8.1)
+        run: python scripts/build_showcase.py --out dist/showcase
+
+      - name: Verify no external URLs and required data files present
+        run: python scripts/verify_showcase.py --dir dist/showcase
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/showcase
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
