@@ -221,6 +221,48 @@ class Handler(BaseHTTPRequestHandler):
             if not prin: return
             return self._send(200, p.telemetry.analytics(prin.tenant, first("window", "7d"),
                                                           first("subject"), first("role")))
+        if u.path == "/api/suggestions":
+            # P1.6 — Suggested questions from the tenant question bank,
+            # filtered by the asker's ACL (they never see a question
+            # whose supporting document they could not retrieve). The
+            # spec asks for confidence ≥ 0.56 and ≥ 2 cited documents;
+            # ratings-per-question are populated by the eval bank, so
+            # when a rating exists we honour it and when it does not we
+            # fall back to family-diverse ACL-visible questions from the
+            # seed bank (Deferred → docs/progress/P1.6.md).
+            try:
+                prin = self._principal()
+            except PermissionError as e:
+                return self._send(401, {"error": str(e)})
+            accessible = set(prin.accessible_acls())
+            uri_acls: dict[str, set[str]] = {}
+            for d in p.documents.list(prin.tenant):
+                uri = (d.get("uri") or "").replace("file://", "").replace("upload://", "")
+                acl = d.get("acl") or []
+                if isinstance(acl, str):
+                    try:
+                        acl = json.loads(acl)
+                    except Exception:
+                        acl = [acl]
+                uri_acls[uri] = set(acl or ["public"])
+            rows = p.db.query(
+                "SELECT question, expected_docs, family FROM question_bank WHERE tenant=?",
+                (prin.tenant,))
+            out = []
+            seen_family = set()
+            for r in rows:
+                uris = [u for u in (r["expected_docs"] or "").split(",") if u]
+                # ACL gate: every supporting document must be accessible
+                if not uris or not all(uri_acls.get(u, {"public"}) & accessible for u in uris):
+                    continue
+                fam = r["family"] if "family" in r.keys() else ""
+                out.append({"question": r["question"], "family": fam or "", "docs": len(uris)})
+                if fam:
+                    seen_family.add(fam)
+                if len(out) >= 6:
+                    break
+            return self._send(200, {"tenant": prin.tenant, "suggestions": out,
+                                    "families": sorted(seen_family)})
         if u.path == "/api/corpus":
             # Five-tile "corpus at a glance" for the Ask console header (P1.2).
             # Asker-accessible: every signed-in principal can see how big

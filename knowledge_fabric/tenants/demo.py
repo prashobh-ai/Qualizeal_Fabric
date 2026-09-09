@@ -128,6 +128,10 @@ QUESTION_BANK = {
         ("what is the acceptance criteria for coverage?", ["qa/test-strategy.md"], "threshold"),
         ("which requirement has a traceability gap?", ["qa/traceability-matrix.csv"], "lookup"),
         ("what blocks the release according to the standup?", ["qa/standup.transcript"], "evidence"),
+        # A restricted-only question so P1.6 suggestions can distinguish
+        # `asker.public` (no `restricted` scope, cannot see it) from
+        # `asker.restricted` (has `restricted` scope, sees it in the chip row).
+        ("how fast must critical defects be triaged?", ["qa/defect-policy.md"], "policy"),
     ],
     "q-airlines": [
         ("what is required before boarding begins?", ["ops/turnaround.md"], "procedure"),

@@ -544,5 +544,78 @@ class TestCorpusTiles(unittest.TestCase):
         self.assertIn("animateNumber", ASK_HTML)
 
 
+class TestSuggestedQuestions(unittest.TestCase):
+    """P1.6 — suggested questions from the question bank, ACL-filtered.
+
+    Under the P0.3 role mapping, `asker.public` carries only the `public`
+    scope while `asker.restricted` also carries the `restricted` scope
+    (an elevated asker who can see restricted documents). A question
+    whose supporting document is restricted therefore appears for
+    `asker.restricted` but not for `asker.public` — so `asker.public`'s
+    suggestion set is a strict subset of `asker.restricted`'s. This is
+    the same acceptance the P1.6 spec asks for, expressed for this
+    session's role slugs (the direction is documented in
+    `docs/progress/P1.6.md`).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.platform = seeded([T])
+        cls._saved = (http_api._platform, http_api._svc)
+        http_api._platform = cls.platform
+        http_api._svc = AnswerService(cls.platform)
+        cls.srv = ThreadingHTTPServer(("127.0.0.1", 0), http_api.Handler)
+        cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}"
+        cls.thread = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.tokens = {s: cls._login(s) for s in ("asker.public", "asker.restricted")}
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.srv.server_close()
+        http_api._platform, http_api._svc = cls._saved
+
+    @classmethod
+    def _call(cls, method, path, body=None, token=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(cls.base + path, data=data, method=method)
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, r.headers.get("Content-Type", ""), r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers.get("Content-Type", ""), e.read()
+
+    @classmethod
+    def _login(cls, subject):
+        code, _, raw = cls._call("POST", "/login", {"tenant": T, "subject": subject})
+        assert code == 200, raw
+        return json.loads(raw)["token"]
+
+    def _suggestions(self, token):
+        code, _, raw = self._call("GET", "/api/suggestions", token=token)
+        self.assertEqual(code, 200)
+        return {s["question"] for s in json.loads(raw)["suggestions"]}
+
+    def test_public_subset_of_elevated_asker(self):
+        pub = self._suggestions(self.tokens["asker.public"])
+        elev = self._suggestions(self.tokens["asker.restricted"])
+        self.assertTrue(pub.issubset(elev),
+                        f"asker.public {pub - elev} not a subset of asker.restricted {elev}")
+        # Strict subset: the restricted-doc question is only seen by the
+        # elevated asker.
+        self.assertLess(pub, elev,
+                        "asker.public should see fewer questions than asker.restricted")
+        # And the restricted question is in the elevated set specifically.
+        self.assertIn("how fast must critical defects be triaged?", elev)
+        self.assertNotIn("how fast must critical defects be triaged?", pub)
+
+    def test_at_most_six(self):
+        for u in ("asker.public", "asker.restricted"):
+            self.assertLessEqual(len(self._suggestions(self.tokens[u])), 6)
+
+
 if __name__ == "__main__":
     unittest.main()

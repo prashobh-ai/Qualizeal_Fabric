@@ -165,10 +165,18 @@ const SAMPLE_EXTRA=[
 const KIND_CLS={answer:'good',clarify:'warn',gap:'bad'};
 const CPLX_CLS={simple:'good',medium:'warn',complex:'violet'};
 
-function samples(){const t=(KF.session&&KF.session.tenant)||$('#kf-tenant').value;
- const qs=(KF.DIR.questions[t]||[]).concat(t==='q-quality'?SAMPLE_EXTRA:[]);
- $('#samples').innerHTML=qs.map(q=>'<span class="chip" data-q="'+esc(q)+'">'+esc(q)+'</span>').join('');
+function _renderChips(qs){$('#samples').innerHTML=qs.map(q=>'<span class="chip" data-q="'+esc(q)+'">'+esc(q)+'</span>').join('');
  KF.$$('#samples .chip').forEach(c=>c.onclick=()=>{$('#question').value=c.dataset.q;$('#question').focus()})}
+async function samples(){
+ // P1.6 — signed-in asker gets ACL-filtered suggestions from the question
+ // bank (a restricted asker never sees a question whose supporting document
+ // they could not retrieve). Unsigned users see the seed-bank preview.
+ if(KF.session){try{const j=await api('/api/suggestions');
+  const qs=(j.suggestions||[]).map(s=>s.question).slice(0,6);
+  if(qs.length){_renderChips(qs);return}}catch(e){/* fall through to seed */}}
+ const t=(KF.session&&KF.session.tenant)||$('#kf-tenant').value;
+ const qs=(KF.DIR.questions[t]||[]).concat(t==='q-quality'?SAMPLE_EXTRA:[]);
+ _renderChips(qs)}
 
 function markers(text){return esc(text).replace(/\[(\d+)\]/g,(m,n)=>'<sup class="ref" data-n="'+n+'">['+n+']</sup>')}
 
