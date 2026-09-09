@@ -1,145 +1,294 @@
-"""Showcase builder (F0.2 placeholder; F8.1 will replace this).
+"""Showcase builder (F8.1) — the interactive product on GitHub Pages.
 
-Assembles ``dist/showcase/`` — a static site served by GitHub Pages under
-``/Qualizeal_Fabric/``. Until F8.1 lands, this ships only the QualiZeal
-product shell with a "showcase build pending" banner, so the Pages URL
-stops rendering the README through Jekyll immediately.
+Builds ``dist/showcase/`` — a static site that runs the REAL product surfaces
+(Workspace, Admin, Curator, Sign-in, Telemetry) with no server. It does this by:
 
-* Zero-dependency: pure standard library.
-* Relative asset paths only (`./assets/...`) — works under any base path.
-* Adds `.nojekyll` at the site root so GitHub Pages serves the artifact
-  as-is without Jekyll's underscore-file rewriting.
+1. seeding an in-memory fabric with the self-contained demo corpus and driving
+   a realistic spread of questions across roles (so telemetry, analytics and
+   usage are populated);
+2. starting the real HTTP handler in-process and capturing the actual JSON that
+   every endpoint returns, per role, into ``snapshot.json``;
+3. emitting each surface's real HTML into its own folder, with ``/static``
+   asset paths rewritten to relative and the browser-side ``engine.js`` injected
+   before the runtime — the engine answers every ``fetch`` from the snapshot;
+4. writing a brand landing page (explainability + a chat widget) at the root.
 
-Usage
------
-    python scripts/build_showcase.py --out dist/showcase
+Zero third-party dependencies; standard library + the project only. Relative
+asset paths, ``.nojekyll`` at the root, no external URLs — so it serves under
+any base path (the Pages repo path, localhost, an AWS subpath).
+
+Usage:  python scripts/build_showcase.py --out dist/showcase
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
-
+import threading
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
 
 ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, ROOT)
+os.environ.setdefault("KF_MODEL_MODE", "mock")  # deterministic, no network
+
+from knowledge_fabric.app import Platform                                 # noqa: E402
+from knowledge_fabric.answer.service import AnswerService                 # noqa: E402
+from knowledge_fabric.evaluation import bank as qbank                     # noqa: E402
+from knowledge_fabric.surfaces import http_api                           # noqa: E402
+from knowledge_fabric.surfaces.admin_ui import ADMIN_HTML                # noqa: E402
+from knowledge_fabric.surfaces.ask_ui import ASK_HTML                    # noqa: E402
+from knowledge_fabric.surfaces.curator_ui import CURATOR_HTML            # noqa: E402
+from knowledge_fabric.surfaces.dashboard import DASHBOARD_HTML           # noqa: E402
+from knowledge_fabric.surfaces.signin_ui import SIGNIN_HTML              # noqa: E402
+from knowledge_fabric.tenants import demo                               # noqa: E402
+from tests.fixtures import synthetic_corpus                             # noqa: E402
+
 BRAND_SRC = os.path.join(ROOT, "knowledge_fabric", "surfaces", "static", "assets", "brand")
+ENGINE_SRC = os.path.join(ROOT, "scripts", "showcase", "engine.js")
+LANDING_SRC = os.path.join(ROOT, "scripts", "showcase", "landing.html")
+TENANT = "qualizeal"
 
-PLACEHOLDER_INDEX = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QualiZeal Knowledge Fabric</title>
-<link rel="icon" href="./assets/brand/logo/favicon-32.png">
-<style>
-  :root{
-    --ink:#0D1523;--body:#2B3B4A;--mut:#5A6B7C;--line:#CFE0F0;--panel:#F4F8FC;
-    --blue:#0096FF;--blue-tint:#EAF4FF;--coral:#F53E5A;--good:#0CA678;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:#FFF;color:var(--body);
-       font:14px/1.5 Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-       font-variant-numeric:tabular-nums}
-  header{height:56px;border-bottom:1px solid var(--line);display:flex;align-items:center;
-         gap:14px;padding:0 22px;background:#FFF;position:sticky;top:0;z-index:5}
-  header .lockup{height:18px;width:auto}
-  header .sub{color:var(--mut);font-size:12px}
-  main{max-width:1080px;margin:0 auto;padding:24px 22px}
-  .banner{background:var(--blue-tint);border:1px solid var(--line);border-left:4px solid var(--blue);
-          border-radius:12px;padding:16px 18px;color:var(--ink);margin-bottom:18px;font-size:14px}
-  .banner b{color:var(--blue)}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
-  .card{background:#FFF;border:1px solid var(--line);border-radius:12px;padding:16px 18px;
-        box-shadow:0 1px 2px rgba(13,21,35,.06),0 8px 24px rgba(13,21,35,.06)}
-  .card h3{margin:0 0 6px;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
-  .card p{margin:0;color:var(--ink);font-size:14px}
-  .lvl{display:inline-flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-  .lvl span{display:inline-block;padding:2px 10px;border-radius:8px;font-size:12px;font-weight:600;color:#FFF}
-  .lvl .l0{background:var(--good)}.lvl .l1{background:var(--blue)}
-  .lvl .l2{background:#7048E8}.lvl .l3{background:var(--coral)}
-  .watermark{position:fixed;right:22px;bottom:56px;opacity:.04;pointer-events:none;height:220px}
-  .watermark img{height:100%;width:auto}
-  footer{border-top:1px solid var(--line);height:40px;display:flex;align-items:center;
-         justify-content:space-between;padding:0 22px;color:var(--mut);font-size:12px;background:#FFF}
-</style>
-</head>
-<body>
-<header>
-  <img class="lockup" src="./assets/brand/logo/qualizeal-lockup.png" alt="QualiZeal Knowledge Fabric">
-  <span class="sub">Internal · Showcase</span>
-</header>
+# A realistic run so analytics / usage / cache have something to show.
+SCRIPT = [
+    ("asker.public", "what must a release achieve before promotion?"),
+    ("asker.public", "why does a component with an open defect block dependent releases?"),
+    ("asker.public", "which requirement has a traceability gap?"),
+    ("asker.public", "what blocks the release according to the standup?"),
+    ("asker.public", "what must a release achieve before promotion?"),          # cache hit
+    ("curator", "how fast must critical defects be triaged?"),
+    ("curator", "compare acceptance criteria across the strategy and the runbook"),
+    ("asker.public", "how fast must critical defects be triaged?"),
+    ("asker.restricted", "what must a release achieve before promotion and which requirement has a traceability gap?"),
+    ("asker.public", "quel est le critère d acceptation pour la couverture?"),   # FR
+    ("asker.public", "¿cuál es el criterio de aceptación para la cobertura?"),   # ES
+    ("qa-agent", "what is required before a release is promoted?"),
+    ("asker.public", "what is the capital of France?"),                          # gap
+    ("curator", "why does an open defect block its dependent releases?"),
+]
 
-<main>
-  <div class="banner">
-    <b>Showcase build pending.</b>
-    This page will be replaced by the interactive product showcase (Workspace, Admin
-    and Curator surfaces backed by a browser-side engine) once phase&nbsp;F8 lands.
-    In the meantime, the fabric is running against real data on any laptop with
-    <code>make up</code>.
-  </div>
+# Extra questions to bake answers for (so the chatbot / Workspace answer freely).
+EXTRA_Q = [
+    "what must a release achieve before promotion?",
+    "how fast must critical defects be triaged?",
+    "which requirement has a traceability gap?",
+    "why does a component with an open defect block dependent releases?",
+    "compare acceptance criteria across the strategy and the runbook",
+    "what blocks the release according to the standup?",
+    "what must a release achieve before promotion and which requirement has a traceability gap?",
+]
 
-  <div class="grid">
-    <div class="card">
-      <h3>What it is</h3>
-      <p>QualiZeal's own in-house Knowledge Fabric — documents, products, services,
-      GitHub, Jira, Confluence and files behind one governed answer path, with
-      voice in and out, analytics that explain which model answered and why.</p>
-    </div>
-    <div class="card">
-      <h3>Four answer levels</h3>
-      <p>The router uses no model. Complexity and relationships decide the level;
-      the card always says which and why.</p>
-      <div class="lvl">
-        <span class="l0">Look it up</span><span class="l1">Quote it</span>
-        <span class="l2">Summarise it</span><span class="l3">Reason about it</span>
-      </div>
-    </div>
-    <div class="card">
-      <h3>One image, three deployments</h3>
-      <p>GitHub Pages (browser-side engine), a laptop (<code>make up</code>) and
-      AWS from the same code. Runtime stays standard-library only (ADR&#8209;0001).</p>
-    </div>
-  </div>
-</main>
+ROLES = ["asker.public", "asker.restricted", "curator", "admin", "qa-agent"]
+# GET endpoints to capture per bucket (askers use only the /api/* set).
+ASKER_GETS = ["/api/corpus"]
+CURATOR_GETS = ["/curator/quality", "/curator/gaps", "/curator/documents", "/admin/sources"]
+ADMIN_GETS = ["/admin/users", "/admin/runs?limit=12", "/admin/audit?limit=40", "/admin/sources",
+              "/admin/connectors", "/admin/budget", "/admin/authority",
+              "/curator/quality", "/curator/gaps", "/curator/documents"]
 
-<div class="watermark"><img src="./assets/brand/logo/qualizeal-mark.png" alt=""></div>
 
-<footer>
-  <span>&copy; QualiZeal. All rights reserved.</span>
-  <span>QualiZeal Knowledge Fabric · Internal</span>
-</footer>
-</body>
-</html>
-"""
+def _seed():
+    p = http_api.Platform(db_path=":memory:", blob_root=os.path.join(ROOT, "data", "showcase-blobs"))
+    demo.seed(p, [TENANT])
+    synthetic_corpus.load_into(p, TENANT)          # self-contained demo knowledge
+    p.policy.set_budget(TENANT, 20.0)
+    qbank.generate(p, TENANT)                      # bank from the loaded corpus
+    svc = AnswerService(p)
+    for subject, q in SCRIPT:
+        try:
+            svc.ask(demo.principal_for(p, TENANT, subject), q)
+        except Exception:
+            pass
+    return p
+
+
+class _Client:
+    """Tiny in-process HTTP client against the running showcase server."""
+
+    def __init__(self, base):
+        self.base = base
+
+    def call(self, method, path, body=None, token=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.base + path, data=data, method=method)
+        if token:
+            req.add_header("Authorization", "Bearer " + token)
+        if data is not None:
+            req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            try:
+                return e.code, json.loads(e.read() or b"{}")
+            except Exception:
+                return e.code, {}
+
+
+def _bake(client) -> dict:
+    snap: dict = {"login": {}, "get": {"asker": {}, "curator": {}, "admin": {}},
+                  "answers": {}, "galaxy": {}, "usage": {}, "suggestions": {},
+                  "analytics": {}, "versions": {}, "doctor": {}, "bank": []}
+    tokens = {}
+    for subject in ROLES:
+        code, j = client.call("POST", "/login", {"tenant": TENANT, "subject": subject})
+        if code == 200 and "token" in j:
+            snap["login"][subject] = j
+            tokens[subject] = j["token"]
+
+    def norm(q):
+        import re
+        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", q.lower())).strip()
+
+    # answers + galaxy (bake as the broad asker so citations are full)
+    asker = tokens.get("asker.public")
+    restricted = tokens.get("asker.restricted")
+    seen = set()
+    # every accessible suggestion + the curated extras
+    for tok, key in ((asker, "public"), (restricted, "restricted")):
+        if not tok:
+            continue
+        _, s = client.call("GET", "/api/suggestions", token=tok)
+        snap["suggestions"][key] = s
+        for item in (s.get("suggestions") or []):
+            q = item.get("question")
+            if q:
+                EXTRA_Q.append(q)
+    for q in EXTRA_Q:
+        n = norm(q)
+        if n in seen:
+            continue
+        seen.add(n)
+        _, a = client.call("POST", "/ask", {"question": q}, token=asker)
+        if a and a.get("kind"):
+            snap["answers"][n] = a
+            snap["bank"].append(q)
+            tid = a.get("trajectory_id")
+            if tid:
+                _, g = client.call("GET", "/api/galaxy?trace_id=" + tid, token=asker)
+                snap["galaxy"][tid] = g
+
+    # per-subject usage
+    for subject in ROLES:
+        tok = tokens.get(subject)
+        if not tok:
+            continue
+        _, u = client.call("GET", "/api/usage", token=tok)
+        snap["usage"][subject] = u
+
+    # role-bucketed GETs
+    for path in ASKER_GETS:
+        _, snap["get"]["asker"][path.split("?")[0]] = client.call("GET", path, token=asker)
+    for path in CURATOR_GETS:
+        code, j = client.call("GET", path, token=tokens.get("curator"))
+        if code == 200:
+            snap["get"]["curator"][path.split("?")[0]] = j
+    for path in ADMIN_GETS:
+        code, j = client.call("GET", path, token=tokens.get("admin"))
+        if code == 200:
+            snap["get"]["admin"][path.split("?")[0]] = j
+
+    # analytics per window (curator+admin dashboards / telemetry page)
+    for win in ("24h", "7d", "all"):
+        code, j = client.call("GET", "/api/analytics?window=" + win, token=tokens.get("admin"))
+        if code == 200:
+            snap["analytics"][win] = j
+            snap["analytics"][{"24h": "24h", "7d": "7d", "all": "all"}[win]] = j
+
+    # doctor targets (admin AWS-readiness panel)
+    for target in ("", "aws", "model", "cache"):
+        code, j = client.call("GET", "/admin/doctor?target=" + target, token=tokens.get("admin"))
+        if code == 200:
+            snap["doctor"][target] = j
+
+    # versions for the curator doc table (first few documents)
+    docs = (snap["get"]["curator"].get("/curator/documents") or {}).get("documents") or []
+    for d in docs[:8]:
+        did = d.get("document_id") or d.get("id")
+        if did:
+            code, j = client.call("GET", "/curator/versions?document_id=" + did, token=tokens.get("curator"))
+            if code == 200:
+                snap["versions"][did] = j
+    return snap
+
+
+# --------------------------------------------------------------------------
+# emit surfaces
+# --------------------------------------------------------------------------
+def _rewrite(html: str, surface: str, asset_prefix: str, engine_href: str) -> str:
+    """Rewrite a served page for static hosting: relative assets + the engine."""
+    html = html.replace("/static/assets/", asset_prefix)
+    # root links (the lockup on standalone pages) point at the showcase root.
+    html = html.replace('href="/"', 'href="../"')
+    inject = ('<script>window.KF_SURFACE=%r;</script>\n<script src="%s"></script>\n'
+              % (surface, engine_href))
+    # the engine must run before ANY page script (it installs the fetch shim and
+    # sets KF_BASE). Inject before the first <script> — works for the shared
+    # runtime pages and the standalone telemetry page alike.
+    i = html.find("<script")
+    if i < 0:
+        return html
+    return html[:i] + inject + html[i:]
 
 
 def build(out_dir: str) -> None:
-    """Write the placeholder showcase into `out_dir`."""
     out = os.path.abspath(out_dir)
     if os.path.isdir(out):
         shutil.rmtree(out)
     os.makedirs(out, exist_ok=True)
+    open(os.path.join(out, ".nojekyll"), "w").close()
+    shutil.copytree(BRAND_SRC, os.path.join(out, "assets", "brand"))
+    shutil.copy(ENGINE_SRC, os.path.join(out, "engine.js"))
 
-    # .nojekyll so Pages serves the artifact untouched
-    with open(os.path.join(out, ".nojekyll"), "w") as fh:
-        fh.write("")
+    # seed + run server + bake
+    p = _seed()
+    # The seed run populated telemetry (incl. cache hits, so analytics shows the
+    # savings story). Clear the answer cache before baking so every demo answer
+    # runs fresh retrieval and carries a populated galaxy.
+    p.cache.invalidate(TENANT)
+    saved = (http_api._platform, http_api._svc)
+    http_api._platform = p
+    http_api._svc = AnswerService(p)
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), http_api.Handler)
+    base = "http://127.0.0.1:%d" % srv.server_address[1]
+    th = threading.Thread(target=srv.serve_forever, daemon=True)
+    th.start()
+    try:
+        snap = _bake(_Client(base))
+    finally:
+        srv.shutdown(); srv.server_close()
+        http_api._platform, http_api._svc = saved
 
-    # Brand assets (relative path used by index.html) — copied whole, so the
-    # transparent PNG lockup/mark and favicons under logo/ come along.
-    brand_dst = os.path.join(out, "assets", "brand")
-    shutil.copytree(BRAND_SRC, brand_dst)
+    with open(os.path.join(out, "snapshot.json"), "w", encoding="utf-8") as fh:
+        json.dump(snap, fh, separators=(",", ":"), default=str)
 
-    # The placeholder index
+    surfaces = {"workspace": ASK_HTML, "admin": ADMIN_HTML, "curator": CURATOR_HTML,
+                "signin": SIGNIN_HTML, "dashboard": DASHBOARD_HTML}
+    for name, html in surfaces.items():
+        folder = os.path.join(out, name)
+        os.makedirs(folder, exist_ok=True)
+        page = _rewrite(html, name, "../assets/", "../engine.js")
+        with open(os.path.join(folder, "index.html"), "w", encoding="utf-8") as fh:
+            fh.write(page)
+
+    # landing page (root) — brand hero, explainability + chat widget
+    with open(LANDING_SRC, encoding="utf-8") as fh:
+        landing = fh.read()
+    landing = landing.replace("__BANK__", json.dumps(snap["bank"][:8]))
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as fh:
-        fh.write(PLACEHOLDER_INDEX)
+        fh.write(landing)
 
-    print(f"showcase built at {out} ({len(os.listdir(out))} entries)")
+    entries = sorted(os.listdir(out))
+    print("showcase built at %s\n  %s\n  answers=%d galaxies=%d bank=%d"
+          % (out, ", ".join(entries), len(snap["answers"]), len(snap["galaxy"]), len(snap["bank"])))
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv=None):
     ap = argparse.ArgumentParser(prog="build_showcase")
-    ap.add_argument("--out", default="dist/showcase", help="output directory")
+    ap.add_argument("--out", default="dist/showcase")
     args = ap.parse_args(argv)
     build(args.out)
     return 0

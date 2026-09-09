@@ -1,6 +1,13 @@
-"""F0.2 — the Pages showcase builder and its verifier."""
+"""F8.1 — the interactive Pages showcase builder and its verifier.
+
+The showcase is the real product surfaces served as static files, backed by a
+baked ``snapshot.json`` and the browser-side ``engine.js``. These tests build
+it once and assert the structure, the snapshot contents, and that the verifier
+guards the invariants (no external URLs, required files present).
+"""
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
@@ -10,52 +17,97 @@ from scripts import build_showcase, verify_showcase
 
 
 class TestShowcaseBuilder(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="kf-showcase-")
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="kf-showcase-")
+        cls.out = os.path.join(cls.tmp, "showcase")
+        build_showcase.build(cls.out)
 
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
 
-    def test_build_produces_required_files(self):
-        out = os.path.join(self.tmp, "showcase")
-        build_showcase.build(out)
-        self.assertTrue(os.path.isfile(os.path.join(out, ".nojekyll")))
-        self.assertTrue(os.path.isfile(os.path.join(out, "index.html")))
-        self.assertTrue(os.path.isfile(os.path.join(out, "assets", "brand",
-                                                     "logo", "qualizeal-lockup.png")))
-        self.assertTrue(os.path.isfile(os.path.join(out, "assets", "brand",
-                                                     "logo", "qualizeal-mark.png")))
-        with open(os.path.join(out, "index.html"), encoding="utf-8") as fh:
-            html = fh.read()
-        # relative paths only; no external URLs; base-path agnostic
+    def _read(self, *parts):
+        with open(os.path.join(self.out, *parts), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_required_files_and_surfaces(self):
+        for req in (".nojekyll", "index.html", "engine.js", "snapshot.json"):
+            self.assertTrue(os.path.isfile(os.path.join(self.out, req)), f"missing {req}")
+        for name in ("workspace", "admin", "curator", "signin", "dashboard"):
+            self.assertTrue(os.path.isfile(os.path.join(self.out, name, "index.html")),
+                            f"missing {name}/index.html")
+        for logo in ("qualizeal-lockup.png", "qualizeal-mark.png"):
+            self.assertTrue(os.path.isfile(os.path.join(self.out, "assets", "brand", "logo", logo)))
+
+    def test_snapshot_has_every_role_and_endpoint(self):
+        snap = json.loads(self._read("snapshot.json"))
+        for key in ("login", "get", "answers", "galaxy", "usage", "suggestions", "analytics"):
+            self.assertIn(key, snap)
+        for subject in ("asker.public", "asker.restricted", "curator", "admin"):
+            self.assertIn(subject, snap["login"])
+        # admin bucket carries the governance reads; curator the quality reads
+        self.assertIn("/admin/users", snap["get"]["admin"])
+        self.assertIn("/curator/quality", snap["get"]["curator"])
+        # at least one baked answer carries a full card + a lit galaxy
+        self.assertTrue(snap["answers"])
+        lit = [g for g in snap["galaxy"].values() if g.get("nodes")]
+        self.assertTrue(lit, "no galaxy has any activated nodes")
+
+    def test_landing_is_explainable_and_relative(self):
+        html = self._read("index.html")
+        self.assertNotIn("Showcase build pending", html)          # the placeholder is gone
         self.assertIn("./assets/brand/logo/qualizeal-lockup.png", html)
+        self.assertIn("./engine.js", html)
+        for w in ("Look it up", "Quote it", "Summarise it", "Reason about it"):
+            self.assertIn(w, html)                                # the four reader levels
+        self.assertIn("Open the Workspace", html)
+        self.assertIn('id="cbtn"', html)                          # the chatbot widget
         self.assertNotIn("http://", html)
         self.assertNotIn("https://", html)
-        # copyright + wordmark + banner
-        self.assertIn("QualiZeal. All rights reserved.", html)
-        self.assertIn("QualiZeal Knowledge Fabric", html)
-        self.assertIn("Showcase build pending", html)
+
+    def test_surface_pages_inject_the_engine(self):
+        for name in ("workspace", "admin", "curator", "signin", "dashboard"):
+            html = self._read(name, "index.html")
+            self.assertIn("window.KF_SURFACE=%r" % name, html)
+            self.assertIn('src="../engine.js"', html)
+            self.assertIn("../assets/brand/", html)               # relative assets
+            self.assertNotIn("/static/assets/", html)             # rewritten away
+            self.assertNotIn("http://", html)
+            self.assertNotIn("https://", html)
+
+    def test_engine_has_no_external_urls(self):
+        eng = self._read("engine.js")
+        self.assertNotIn("http://", eng)
+        self.assertNotIn("https://", eng)
 
     def test_verifier_passes_clean_build(self):
-        out = os.path.join(self.tmp, "showcase")
-        build_showcase.build(out)
-        self.assertEqual(verify_showcase.verify(out), [])
+        self.assertEqual(verify_showcase.verify(self.out), [])
 
     def test_verifier_fails_on_external_url(self):
-        out = os.path.join(self.tmp, "showcase")
-        build_showcase.build(out)
-        with open(os.path.join(out, "index.html"), "a", encoding="utf-8") as fh:
-            fh.write('<script src="https://example.com/x.js"></script>')
-        errors = verify_showcase.verify(out)
-        self.assertTrue(errors)
-        self.assertIn("https://example.com/x.js", " ".join(errors))
+        tmp = tempfile.mkdtemp(prefix="kf-showcase-ext-")
+        try:
+            out = os.path.join(tmp, "showcase")
+            build_showcase.build(out)
+            with open(os.path.join(out, "index.html"), "a", encoding="utf-8") as fh:
+                fh.write('<script src="https://example.com/x.js"></script>')
+            errors = verify_showcase.verify(out)
+            self.assertTrue(any("example.com" in e for e in errors))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_verifier_fails_on_missing_nojekyll(self):
-        out = os.path.join(self.tmp, "showcase")
-        build_showcase.build(out)
-        os.remove(os.path.join(out, ".nojekyll"))
-        errors = verify_showcase.verify(out)
-        self.assertTrue(any(".nojekyll" in e for e in errors))
+    def test_verifier_fails_on_missing_files(self):
+        tmp = tempfile.mkdtemp(prefix="kf-showcase-miss-")
+        try:
+            out = os.path.join(tmp, "showcase")
+            build_showcase.build(out)
+            os.remove(os.path.join(out, ".nojekyll"))
+            os.remove(os.path.join(out, "snapshot.json"))
+            errors = verify_showcase.verify(out)
+            self.assertTrue(any(".nojekyll" in e for e in errors))
+            self.assertTrue(any("snapshot.json" in e for e in errors))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

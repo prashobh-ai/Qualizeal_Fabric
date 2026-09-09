@@ -176,6 +176,17 @@ pre{background:var(--qz-panel);border:1px solid var(--line);border-radius:10px;p
 RUNTIME_JS = r"""
 const KF=(()=>{
  const DIR=window.KF_DIRECTORY||{tenants:[],users:{},questions:{}};
+ // Deploy-base indirection: '' on the server, the repo path under GitHub
+ // Pages, '/kf' behind an AWS subpath. Set by the host page before this runs;
+ // every navigation and API path is prefixed with it so one build serves any base.
+ const BASE=(window.KF_BASE||'');
+ // Optional path remap for embeds where the surfaces live at different paths
+ // (the static showcase serves the Workspace at /workspace, not /). Default
+ // identity, so the server is unaffected.
+ function route(p){return (window.KF_ROUTES&&window.KF_ROUTES[p])||p}
+ function nav(p){location.href=BASE+route(p)}
+ function applyBase(){document.querySelectorAll('[data-path]').forEach(a=>{
+  a.setAttribute('href',BASE+route(a.getAttribute('data-path')))})}
  const $=s=>document.querySelector(s);
  const $$=s=>Array.from(document.querySelectorAll(s));
  const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -191,13 +202,14 @@ const KF=(()=>{
  function save(s){session=s;try{if(s)sessionStorage.setItem('kf.session',JSON.stringify(s));else sessionStorage.removeItem('kf.session')}catch(e){}}
  async function api(path,opts){opts=opts||{};const headers={'Content-Type':'application/json'};
   if(session&&session.token)headers.Authorization='Bearer '+session.token;
-  const r=await fetch(path,{method:opts.method||'GET',headers,body:opts.body===undefined?undefined:JSON.stringify(opts.body)});
+  const url=(path.charAt(0)==='/'?BASE:'')+path;
+  const r=await fetch(url,{method:opts.method||'GET',headers,body:opts.body===undefined?undefined:JSON.stringify(opts.body)});
   let j={};try{j=await r.json()}catch(e){j={error:'non-JSON response'}}
   if(!r.ok){const err=new Error(j.error||('HTTP '+r.status));err.status=r.status;err.body=j;throw err}
   return j}
  const FABRIC='qualizeal';   // single in-house fabric (no tenant selector, D5)
  async function login(subject){const j=await api('/login',{method:'POST',body:{tenant:FABRIC,subject}});save(j);renderWho();return j}
- function logout(){save(null);renderWho();location.href='/signin'}
+ function logout(){save(null);renderWho();nav('/signin')}
  function hasRole(){const roles=(session&&session.roles)||[];for(const r of arguments)if(roles.indexOf(r)>=0)return true;return false}
  let toastTimer=null;
  function toast(msg,kind){let t=$('#kf-toast');if(!t){t=document.createElement('div');t.id='kf-toast';document.body.appendChild(t)}
@@ -206,22 +218,22 @@ const KF=(()=>{
  function gate(err,need){const box=$('#kf-gate');if(!box)return;
   if(!err){box.className='hidden';box.innerHTML='';return}
   const who=session?esc(session.subject)+' <span class="pill">'+esc((session.roles||[]).join(', ')||'no role')+'</span>':'nobody';
-  if(err.status===401){box.className='gate';box.innerHTML='<h4>Sign in required</h4>Please <a href="/signin">sign in to QualiZeal Knowledge Fabric</a>. '+esc(err.message||'')}
-  else if(err.status===403){box.className='gate bad';box.innerHTML='<h4>This console needs the <code>'+esc(need||'admin')+'</code> role</h4>You are signed in as '+who+'. The platform answered: <i>'+esc(err.message)+'</i>. <a href="/signin">Switch user</a>.'}
+  if(err.status===401){box.className='gate';box.innerHTML='<h4>Sign in required</h4>Please <a href="'+BASE+'/signin">sign in to QualiZeal Knowledge Fabric</a>. '+esc(err.message||'')}
+  else if(err.status===403){box.className='gate bad';box.innerHTML='<h4>This console needs the <code>'+esc(need||'admin')+'</code> role</h4>You are signed in as '+who+'. The platform answered: <i>'+esc(err.message)+'</i>. <a href="'+BASE+'/signin">Switch user</a>.'}
   else{box.className='gate bad';box.innerHTML='<h4>Request failed</h4>'+esc(err.message||String(err))}}
  function applyRoleNav(){const roles=(session&&session.roles)||[];
   $$('#kf-nav a[data-roles]').forEach(a=>{const need=(a.getAttribute('data-roles')||'').split(',');
    a.style.display=(session&&need.some(r=>roles.indexOf(r)>=0))?'':'none'})}
  function renderWho(){const w=$('#kf-who');if(!w)return;applyRoleNav();
-  if(!session){w.innerHTML='<a class="btn primary sm" href="/signin">Sign in</a>';return}
+  if(!session){w.innerHTML='<a class="btn primary sm" href="'+BASE+'/signin">Sign in</a>';return}
   w.innerHTML='<b>'+esc(session.subject)+'</b>'+
    (session.roles||[]).map(r=>'<span class="pill '+({admin:'violet',curator:'info',asker:'good',agent:'warn'}[r]||'')+'">'+esc(r)+'</span>').join('')+
    '<button class="btn sm" id="kf-logout">Sign out</button>';
   $('#kf-logout').onclick=()=>{logout();if(window.KF_ON_SESSION)window.KF_ON_SESSION(null)}}
- function initBar(opts){opts=opts||{};load();renderWho()}
+ function initBar(opts){opts=opts||{};load();applyBase();renderWho()}
  function bar(pctv,color){const v=Math.max(0,Math.min(1,Number(pctv)||0));return '<div class="trk"><i style="width:'+(v*100).toFixed(0)+'%;background:'+(color||'var(--accent)')+'"></i></div>'}
  function level(x,good,warn){x=Number(x)||0;return x>=good?'good':x>=warn?'warn':'bad'}
- return {DIR,$,$$,esc,num,pct,money,ms,when,ago,api,login,logout,hasRole,toast,gate,initBar,bar,level,get session(){return session}};
+ return {DIR,$,$$,esc,num,pct,money,ms,when,ago,api,login,logout,hasRole,toast,gate,initBar,applyBase,nav,base:()=>BASE,bar,level,get session(){return session}};
 })();
 """
 
@@ -237,7 +249,7 @@ _SHELL = """<!doctype html>
 <style>__CSS__
 __EXTRA_CSS__</style></head><body>
 <header class="topbar">
-  <a class="lockup-link" href="/" title="QualiZeal Knowledge Fabric"><img class="lockup" src="__LOCKUP__" alt="QualiZeal Knowledge Fabric"></a>
+  <a class="lockup-link" href="/" data-path="/" title="QualiZeal Knowledge Fabric"><img class="lockup" src="__LOCKUP__" alt="QualiZeal Knowledge Fabric"></a>
   <nav id="kf-nav">__NAV__</nav>
   <span class="spacer"></span>
   <span id="kf-who"></span>
@@ -280,7 +292,7 @@ def shell(title: str, subtitle: str, body: str, script: str, active: str, extra_
     for label, path, roles in NAV:
         active_attr = _ACTIVE if label == active else ""
         roles_attr = "" if roles is None else ' data-roles="{}"'.format(",".join(roles))
-        parts.append('<a href="{}"{}{}>{}</a>'.format(path, active_attr, roles_attr, label))
+        parts.append('<a href="{0}" data-path="{0}"{1}{2}>{3}</a>'.format(path, active_attr, roles_attr, label))
     nav = "".join(parts)
     directory = json.dumps(demo_directory(), sort_keys=True).replace("</", "<\\/")
     browser_title = f"QualiZeal Knowledge Fabric — {active}"

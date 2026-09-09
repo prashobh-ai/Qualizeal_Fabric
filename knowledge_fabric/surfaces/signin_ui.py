@@ -72,7 +72,7 @@ const ROLES=[
 ];
 async function signIn(subject){
  try{const s=await KF.login(subject);toast('Signed in as '+s.subject,'good');
-  location.href = (s.roles&&s.roles.indexOf('admin')>=0)?'/admin':'/';}
+  KF.nav((s.roles&&s.roles.indexOf('admin')>=0)?'/admin':'/');}
  catch(e){$('#su-err').textContent='Sign-in failed: '+e.message;}
 }
 // Demo identity picker (showcase sign-in) — the corporate directory replaces
@@ -85,7 +85,7 @@ $('#signin-form').addEventListener('submit',e=>{e.preventDefault();
  // real IdP once the corporate directory is connected.
  signIn(u);});
 KF.initBar({});
-if(KF.session){location.href='/';}
+if(KF.session){KF.nav('/');}
 """
 
 _SHELL = """<!doctype html>

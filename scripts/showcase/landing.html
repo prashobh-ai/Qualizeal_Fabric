@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QualiZeal Knowledge Fabric</title>
+<link rel="icon" href="./assets/brand/logo/favicon-32.png">
+<style>
+:root{
+ --ink:#0D1523;--body:#2B3B4A;--mut:#5A6B7C;--soft:#7C8DA1;--line:#CFE0F0;--line2:#DCE4EC;
+ --panel:#F4F8FC;--surface:#FFFFFF;--blue:#0096FF;--blue-deep:#00619F;--blue-tint:#EAF4FF;
+ --coral:#F53E5A;--coral-tint:#FDEEF1;--green:#0CA678;--purple:#7048E8;--amber:#E8A23A;--canvas:#0E1A45;
+ --font:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+ --shadow:0 1px 2px rgba(13,21,35,.06),0 10px 30px rgba(13,21,35,.08);
+}
+*{box-sizing:border-box}html{color-scheme:light}
+body{margin:0;background:var(--surface);color:var(--body);font:15px/1.6 var(--font);font-variant-numeric:tabular-nums}
+a{color:var(--blue-deep);text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+header{height:56px;border-bottom:1px solid var(--line);display:flex;align-items:center;position:sticky;top:0;background:var(--surface);z-index:20}
+header .wrap{display:flex;align-items:center;gap:14px;width:100%}
+header .lockup{height:18px}
+header .sub{color:var(--mut);font-size:12px}
+header .spacer{flex:1}
+.btn{display:inline-block;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;
+ padding:8px 14px;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit}
+.btn:hover{border-color:var(--blue);text-decoration:none}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.primary:hover{background:var(--blue-deep);border-color:var(--blue-deep)}
+.hero{padding:60px 0 30px;text-align:center;background:linear-gradient(180deg,var(--blue-tint),var(--surface) 320px)}
+.hero h1{font-size:40px;line-height:1.15;margin:0 0 12px;color:var(--ink);font-weight:700;letter-spacing:-.5px}
+.hero p{font-size:17px;color:var(--body);max-width:680px;margin:0 auto 22px}
+.hero .cta{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.levels{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:26px 0 0}
+.lvl{display:inline-flex;align-items:center;gap:7px;padding:6px 13px;border-radius:999px;font-size:13px;font-weight:600;color:#fff}
+.lvl.l0{background:var(--green)}.lvl.l1{background:var(--blue)}.lvl.l2{background:var(--purple)}.lvl.l3{background:var(--coral)}
+section.block{padding:44px 0;border-top:1px solid var(--line2)}
+h2{font-size:24px;color:var(--ink);margin:0 0 6px;letter-spacing:-.3px}
+.lead{color:var(--mut);margin:0 0 24px;max-width:640px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow)}
+.card h3{margin:0 0 6px;font-size:15px;color:var(--ink)}
+.card p{margin:0;color:var(--body);font-size:14px}
+.card .tag{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--soft);font-weight:700;margin-bottom:10px}
+.steps{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:8px}
+@media(max-width:760px){.steps{grid-template-columns:1fr 1fr}}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center}
+.step .n{width:26px;height:26px;border-radius:50%;background:var(--blue);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;margin-bottom:8px}
+.step .t{font-weight:700;font-size:13px;color:var(--ink)}
+.step .d{font-size:12px;color:var(--mut);margin-top:3px}
+.roles{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:760px){.roles{grid-template-columns:1fr}}
+.role{border:1px solid var(--line);border-radius:14px;padding:20px;background:var(--surface);box-shadow:var(--shadow);display:flex;flex-direction:column;gap:8px}
+.role h3{margin:0;font-size:16px;color:var(--ink)}
+.role p{margin:0;color:var(--body);font-size:13px;flex:1}
+.role .go{margin-top:8px}
+footer{border-top:1px solid var(--line);padding:22px 0;color:var(--mut);font-size:12px}
+footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.watermark{position:fixed;right:22px;bottom:56px;opacity:.04;pointer-events:none;height:220px;z-index:0}
+.watermark img{height:100%}
+/* chatbot widget (bottom-left) */
+.cbtn{position:fixed;left:20px;bottom:20px;z-index:50;width:56px;height:56px;border-radius:50%;background:var(--blue);
+ border:none;color:#fff;font-size:24px;cursor:pointer;box-shadow:0 8px 24px rgba(0,150,255,.4)}
+.cbtn:hover{background:var(--blue-deep)}
+.cpanel{position:fixed;left:20px;bottom:88px;z-index:50;width:min(380px,92vw);height:520px;max-height:76vh;background:var(--surface);
+ border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 60px rgba(13,21,35,.24);display:none;flex-direction:column;overflow:hidden}
+.cpanel.open{display:flex}
+.chead{padding:13px 15px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.chead .lk{height:16px}.chead .x{margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:var(--mut)}
+.cbody{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:var(--panel)}
+.cmsg{max-width:88%;padding:8px 12px;border-radius:12px;font-size:14px;line-height:1.5}
+.cmsg.u{align-self:flex-end;background:var(--blue);color:#fff;border-bottom-right-radius:3px}
+.cmsg.a{align-self:flex-start;background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:3px}
+.cmsg.a .lvl-pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#fff;margin-bottom:5px}
+.cmsg .cites{margin-top:6px;font-size:11px;color:var(--mut)}
+.cmsg .cites b{color:var(--blue-deep)}
+.csugg{display:flex;flex-wrap:wrap;gap:6px}
+.csugg button{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer;color:var(--body);text-align:left;font-family:inherit}
+.csugg button:hover{border-color:var(--blue)}
+.cfoot{padding:10px;border-top:1px solid var(--line);display:flex;gap:8px}
+.cfoot input{flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit}
+.cfoot button{border:none;background:var(--blue);color:#fff;border-radius:9px;padding:8px 14px;font-weight:600;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <img class="lockup" src="./assets/brand/logo/qualizeal-lockup.png" alt="QualiZeal Knowledge Fabric">
+    <span class="sub">Internal · Showcase</span>
+    <span class="spacer"></span>
+    <a class="btn" href="./signin/">Sign in</a>
+    <a class="btn primary" href="./workspace/">Open Workspace</a>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <h1>One governed answer path<br>for everything QualiZeal knows.</h1>
+    <p>Documents, products, services, GitHub, Jira, Confluence and files behind a single
+       explainable answer — every response says which level answered, why, from which sources,
+       and what it cost. Ask below, or open the Workspace.</p>
+    <div class="cta">
+      <a class="btn primary" href="./workspace/">Open the Workspace</a>
+      <a class="btn" href="./dashboard/">See the analytics</a>
+    </div>
+    <div class="levels" title="The router uses no model — complexity and relationships decide the level.">
+      <span class="lvl l0">Look it up</span><span class="lvl l1">Quote it</span>
+      <span class="lvl l2">Summarise it</span><span class="lvl l3">Reason about it</span>
+    </div>
+  </div>
+</div>
+
+<section class="block"><div class="wrap">
+  <h2>Explainable by design</h2>
+  <p class="lead">No black box. Every answer carries a card that says exactly how it was produced —
+     and the reader only ever sees a plain level word, never a model or a number.</p>
+  <div class="grid">
+    <div class="card"><div class="tag">The level</div><h3>Four reader levels</h3>
+      <p>Look it up · Quote it · Summarise it · Reason about it. Complexity and how many documents
+         the evidence spans decide the level — the router itself uses no model.</p></div>
+    <div class="card"><div class="tag">The why</div><h3>Answered by, and why</h3>
+      <p>Each answer names the level, a one-line reason, the model that ran, whether it moved levels,
+         the trust score across five grounding signals, tokens, cost and cache savings.</p></div>
+    <div class="card"><div class="tag">The graph</div><h3>The answer galaxy</h3>
+      <p>Every answer lights up the entities and relationships it actually used, so you can see the
+         evidence behind it — and open “Why did the AI say this?” for the five-step trace.</p></div>
+  </div>
+</div></section>
+
+<section class="block"><div class="wrap">
+  <h2>The governed path, end to end</h2>
+  <p class="lead">The same path runs for every question and every role — permission-filtered retrieval,
+     grounding, routing, and a cited answer.</p>
+  <div class="steps">
+    <div class="step"><div class="n">1</div><div class="t">Permission filter</div><div class="d">retrieval scoped to your access</div></div>
+    <div class="step"><div class="n">2</div><div class="t">Ground</div><div class="d">evidence + five trust signals</div></div>
+    <div class="step"><div class="n">3</div><div class="t">Route</div><div class="d">the right level, explained</div></div>
+    <div class="step"><div class="n">4</div><div class="t">Compose</div><div class="d">answer from passages only</div></div>
+    <div class="step"><div class="n">5</div><div class="t">Cite</div><div class="d">every claim to a source</div></div>
+  </div>
+</div></section>
+
+<section class="block"><div class="wrap">
+  <h2>Sign in by role</h2>
+  <p class="lead">Role-based access — an asker sees only their own knowledge and usage; curators shape
+     the corpus; admins run provisioning and governance.</p>
+  <div class="roles">
+    <div class="role"><h3>Workspace · Asker</h3><p>Ask the fabric, read grounded answers with citations,
+      and see your own usage. Restricted askers never see what they can’t retrieve.</p>
+      <a class="btn primary go" href="./workspace/">Open Workspace</a></div>
+    <div class="role"><h3>Curator</h3><p>Quality dashboards, gaps and contradictions, the review queue,
+      user feedback, documents and versions — decide what stays, what’s authoritative, what rolls back.</p>
+      <a class="btn go" href="./curator/">Open Curator</a></div>
+    <div class="role"><h3>Admin</h3><p>Connectors and sync, ingestion runs, bulk load and delete, users and
+      access, budgets, the audit trail and cloud-readiness checks.</p>
+      <a class="btn go" href="./admin/">Open Admin</a></div>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <span>&copy; QualiZeal. All rights reserved.</span>
+  <span>QualiZeal Knowledge Fabric · Internal</span>
+</div></footer>
+
+<div class="watermark"><img src="./assets/brand/logo/qualizeal-mark.png" alt=""></div>
+
+<!-- chatbot widget -->
+<button class="cbtn" id="cbtn" title="Ask the knowledge fabric">&#128172;</button>
+<div class="cpanel" id="cpanel">
+  <div class="chead">
+    <img class="lk" src="./assets/brand/logo/qualizeal-lockup.png" alt="QualiZeal">
+    <button class="x" id="cx">&times;</button>
+  </div>
+  <div class="cbody" id="cbody"></div>
+  <div class="cfoot">
+    <input id="cinput" placeholder="Ask the knowledge fabric…" autocomplete="off">
+    <button id="csend">Ask</button>
+  </div>
+</div>
+
+<script>window.KF_SURFACE='';</script>
+<script src="./engine.js"></script>
+<script>
+(function(){
+ var BANK=__BANK__;
+ var LVL={lookup:['Look it up','#0CA678'],fast:['Quote it','#0096FF'],reason:['Summarise it','#7048E8'],
+   escalation:['Reason about it','#F53E5A']};
+ var esc=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])})};
+ var BASE=window.KF_BASE||'';var TOKEN=null;
+ var body=document.getElementById('cbody');
+ function add(cls,html){var d=document.createElement('div');d.className='cmsg '+cls;d.innerHTML=html;body.appendChild(d);body.scrollTop=body.scrollHeight;return d}
+ function levelWord(name){var k=String(name||'');if(k.indexOf('reasoning')===0)return['Reason about it','#F53E5A'];
+   return LVL[k]||(k==='gap'?['Outside the knowledge base','#7C8DA1']:k==='clarify'?['Needs a clearer question','#7C8DA1']:['—','#7C8DA1'])}
+ function suggest(){
+   var html='<div>Hi — I answer from QualiZeal’s knowledge fabric. Try:</div><div class="csugg">'+
+     BANK.slice(0,4).map(function(q){return '<button data-q="'+esc(q)+'">'+esc(q)+'</button>'}).join('')+'</div>';
+   var d=add('a',html);
+   d.querySelectorAll('button').forEach(function(b){b.onclick=function(){ask(b.getAttribute('data-q'))}});
+ }
+ async function login(){if(TOKEN)return TOKEN;
+   var r=await fetch(BASE+'/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenant:'qualizeal',subject:'asker.public'})});
+   var j=await r.json();TOKEN=j.token;return TOKEN}
+ async function ask(q){
+   if(!q)return;add('u',esc(q));document.getElementById('cinput').value='';
+   var typing=add('a','<i style="color:#7C8DA1">thinking…</i>');
+   try{await login();
+     var r=await fetch(BASE+'/ask',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},body:JSON.stringify({question:q})});
+     var a=await r.json();typing.remove();
+     var lw=levelWord((a.why||{}).level_name);
+     var cites=(a.citations||[]).slice(0,3).map(function(c){return '<b>'+esc(c.document_title)+'</b> '+esc(c.coordinate_render||'')}).join(' · ');
+     var pill=a.kind==='answer'?'<span class="lvl-pill" style="background:'+lw[1]+'">'+esc(lw[0])+'</span><br>':'';
+     add('a',pill+esc(a.answer_text||'')+(cites?'<div class="cites">'+cites+'</div>':''));
+   }catch(e){typing.remove();add('a','Something went wrong: '+esc(e.message))}
+ }
+ document.getElementById('cbtn').onclick=function(){var p=document.getElementById('cpanel');p.classList.toggle('open');
+   if(p.classList.contains('open')&&!body.childNodes.length)suggest()};
+ document.getElementById('cx').onclick=function(){document.getElementById('cpanel').classList.remove('open')};
+ document.getElementById('csend').onclick=function(){ask(document.getElementById('cinput').value.trim())};
+ document.getElementById('cinput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();ask(this.value.trim())}});
+})();
+</script>
+</body>
+</html>

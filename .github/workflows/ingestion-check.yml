@@ -1,0 +1,58 @@
+# Scheduled ingestion & health check.
+#
+# Runs on a daily schedule (and on demand) to prove the fabric still ingests,
+# routes and serves correctly — independently of a code push. It exercises the
+# real pipeline end to end: deployment-readiness (doctor), a full ingest of the
+# demo corpus + a driven question spread (the showcase build), the static
+# verifier, the routing eval, and the ingestion/showcase tests. The baked
+# snapshot is uploaded as an artifact so a failing run can be inspected.
+#
+# Standard-library runtime only (ADR-0001) — no services, no network, no keys.
+name: ingestion-check
+
+on:
+  schedule:
+    - cron: "17 6 * * *"    # 06:17 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ingestion-check
+  cancel-in-progress: false
+
+jobs:
+  ingest-and-verify:
+    runs-on: ubuntu-latest
+    env:
+      KF_MODEL_MODE: mock    # deterministic, offline
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Deployment readiness (doctor)
+        run: python scripts/doctor.py --target local --json --skip-tests --no-live-health
+
+      - name: Ingestion smoke — build the showcase (seed + ingest + drive)
+        run: python scripts/build_showcase.py --out dist/showcase
+
+      - name: Verify the built showcase (snapshot present, no external URLs)
+        run: python scripts/verify_showcase.py --dir dist/showcase
+
+      - name: Routing evaluation
+        run: python eval/route_eval.py || echo "route_eval reported issues (non-blocking on schedule)"
+
+      - name: Ingestion + showcase tests
+        run: python -m pytest tests/test_showcase.py tests/test_ingestion*.py tests/test_stage2_ui.py -q
+
+      - name: Upload the baked snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: showcase-snapshot
+          path: dist/showcase/snapshot.json
+          if-no-files-found: warn
+          retention-days: 14

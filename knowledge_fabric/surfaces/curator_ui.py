@@ -94,8 +94,17 @@ _DRAWER = """
 </div>
 """
 
+_FEEDBACK = card("User feedback to check",
+                 '<div class="muted small">Answers readers flagged as unhelpful (&#128078;). Each one is a candidate '
+                 'gap, a wrong route, or a document to fix.</div>'
+                 '<div class="tablewrap" style="margin-top:8px"><table id="feedback-table">'
+                 '<thead><tr><th>When</th><th>Reader</th><th>Question</th><th>Level</th><th>Note</th></tr></thead>'
+                 '<tbody id="feedback-rows"><tr><td colspan="5" class="empty">No negative feedback — readers are happy.</td></tr></tbody>'
+                 '</table></div>', "feedback-card")
+
 _BODY = (f'<div class="grid" style="grid-template-columns:2fr 1fr">{_QUALITY}{_RISK}</div>'
          f'<div style="margin-top:14px">{_QUEUES}</div>'
+         f'<div style="margin-top:14px">{_FEEDBACK}</div>'
          f'{_DOCS}'
          f'<div class="grid two" style="margin-top:14px">{_ADD}{_AUTHORITY}</div>'
          f'{_DRAWER}')
@@ -159,9 +168,13 @@ function renderDocs(){const f=$('#doc-filter').value,s=$('#doc-search').value.to
 
 function renderAuthority(ranks){$('#authority-ranks').innerHTML=(ranks||[]).map(r=>'<span class="pill '+(r.rank===1?'good':'')+'" title="weight '+esc(r.weight)+'">'+esc(r.source)+' · rank '+esc(r.rank)+(r.overridden?' *':'')+'</span>').join('')||'<span class="empty">defaults</span>'}
 
+function renderFeedback(rows){const fb=rows||[];
+ $('#feedback-rows').innerHTML=fb.length?fb.map(f=>'<tr><td class="mono small">'+esc(ago(f.at))+'</td><td>'+esc(f.subject||'—')+'</td><td>'+esc(f.question||'')+'</td><td>'+(f.level?'<span class="pill">'+esc(f.level)+'</span>':'')+'</td><td class="small">'+esc(f.note||'')+'</td></tr>').join('')
+  :'<tr><td colspan="5" class="empty">No negative feedback — readers are happy.</td></tr>'}
+async function loadFeedback(){try{const d=await api('/curator/feedback');renderFeedback(d.feedback)}catch(e){}}
 async function loadAll(){try{
  const [q,g,d]=await Promise.all([api('/curator/quality'),api('/curator/gaps'),api('/curator/documents')]);gate(null);
- renderQuality(q);renderQueues(g);DOCS=d.documents||[];DATASET=d.dataset_version||0;renderDocs();renderAuthority(d.authority)}
+ renderQuality(q);renderQueues(g);DOCS=d.documents||[];DATASET=d.dataset_version||0;renderDocs();renderAuthority(d.authority);loadFeedback()}
  catch(e){gate(e,'curator');if(e.status!==401&&e.status!==403)toast(e.message,'bad')}}
 
 async function decide(doc_id,decision,extra){const doc=DOCS.find(x=>x.document_id===doc_id)||{title:doc_id};
