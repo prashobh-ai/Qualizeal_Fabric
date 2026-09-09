@@ -146,7 +146,7 @@ const KIND_CLS={answer:'good',clarify:'warn',gap:'bad'};
 const CPLX_CLS={simple:'good',medium:'warn',complex:'violet'};
 
 function samples(){const t=(KF.session&&KF.session.tenant)||$('#kf-tenant').value;
- const qs=(KF.DIR.questions[t]||[]).concat(t==='acme-assurance'?SAMPLE_EXTRA:[]);
+ const qs=(KF.DIR.questions[t]||[]).concat(t==='q-quality'?SAMPLE_EXTRA:[]);
  $('#samples').innerHTML=qs.map(q=>'<span class="chip" data-q="'+esc(q)+'">'+esc(q)+'</span>').join('');
  KF.$$('#samples .chip').forEach(c=>c.onclick=()=>{$('#question').value=c.dataset.q;$('#question').focus()})}
 

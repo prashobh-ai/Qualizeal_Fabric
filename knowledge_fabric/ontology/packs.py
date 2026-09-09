@@ -53,8 +53,8 @@ AVIATION_OPS = OntologyPack(
     },
 )
 
-HEALTH_PROVIDER = OntologyPack(
-    name="health-provider", version=1,
+HEALTH = OntologyPack(
+    name="health", version=1,
     entity_types=["Policy", "Procedure", "Patient", "Medication", "Guideline", "Department"],
     relation_types=["indicated_for", "contraindicated_with", "governed_by", "administered_by"],
     typed_facts={"dosage": ["Medication", "Patient", "Guideline"]},
@@ -69,7 +69,7 @@ HEALTH_PROVIDER = OntologyPack(
     },
 )
 
-PACKS = {p.name: p for p in (QUALITY_ASSURANCE, AVIATION_OPS, HEALTH_PROVIDER)}
+PACKS = {p.name: p for p in (QUALITY_ASSURANCE, AVIATION_OPS, HEALTH)}
 
 
 def get_pack(name: str) -> OntologyPack:

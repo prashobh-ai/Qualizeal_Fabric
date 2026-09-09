@@ -27,8 +27,8 @@ from tests.util import seeded
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "ci" / "licence_manifest.json"
 GATE = ROOT / "scripts" / "licence_gate.py"
-T = "acme-assurance"
-T2 = "northwind-air"
+T = "q-quality"
+T2 = "q-airlines"
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
 HEX16 = re.compile(r"^[0-9a-f]{16}$")
 
@@ -244,8 +244,8 @@ class OtlpExportTests(unittest.TestCase):
     def setUpClass(cls):
         cls.p = seeded([T, T2])
         cls.svc = AnswerService(cls.p)
-        asha = demo.principal_for(cls.p, T, "asha.asker")
-        carl = demo.principal_for(cls.p, T, "carl.curator")
+        asha = demo.principal_for(cls.p, T, "asker.public")
+        carl = demo.principal_for(cls.p, T, "curator")
         cls.a1 = cls.svc.ask(asha, "what must a release achieve before promotion?")
         cls.a2 = cls.svc.ask(carl, "what is the acceptance criteria for coverage?")
         cls.a3 = cls.svc.ask(asha, "what must a release achieve before promotion?")   # cache path
@@ -293,7 +293,7 @@ class OtlpExportTests(unittest.TestCase):
         self.assertAlmostEqual(at["kf.cost.usd"], a.cost, places=9)
         self.assertAlmostEqual(at["kf.cost.saved_usd"], a.cost_saved, places=9)
         self.assertIn("kf.cache.hit", at)
-        self.assertEqual(at["user.id"], "asha.asker")
+        self.assertEqual(at["user.id"], "asker.public")
         self.assertEqual(at["user.roles"], ["asker"])
         self.assertEqual(at["kf.complexity"], a.complexity)
         self.assertEqual(at["kf.selector.level_name"], a.why["level_name"])
@@ -321,7 +321,7 @@ class OtlpExportTests(unittest.TestCase):
 
     def test_per_role_and_cache_savings_are_visible(self):
         at2 = _attrs(self._root(self.a2))
-        self.assertEqual(at2["user.id"], "carl.curator")
+        self.assertEqual(at2["user.id"], "curator")
         self.assertEqual(at2["user.roles"], ["curator"])
         at3 = _attrs(self._root(self.a3))
         self.assertTrue(at3["kf.cache.hit"])

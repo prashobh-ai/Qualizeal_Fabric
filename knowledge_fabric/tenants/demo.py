@@ -23,14 +23,26 @@ class TenantConfig:
 
 
 DEMO_TENANTS = [
-    TenantConfig("acme-assurance", "Acme Assurance (synthetic)", "quality-assurance", 5.0),
-    TenantConfig("northwind-air", "Northwind Air (synthetic)", "aviation-ops", 5.0),
-    TenantConfig("meridian-health", "Meridian Health (synthetic)", "health-provider", 5.0),
+    # Q-domain tenants (P0.3). Slugs are the canonical identifier used
+    # everywhere; every corpus is synthetic and every user is a role, never a
+    # person. The first three carry demo corpora today; the rest are declared
+    # so they can be selected, seeded and demoed without any code change.
+    TenantConfig("q-quality", "Q-Quality (synthetic)", "quality-assurance", 5.0),
+    TenantConfig("q-airlines", "Q-Airlines (synthetic)", "aviation-ops", 5.0),
+    TenantConfig("q-health", "Q-Health (synthetic)", "health", 5.0),
+    TenantConfig("q-aerotech", "Q-Aerotech (synthetic)", "aviation-ops", 5.0),
+    TenantConfig("q-assure-claims", "Q-Assure Claims (synthetic)", "quality-assurance", 5.0),
+    TenantConfig("q-pharma", "Q-Pharma (synthetic)", "health", 5.0),
+    TenantConfig("q-devicelab", "Q-DeviceLab (synthetic)", "quality-assurance", 5.0),
+    TenantConfig("q-bank", "Q-Bank (synthetic)", "quality-assurance", 5.0),
+    TenantConfig("q-assurance", "Q-Assurance (synthetic)", "quality-assurance", 5.0),
+    TenantConfig("q-cruise", "Q-Cruise (synthetic)", "aviation-ops", 5.0),
+    TenantConfig("q-retail", "Q-Retail (synthetic)", "quality-assurance", 5.0),
 ]
 
 # --- synthetic corpora: realistic SHAPES, wholly invented content ---------
 CORPORA = {
-    "acme-assurance": [
+    "q-quality": [
         ("qa/test-strategy.md", "Test Strategy v3", "text/markdown", ["public"],
          """# Test Strategy
 
@@ -54,7 +66,7 @@ This restricted policy is visible only to curators and admins, not to general as
         ("qa/standup.transcript", "Release Standup Recording", "audio/transcript", ["public"],
          "[00:03] The traceability gap on REQ-102 is the last blocker for the release.\n[00:15] We agreed to add test case TC-4503 before promotion.\n[00:41] Coverage sits at ninety four percent, one point short of the acceptance bar.\n"),
     ],
-    "northwind-air": [
+    "q-airlines": [
         ("ops/turnaround.md", "Aircraft Turnaround Procedure", "text/markdown", ["public"],
          """# Turnaround Procedure
 
@@ -67,7 +79,7 @@ The procedure complies with the operator's airworthiness maintenance program.
         ("ops/inspection-log.csv", "Daily Inspection Log", "text/csv", ["public"],
          "aircraft,system,check,result\nNW-101,hydraulics,pre-flight,pass\nNW-101,brakes,pre-flight,pass\nNW-102,hydraulics,pre-flight,defer\n"),
     ],
-    "meridian-health": [
+    "q-health": [
         ("clin/triage-protocol.md", "Emergency Triage Protocol", "text/markdown", ["public"],
          """# Triage Protocol
 
@@ -84,7 +96,7 @@ The protocol is governed by the department's clinical guideline board and review
 # synthetic connector records — automated ingestion from GitHub + Jira (WS1).
 # Identifier-safe: invented org/repo/keys only.
 GITHUB_RECORDS = {
-    "acme-assurance": [
+    "q-quality": [
         {"repo": "acme/assurance-platform", "path": "docs/release-runbook.md", "updated_at": 1700,
          "commit": "a1b2c3", "mime": "text/markdown",
          "content": "# Release Runbook\n\nA release is cut only after the regression suite is green and "
@@ -97,7 +109,7 @@ GITHUB_RECORDS = {
     ],
 }
 JIRA_RECORDS = {
-    "acme-assurance": [
+    "q-quality": [
         {"project": "REL", "key": "REL-42", "summary": "Close traceability gap on REQ-102",
          "status": "In Progress", "updated": 1720, "acl": ["public"],
          "description": "REQ-102 has no linked test case. Add TC-4503 and link it to the requirement "
@@ -111,39 +123,33 @@ JIRA_RECORDS = {
 
 # question bank per tenant (measured, multi-doc where possible, distinct families)
 QUESTION_BANK = {
-    "acme-assurance": [
+    "q-quality": [
         ("what must a release achieve before promotion?", ["qa/test-strategy.md"], "policy"),
         ("what is the acceptance criteria for coverage?", ["qa/test-strategy.md"], "threshold"),
         ("which requirement has a traceability gap?", ["qa/traceability-matrix.csv"], "lookup"),
         ("what blocks the release according to the standup?", ["qa/standup.transcript"], "evidence"),
     ],
-    "northwind-air": [
+    "q-airlines": [
         ("what is required before boarding begins?", ["ops/turnaround.md"], "procedure"),
         ("which aircraft system was deferred?", ["ops/inspection-log.csv"], "lookup"),
     ],
-    "meridian-health": [
+    "q-health": [
         ("what does triage category 1 require?", ["clin/triage-protocol.md"], "procedure"),
     ],
 }
 
-# demo users per tenant: (subject, roles, scopes)
-DEMO_USERS = {
-    "acme-assurance": [
-        ("asha.asker", ["asker"], ["public"]),
-        ("carl.curator", ["curator"], ["public", "restricted"]),
-        ("adar.admin", ["admin"], ["public", "restricted"]),
-        ("rana.restricted", ["asker"], ["public"]),          # cannot see 'restricted'
-        ("qa-agent", ["agent"], ["public"]),                  # service principal
-    ],
-    "northwind-air": [("nia.asker", ["asker"], ["public"])],
-    "meridian-health": [("mo.asker", ["asker"], ["public"])],
-    "qualizeal": [
-        ("asha.asker", ["asker"], ["public"]),
-        ("carl.curator", ["curator"], ["public", "restricted"]),
-        ("adar.admin", ["admin"], ["public", "restricted"]),
-        ("kf-agent", ["agent"], ["public"]),
-    ],
-}
+# Role-based user ids (P0.3). No people's names anywhere — the subject IS
+# the role. Every tenant carries the same five ids so any script/test/console
+# can address a given role with a stable string.
+_ROLE_USERS = [
+    ("asker.public",     ["asker"],   ["public"]),               # base asker, cannot see restricted
+    ("asker.restricted", ["asker"],   ["public", "restricted"]), # elevated asker (test I6 positive path)
+    ("curator",          ["curator"], ["public", "restricted"]),
+    ("admin",            ["admin"],   ["public", "restricted"]),
+    ("qa-agent",         ["agent"],   ["public"]),               # service principal
+]
+DEMO_USERS = {cfg.tenant: list(_ROLE_USERS) for cfg in DEMO_TENANTS}
+DEMO_USERS["qualizeal"] = list(_ROLE_USERS)
 
 # identifier-safety: patterns that would indicate a REAL-resolvable identifier
 _UNSAFE = [
@@ -182,6 +188,12 @@ def seed(platform, tenants: list[str] | None = None) -> dict:
         if cfg.tenant not in chosen:
             continue
         platform.policy.set_budget(cfg.tenant, cfg.budget)
+        # Tenants without a preloaded corpus stay budget-configured and can
+        # receive ingests from bulk upload / connectors just like the seeded
+        # ones — the point of DEMO_TENANTS is that every Q-* slug is valid.
+        if cfg.tenant not in CORPORA:
+            summary[cfg.tenant] = {"documents": 0, "ingested": 0, "passages": 0}
+            continue
         for uri, title, mime, acl, body in CORPORA[cfg.tenant]:
             raw = intake.canonical(cfg.tenant, "files", f"file://{uri}", title,
                                    body.encode(), mime=mime, acl=acl, ontology=cfg.ontology)

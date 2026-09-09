@@ -24,10 +24,10 @@ jobs:
           from knowledge_fabric.app import Platform
           from knowledge_fabric.tenants import demo
           from knowledge_fabric.evaluation import gate
-          p = Platform(); demo.seed(p, ["acme-assurance"])
-          assert gate.evaluate(p, "acme-assurance", 1)["passed"], "clean index must pass"
-          gate.corrupt_citation_coordinates(p, "acme-assurance")
-          v = gate.promote_if_passes(p, "acme-assurance", 2)
+          p = Platform(); demo.seed(p, ["q-quality"])
+          assert gate.evaluate(p, "q-quality", 1)["passed"], "clean index must pass"
+          gate.corrupt_citation_coordinates(p, "q-quality")
+          v = gate.promote_if_passes(p, "q-quality", 2)
           assert not v["passed"] and v["promoted"] is None, "corrupt index must be blocked"
           print("promotion gate proven")
           PY

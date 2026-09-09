@@ -1,44 +1,90 @@
-# Local (developer) deployment shape — Build Plan Section 17.
+# Local deployment shape — Build Plan Section 17.
 #
-# The Knowledge Fabric app runs with LOCAL adapters (SQLite store, filesystem
-# object store, in-process durable queue, deterministic embedder, mock/hosted
-# model via env, local HS256 IdP). It needs no other container to run.
+# Two profiles behind the SAME adapter contracts (ADR-0001):
 #
-# The commented services below are the CLOUD adapters the same image points at
-# via env when you move to the interim host or a client account — swapping them
-# in is a configuration change, not a code change (I: portability).
+#   PROFILE=lite (default): stdlib-only. Just the fabric container. Every
+#   real engine is disabled; the platform runs against SQLite, filesystem
+#   object store, in-process queue, deterministic hash embedder, mock model,
+#   HS256 local IdP. This is what CI runs and what a laptop demo uses.
+#
+#   PROFILE=full: engine-backed. Postgres 16 + pgvector + pg_trgm, an
+#   OpenTelemetry Collector, Jaeger for traces, and Prometheus for metrics.
+#   Selected by env — code is unchanged. The image is the SAME image.
+#
+# Usage:
+#   docker compose --profile lite up -d
+#   docker compose --profile full up -d
 services:
   fabric:
+    profiles: ["lite", "full"]
     build:
-      context: ..
-      dockerfile: Dockerfile
-    image: qualizeal/knowledge-fabric:local
+      context: ../..
+      dockerfile: deploy/Dockerfile
+      args:
+        # Cloud-capable image built from the same Dockerfile. For 'full' we
+        # pull the DB driver and OTel client; both permissive-licensed.
+        KF_EXTRAS: ${KF_EXTRAS:-}
+    image: qualizeal/knowledge-fabric:${KF_PROFILE:-lite}
     environment:
+      - KF_PROFILE=${KF_PROFILE:-lite}
       - KF_DB=/data/kf.db
       - KF_BLOBS=/data/blobs
-      - KF_MODEL_MODE=${KF_MODEL_MODE:-mock}   # mock | hosted | off
+      - KF_MODEL_MODE=${KF_MODEL_MODE:-mock}
       - KF_MODEL_BASE_URL=${KF_MODEL_BASE_URL:-}
       - KF_MODEL_API_KEY=${KF_MODEL_API_KEY:-}
       - KF_IDP_SECRET=${KF_IDP_SECRET:-local-dev-secret-change-me}
       - KF_GROUNDING_THRESHOLD=${KF_GROUNDING_THRESHOLD:-0.50}
+      # 'full' overrides — same container, different adapters selected by env.
+      - KF_DB_URL=${KF_DB_URL:-}
+      - KF_OTLP_URL=${KF_OTLP_URL:-}
     ports:
       - "8080:8080"
     volumes:
       - fabric-data:/data
 
-  # --- CLOUD ADAPTERS (enable when moving to interim/client) ----------------
-  # postgres:            # VectorIndex/LexicalIndex/GraphStore + Queue back-end
-  #   image: pgvector/pgvector:pg16
-  #   environment: { POSTGRES_PASSWORD: fabric }
-  #   ports: ["5432:5432"]
-  # minio:               # ObjectStore (S3-class)
-  #   image: minio/minio
-  #   command: server /data --console-address ":9001"
-  #   ports: ["9000:9000", "9001:9001"]
-  # keycloak:            # OIDC IdP (Runbook Section 0) — Principal adapter swap
-  #   image: quay.io/keycloak/keycloak:24.0
-  #   command: start-dev
-  #   ports: ["8081:8080"]
+  # --- FULL profile: real engines behind the same contracts -----------------
+  postgres:
+    profiles: ["full"]
+    image: pgvector/pgvector:pg16
+    environment:
+      - POSTGRES_PASSWORD=fabric
+      - POSTGRES_DB=fabric
+      - POSTGRES_USER=fabric
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+    ports: ["5432:5432"]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  # Vendor-neutral, Apache-2.0. Fabric sends OTLP/JSON here; the collector
+  # fans out to Jaeger (traces) and Prometheus (metrics).
+  otel-collector:
+    profiles: ["full"]
+    image: otel/opentelemetry-collector-contrib:0.108.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4318:4318"  # OTLP/HTTP
+
+  jaeger:
+    profiles: ["full"]
+    image: jaegertracing/all-in-one:1.60
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"  # UI
+
+  prometheus:
+    profiles: ["full"]
+    image: prom/prometheus:v2.54.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
 
 volumes:
   fabric-data:
+  pg-data:

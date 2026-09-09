@@ -56,7 +56,7 @@ def platform() -> Platform:
     global _platform, _svc
     if _platform is None:
         _platform = Platform(db_path=os.environ.get("KF_DB", "./data/kf.db"))
-        if not _platform.documents.list("acme-assurance"):
+        if not _platform.documents.list("q-quality"):
             demo.seed(_platform)
         cap = os.environ.get("KF_BUDGET_CAP_USD")          # injected by the AWS module
         if cap:
@@ -174,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/connectors":
             return self._send(200, {"connectors": registry.available()})
         if u.path == "/metrics":
-            return self._send(200, p.telemetry.metrics(first("tenant", "acme-assurance")))
+            return self._send(200, p.telemetry.metrics(first("tenant", "q-quality")))
 
         # curator + admin
         if u.path == "/api/analytics":

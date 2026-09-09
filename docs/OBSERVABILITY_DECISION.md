@@ -53,7 +53,7 @@ span whose exported attributes are `kf.model.tier=deep`, `gen_ai.response.model=
 `gen_ai.usage.input_tokens=40`, `gen_ai.usage.output_tokens=33`, `kf.cost.usd=0.000365`,
 `kf.selector.level=reason`, `kf.selector.why.reasons=[factual_lookup, multi_document]`,
 `kf.selector.why.explain="Routed to the deep tier — this needs reasoning across evidence across 4
-documents (grounding 0.69)"`, `user.id=asha.asker`, `user.roles=[asker]`, `kf.complexity=complex`,
+documents (grounding 0.69)"`, `user.id=asker.public`, `user.roles=[asker]`, `kf.complexity=complex`,
 `kf.grounding.score=0.6924` plus the five `kf.grounding.signal.*` values, `kf.citations.count=3`,
 `kf.dataset.version=3`, `kf.sources=[…]`, `kf.trajectory.selected=[pas_…]` — with four child spans
 carrying `parentSpanId` of the root. That *is* an LLM-observability trace.

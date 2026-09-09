@@ -66,8 +66,8 @@ Or drive it directly:
 
 ```bash
 python -m knowledge_fabric.cli seed
-python -m knowledge_fabric.cli ask acme-assurance asha.asker "what must a release achieve before promotion?"
-python -m knowledge_fabric.cli eval acme-assurance
+python -m knowledge_fabric.cli ask q-quality asker.public "what must a release achieve before promotion?"
+python -m knowledge_fabric.cli eval q-quality
 ```
 
 ## What the execution shows (`make demo`)
@@ -133,11 +133,11 @@ a config change, zero code change. The demo users:
 
 | tenant | user | roles | may see |
 |---|---|---|---|
-| acme-assurance | `asha.asker` | asker | public |
-| acme-assurance | `carl.curator` | curator | public + restricted |
-| acme-assurance | `adar.admin` | admin | everything |
-| acme-assurance | `rana.restricted` | asker | public only |
-| acme-assurance | `qa-agent` | agent | public (service principal) |
+| q-quality | `asker.public` | asker | public |
+| q-quality | `curator` | curator | public + restricted |
+| q-quality | `admin` | admin | everything |
+| q-quality | `asker.public` | asker | public only |
+| q-quality | `qa-agent` | agent | public (service principal) |
 
 ## Docs
 - [`docs/ROADMAP_ALIGNMENT.md`](docs/ROADMAP_ALIGNMENT.md) — QualiZeal Core Build Roadmap coverage map.

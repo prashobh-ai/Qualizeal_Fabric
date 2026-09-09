@@ -235,9 +235,13 @@ def scan_requirements(repo_root: str, files: list[str]) -> dict[str, str]:
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
         if name.endswith(".toml"):
-            # dependencies = ["pkg>=1", ...] — a light scan, no toml parser needed for the gate
-            for m in re.finditer(r'"([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:[<>=!~\[;].*)?"', text):
-                dist = m.group(1)
+            # A strict scan: pull ONLY the `dependencies = [...]` array and
+            # every `<extra> = [...]` array under `[project.optional-dependencies]`.
+            # Everything else in pyproject (project metadata, build-system,
+            # tool tables) is ignored — otherwise the greedy regex used to
+            # sweep up licence identifiers and heading strings as if they
+            # were pip requirements.
+            for dist in _pyproject_dists(text):
                 if dist.lower() not in ("python",):
                     out.setdefault(_norm(dist), name)
             continue
@@ -253,6 +257,72 @@ def scan_requirements(repo_root: str, files: list[str]) -> dict[str, str]:
 
 def _norm(dist: str) -> str:
     return re.sub(r"[-_.]+", "-", dist).lower()
+
+
+_TOML_ARR = re.compile(r"^\s*(?:dependencies|[A-Za-z0-9_-]+)\s*=\s*\[", re.M)
+_TOML_TABLE = re.compile(r"^\s*\[([^\]]+)\]\s*$", re.M)
+
+
+def _pyproject_dists(text: str) -> list[str]:
+    """Return distribution names declared as project dependencies in a pyproject.toml.
+
+    Reads the ``[project] dependencies`` array and every array under the
+    ``[project.optional-dependencies]`` table. Every other table (build-system,
+    tool.*) is ignored so the gate stops picking up licence identifiers or
+    project metadata as if they were requirement pins.
+    """
+    dists: list[str] = []
+    tables: list[tuple[str, int, int]] = []   # (table_name, start_line, end_line)
+    lines = text.splitlines()
+    # locate table boundaries
+    heads: list[tuple[int, str]] = []
+    for i, line in enumerate(lines):
+        m = _TOML_TABLE.match(line)
+        if m:
+            heads.append((i, m.group(1).strip()))
+    heads.append((len(lines), ""))     # sentinel
+    for (start, name), (end, _) in zip(heads, heads[1:]):
+        tables.append((name, start, end))
+
+    def _extract_arrays(block: str) -> list[str]:
+        """Every top-level array declaration in this table block."""
+        out: list[str] = []
+        i = 0
+        while True:
+            m = _TOML_ARR.search(block, i)
+            if not m:
+                break
+            # Find the matching closing ']', accounting for nested brackets
+            depth = 0
+            j = m.end() - 1
+            while j < len(block):
+                ch = block[j]
+                if ch == "[":
+                    depth += 1
+                elif ch == "]":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            arr = block[m.end():j]
+            for s in re.finditer(r'"([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:[<>=!~\[;].*?)?"', arr):
+                out.append(s.group(1))
+            i = j + 1
+        return out
+
+    # a bare [project] table can also declare `dependencies = [...]`
+    for name, start, end in tables:
+        block = "\n".join(lines[start:end])
+        if name in ("project",):
+            # match only `dependencies = [...]`
+            m = re.search(r"^\s*dependencies\s*=\s*\[", block, re.M)
+            if m:
+                for s in re.finditer(r'"([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:[<>=!~\[;].*?)?"',
+                                     block[m.end():]):
+                    dists.append(s.group(1))
+        elif name.startswith("project.optional-dependencies") or name == "project.optional-dependencies":
+            dists.extend(_extract_arrays(block))
+    return dists
 
 
 # --------------------------------------------------------------------------

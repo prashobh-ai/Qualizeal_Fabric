@@ -16,9 +16,9 @@ class _P:  # minimal candidate stand-in for selector unit tests
 
 class TestDecide(unittest.TestCase):
     def setUp(self):
-        self.p = seeded(["acme-assurance"])
+        self.p = seeded(["q-quality"])
         self.svc = AnswerService(self.p)
-        self.asker = demo.principal_for(self.p, "acme-assurance", "asha.asker")
+        self.asker = demo.principal_for(self.p, "q-quality", "asker.public")
 
     def test_selector_levels_and_why(self):
         lookup = selector.classify("what is the coverage target", [_P("d1")], 0.8, False)
