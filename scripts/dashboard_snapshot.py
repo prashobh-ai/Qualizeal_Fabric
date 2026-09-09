@@ -20,22 +20,22 @@ from knowledge_fabric.ingestion.sync import SyncManager
 from knowledge_fabric.surfaces.dashboard import DASHBOARD_HTML
 from knowledge_fabric.tenants import demo
 
-TENANT = "acme-assurance"
+TENANT = "q-quality"
 SCRIPT = [
-    ("asha.asker", "what must a release achieve before promotion?"),
-    ("asha.asker", "why does a component with an open defect block dependent releases?"),
-    ("asha.asker", "which requirement has a traceability gap?"),
-    ("asha.asker", "what blocks the release according to the standup?"),
-    ("asha.asker", "what must a release achieve before promotion?"),        # cache hit
-    ("carl.curator", "how fast must critical defects be triaged?"),
-    ("carl.curator", "compare acceptance criteria across the strategy and the runbook"),
-    ("rana.restricted", "how fast must critical defects be triaged?"),
-    ("asha.asker", "quel est le critère d acceptation pour la couverture?"),  # FR
-    ("asha.asker", "¿cuál es el criterio de aceptación para la cobertura?"),  # ES
-    ("kf-agent", "what is required before a release is promoted?"),
-    ("asha.asker", "what is the capital of France?"),                        # gap
-    ("asha.asker", "list the requirement with a traceability gap"),
-    ("carl.curator", "why does an open defect block its dependent releases?"),
+    ("asker.public", "what must a release achieve before promotion?"),
+    ("asker.public", "why does a component with an open defect block dependent releases?"),
+    ("asker.public", "which requirement has a traceability gap?"),
+    ("asker.public", "what blocks the release according to the standup?"),
+    ("asker.public", "what must a release achieve before promotion?"),        # cache hit
+    ("curator", "how fast must critical defects be triaged?"),
+    ("curator", "compare acceptance criteria across the strategy and the runbook"),
+    ("asker.public", "how fast must critical defects be triaged?"),
+    ("asker.public", "quel est le critère d acceptation pour la couverture?"),  # FR
+    ("asker.public", "¿cuál es el criterio de aceptación para la cobertura?"),  # ES
+    ("qa-agent", "what is required before a release is promoted?"),
+    ("asker.public", "what is the capital of France?"),                        # gap
+    ("asker.public", "list the requirement with a traceability gap"),
+    ("curator", "why does an open defect block its dependent releases?"),
 ]
 
 

@@ -16,13 +16,13 @@ from knowledge_fabric.surfaces import http_api
 from knowledge_fabric.tenants import demo
 from tests.util import seeded
 
-T = "acme-assurance"
+T = "q-quality"
 
 
 class TestAnswerPathFixes(unittest.TestCase):
     def setUp(self):
         self.p = seeded([T]); self.svc = AnswerService(self.p)
-        self.asker = demo.principal_for(self.p, T, "asha.asker")
+        self.asker = demo.principal_for(self.p, T, "asker.public")
 
     def test_ingestion_invalidates_answer_cache(self):
         q = "what is the acceptance criteria for coverage?"
@@ -75,7 +75,7 @@ class TestHttpFixes(unittest.TestCase):
         cls.srv = ThreadingHTTPServer(("127.0.0.1", 0), http_api.Handler)
         cls.port = cls.srv.server_address[1]
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
-        cls.tok = {u: cls._login(u) for u in ("adar.admin", "carl.curator", "asha.asker")}
+        cls.tok = {u: cls._login(u) for u in ("admin", "curator", "asker.public")}
 
     @classmethod
     def tearDownClass(cls):
@@ -98,44 +98,44 @@ class TestHttpFixes(unittest.TestCase):
             return e.code, json.loads(e.read() or b"{}")
 
     def test_rollback_unknown_version_is_404_not_crash(self):
-        code, docs = self._call("GET", "/curator/documents", "carl.curator")
+        code, docs = self._call("GET", "/curator/documents", "curator")
         doc_id = docs["documents"][0]["document_id"]
-        code, out = self._call("POST", "/curator/decision", "carl.curator",
+        code, out = self._call("POST", "/curator/decision", "curator",
                                {"document_id": doc_id, "decision": "rollback", "to_version": 99})
         self.assertEqual(code, 404)
-        code, out = self._call("POST", "/curator/decision", "carl.curator",
+        code, out = self._call("POST", "/curator/decision", "curator",
                                {"document_id": doc_id, "decision": "rollback", "to_version": "x"})
         self.assertEqual(code, 400)
 
     def test_sync_unknown_source_404_and_files_default_folder(self):
-        code, out = self._call("POST", "/admin/sync", "adar.admin", {"source": "confluence"})
+        code, out = self._call("POST", "/admin/sync", "admin", {"source": "confluence"})
         self.assertEqual(code, 404)
-        code, out = self._call("POST", "/admin/sync", "adar.admin", {"source": "files"})
+        code, out = self._call("POST", "/admin/sync", "admin", {"source": "files"})
         self.assertEqual(code, 200)
         self.assertNotIn("KeyError", json.dumps(out))
 
     def test_interval_change_keeps_schedule_config(self):
-        self._call("POST", "/admin/connectors", "adar.admin",
+        self._call("POST", "/admin/connectors", "admin",
                    {"source": "jira", "interval_s": 120, "config": {"projects": ["REL"]}})
-        self._call("POST", "/admin/connectors", "adar.admin", {"source": "jira", "interval_s": 300})
+        self._call("POST", "/admin/connectors", "admin", {"source": "jira", "interval_s": 300})
         sched = scheduler.get_schedule(self.p, T, "jira")
         self.assertEqual(sched["config"].get("projects"), ["REL"])
         self.assertEqual(sched["interval_s"], 300)
 
     def test_doctor_route_in_process(self):
-        code, out = self._call("GET", "/admin/doctor?target=aws", "adar.admin")
+        code, out = self._call("GET", "/admin/doctor?target=aws", "admin")
         self.assertEqual(code, 200); self.assertIn("rendered", out); self.assertIn("selection", out)
-        code, _ = self._call("GET", "/admin/doctor?target=mars", "adar.admin")
+        code, _ = self._call("GET", "/admin/doctor?target=mars", "admin")
         self.assertEqual(code, 400)
 
     def test_versions_diff_route(self):
-        code, docs = self._call("GET", "/curator/documents", "carl.curator")
+        code, docs = self._call("GET", "/curator/documents", "curator")
         doc_id = docs["documents"][0]["document_id"]
-        code, out = self._call("GET", f"/curator/versions?document_id={doc_id}&from=1&to=1", "carl.curator")
+        code, out = self._call("GET", f"/curator/versions?document_id={doc_id}&from=1&to=1", "curator")
         self.assertEqual(code, 200); self.assertIn("unchanged", out["diff"])
 
     def test_otlp_dry_run_route(self):
-        code, out = self._call("GET", "/admin/otlp", "adar.admin")
+        code, out = self._call("GET", "/admin/otlp", "admin")
         self.assertEqual(code, 200); self.assertIn("resourceSpans", json.dumps(out))
 
 

@@ -7,7 +7,7 @@ from knowledge_fabric.governance import authority as auth
 from knowledge_fabric.tenants import demo
 from tests.util import seeded
 
-T = "acme-assurance"
+T = "q-quality"
 
 
 def _cite(doc: dict, passage_id: str = "pas_x") -> Citation:
@@ -43,7 +43,7 @@ class TestRanksAndWeights(AuthorityBase):
         self.assertEqual(auth.weight_for(self.p, T, "jira"), 1.0)
         auth.set_source_rank(self.p, T, "jira", 3)                       # upsert
         self.assertEqual(auth.rank_for(self.p, T, "jira"), 3)
-        self.assertEqual(auth.rank_for(self.p, "northwind-air", "jira"), 4)   # other tenant untouched
+        self.assertEqual(auth.rank_for(self.p, "q-airlines", "jira"), 4)   # other tenant untouched
         with self.assertRaises(ValueError):
             auth.set_source_rank(self.p, T, "jira", 0)
         with self.assertRaises(ValueError):
@@ -70,26 +70,26 @@ class TestAuthoritativeFlag(AuthorityBase):
         doc = self._doc("files")
         self.assertFalse(auth.is_authoritative(self.p, T, doc["id"]))
         n0 = len(self.p.audit.for_tenant(T, 500))
-        auth.mark_authoritative(self.p, T, doc["id"], True, "carl.curator")
+        auth.mark_authoritative(self.p, T, doc["id"], True, "curator")
         self.assertTrue(auth.is_authoritative(self.p, T, doc["id"]))
-        auth.mark_authoritative(self.p, T, doc["id"], False, "carl.curator")
+        auth.mark_authoritative(self.p, T, doc["id"], False, "curator")
         self.assertFalse(auth.is_authoritative(self.p, T, doc["id"]))
         entries = self.p.audit.for_tenant(T, 500)
         self.assertEqual(len(entries), n0 + 2)
         self.assertEqual([e["action"] for e in entries[:2]], ["authority.unmark", "authority.mark"])
         self.assertEqual(entries[0]["resource"], f"document:{doc['id']}")
-        self.assertEqual(entries[0]["subject"], "carl.curator")
+        self.assertEqual(entries[0]["subject"], "curator")
 
     def test_mark_is_tenant_scoped_and_validated(self):
         doc = self._doc("files")
         with self.assertRaises(KeyError):
-            auth.mark_authoritative(self.p, "northwind-air", doc["id"], True, "nia.asker")
+            auth.mark_authoritative(self.p, "q-airlines", doc["id"], True, "asker.public")
         self.assertFalse(auth.is_authoritative(self.p, T, doc["id"]))
         with self.assertRaises(KeyError):
-            auth.mark_authoritative(self.p, T, "doc_missing", True, "carl.curator")
+            auth.mark_authoritative(self.p, T, "doc_missing", True, "curator")
         with self.assertRaises(ValueError):
             auth.mark_authoritative(self.p, T, doc["id"], True, "")
-        self.assertFalse(auth.is_authoritative(self.p, "northwind-air", doc["id"]))
+        self.assertFalse(auth.is_authoritative(self.p, "q-airlines", doc["id"]))
 
 
 class TestBoost(AuthorityBase):
@@ -106,7 +106,7 @@ class TestBoost(AuthorityBase):
         self.assertAlmostEqual(scores["p_unknown"], 0.30)               # not mapped → untouched
         self.assertEqual([pid for pid, _ in out], ["p_files", "p_unknown", "p_jira", "p_gh"])
 
-        auth.mark_authoritative(self.p, T, gh["id"], True, "carl.curator")
+        auth.mark_authoritative(self.p, T, gh["id"], True, "curator")
         out2 = auth.boost(self.p, T, fused, pdoc)
         self.assertAlmostEqual(dict(out2)["p_gh"], 0.40 / 1.5 * 1.5, places=6)
         self.assertEqual([pid for pid, _ in out2][:2], ["p_files", "p_gh"])
@@ -130,7 +130,7 @@ class TestCitationExplanations(AuthorityBase):
 
     def test_authoritative_flag_beats_rank(self):
         files, jira = self._doc("files"), self._doc("jira")
-        auth.mark_authoritative(self.p, T, jira["id"], True, "carl.curator")
+        auth.mark_authoritative(self.p, T, jira["id"], True, "curator")
         res = auth.authoritative_source(self.p, T, [_cite(files, "p1"), _cite(jira, "p2")])
         self.assertEqual(res["document_id"], jira["id"])
         self.assertIn("marked authoritative", res["reason"])
@@ -148,8 +148,8 @@ class TestCitationExplanations(AuthorityBase):
 
     def test_citations_from_other_tenant_are_ignored(self):
         files = self._doc("files")
-        self.assertIsNone(auth.authoritative_source(self.p, "northwind-air", [_cite(files)]))
-        self.assertEqual(auth.conflicts(self.p, "northwind-air", [_cite(files)]), [])
+        self.assertIsNone(auth.authoritative_source(self.p, "q-airlines", [_cite(files)]))
+        self.assertEqual(auth.conflicts(self.p, "q-airlines", [_cite(files)]), [])
 
     def test_conflicts_between_sources_of_different_rank(self):
         files, jira, gh = self._doc("files"), self._doc("jira"), self._doc("github")
@@ -169,7 +169,7 @@ class TestCitationExplanations(AuthorityBase):
 
     def test_conflict_reason_mentions_authoritative_flag(self):
         files, jira = self._doc("files"), self._doc("jira")
-        auth.mark_authoritative(self.p, T, jira["id"], True, "carl.curator")
+        auth.mark_authoritative(self.p, T, jira["id"], True, "curator")
         out = auth.conflicts(self.p, T, [_cite(files, "p1"), _cite(jira, "p2")])
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["preferred"], jira["id"])
@@ -177,7 +177,7 @@ class TestCitationExplanations(AuthorityBase):
 
     def test_works_on_real_answer_citations(self):
         svc = AnswerService(self.p)
-        principal = demo.principal_for(self.p, T, "asha.asker")
+        principal = demo.principal_for(self.p, T, "asker.public")
         ans = svc.ask(principal, "what must a release achieve before promotion?")
         self.assertTrue(ans.citations)
         res = auth.authoritative_source(self.p, T, ans.citations)

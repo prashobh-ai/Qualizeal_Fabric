@@ -31,8 +31,8 @@ from knowledge_fabric.contracts.types import Job
 from knowledge_fabric.ops import readiness
 
 REPO = Path(__file__).resolve().parents[1]
-T = "acme-assurance"
-OTHER = "northwind-air"
+T = "q-quality"
+OTHER = "q-airlines"
 
 # A complete, well-shaped AWS environment (no real endpoints are contacted).
 AWS_ENV = {

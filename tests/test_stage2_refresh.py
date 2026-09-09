@@ -6,8 +6,8 @@ from knowledge_fabric.connectors import admin, registry
 from knowledge_fabric.ingestion import runs, scheduler
 from tests.util import seeded
 
-T = "acme-assurance"
-OTHER = "northwind-air"
+T = "q-quality"
+OTHER = "q-airlines"
 INTERVAL = 600
 # a fixed "now" far past the seed's real wall-clock syncs, so freshness maths is exact
 NOW = 4_000_000_000.0
@@ -161,7 +161,7 @@ class TestConnectorAdmin(Base):
 
     def test_upsert_disable_partial_update_and_audit(self):
         rec = admin.upsert(self.p, T, "jira", enabled=False, allow=["REL", "REL"],
-                           config={"base_url": "https://jira.example.com"}, by_subject="adar.admin")
+                           config={"base_url": "https://jira.example.com"}, by_subject="admin")
         self.assertFalse(rec["enabled"])
         self.assertEqual(rec["allow"], ["REL"])                 # de-duplicated, order kept
         self.assertEqual(rec["config"], {"base_url": "https://jira.example.com"})
@@ -182,7 +182,7 @@ class TestConnectorAdmin(Base):
                           "config": {"base_url": "https://jira.example.com"}, "scopes": ["jira:read"]})
         audit = [a for a in self.p.audit.for_tenant(T) if a["action"] == "connector.upsert"]
         self.assertEqual(len(audit), 4)
-        self.assertEqual(audit[-1]["subject"], "adar.admin")
+        self.assertEqual(audit[-1]["subject"], "admin")
         self.assertEqual(audit[-1]["resource"], "connector:jira")
         self.assertEqual(audit[-1]["decision"], "disabled")
         self.assertEqual(audit[0]["decision"], "enabled")

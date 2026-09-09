@@ -37,7 +37,7 @@ from knowledge_fabric.surfaces.curator_ui import CURATOR_HTML
 from knowledge_fabric.tenants import demo
 from tests.util import seeded
 
-T = "acme-assurance"
+T = "q-quality"
 PAGES = {"ask": ASK_HTML, "curator": CURATOR_HTML, "admin": ADMIN_HTML}
 
 # element ids each page must render into (contract Section G)
@@ -136,7 +136,7 @@ class TestMarkup(unittest.TestCase):
             self.assertIsNotNone(m)
             embedded = json.loads(m.group(1))
             self.assertEqual(embedded, d)
-            for subject in ("asha.asker", "carl.curator", "adar.admin"):
+            for subject in ("asker.public", "curator", "admin"):
                 self.assertIn(subject, html)
 
     def test_role_gate_messages(self):
@@ -224,7 +224,7 @@ class TestServedPages(unittest.TestCase):
         cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}"
         cls.thread = threading.Thread(target=cls.srv.serve_forever, daemon=True)
         cls.thread.start()
-        cls.tokens = {s: cls._login(s) for s in ("asha.asker", "carl.curator", "adar.admin")}
+        cls.tokens = {s: cls._login(s) for s in ("asker.public", "curator", "admin")}
 
     @classmethod
     def tearDownClass(cls):
@@ -262,7 +262,7 @@ class TestServedPages(unittest.TestCase):
             self.assertEqual(raw.decode("utf-8"), html)
 
     def test_login_shape_used_by_sign_in_bar(self):
-        code, j = self._json("POST", "/login", {"tenant": T, "subject": "carl.curator"})
+        code, j = self._json("POST", "/login", {"tenant": T, "subject": "curator"})
         self.assertEqual(code, 200)
         for k in ("token", "subject", "roles", "scopes", "tenant"):
             self.assertIn(k, j)
@@ -273,7 +273,7 @@ class TestServedPages(unittest.TestCase):
 
     def test_ask_answer_card_fields(self):
         code, a = self._json("POST", "/ask", {"question": "what must a release achieve before promotion?"},
-                             self.tokens["asha.asker"])
+                             self.tokens["asker.public"])
         self.assertEqual(code, 200)
         for k in ("kind", "answer_text", "citations", "confidence", "grounding_score", "tier", "level", "why",
                   "lang", "cache_hit", "cost_saved", "tokens_in", "tokens_out", "cost", "model_name",
@@ -291,7 +291,7 @@ class TestServedPages(unittest.TestCase):
         # multistep question → reasoning timeline payload
         code, a = self._json("POST", "/ask", {"question": "what must a release achieve before promotion and "
                                                           "which requirement has a traceability gap?"},
-                             self.tokens["asha.asker"])
+                             self.tokens["asker.public"])
         self.assertEqual(code, 200)
         self.assertIsNotNone(a["reasoning"])
         self.assertIn("mode", a["reasoning"])
@@ -302,13 +302,13 @@ class TestServedPages(unittest.TestCase):
     def test_unauthenticated_and_forbidden(self):
         code, j = self._json("POST", "/ask", {"question": "x"})
         self.assertEqual(code, 401); self.assertIn("error", j)
-        code, j = self._json("GET", "/curator/quality", token=self.tokens["asha.asker"])
+        code, j = self._json("GET", "/curator/quality", token=self.tokens["asker.public"])
         self.assertEqual(code, 403); self.assertIn("requires a higher role", j["error"])
-        code, j = self._json("GET", "/admin/runs", token=self.tokens["carl.curator"])
+        code, j = self._json("GET", "/admin/runs", token=self.tokens["curator"])
         self.assertEqual(code, 403); self.assertIn("error", j)
 
     def test_curator_payloads(self):
-        tok = self.tokens["carl.curator"]
+        tok = self.tokens["curator"]
         code, q = self._json("GET", "/curator/quality", token=tok)
         self.assertEqual(code, 200)
         for k in ("coverage", "freshness", "contradictions", "gaps", "connectedness", "traceability",
@@ -346,7 +346,7 @@ class TestServedPages(unittest.TestCase):
         self.assertEqual(up["uploaded"], 1)
 
     def test_admin_payloads(self):
-        tok = self.tokens["adar.admin"]
+        tok = self.tokens["admin"]
         code, c = self._json("GET", "/admin/connectors", token=tok)
         self.assertEqual(code, 200)
         self.assertIn("connectors", c)

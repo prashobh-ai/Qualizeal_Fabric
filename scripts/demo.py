@@ -47,10 +47,10 @@ def main():
     print("  ingest summary:", summary)
 
     svc = AnswerService(p)
-    asker = demo.principal_for(p, "acme-assurance", "asha.asker")
-    curator = demo.principal_for(p, "acme-assurance", "carl.curator")
-    restricted = demo.principal_for(p, "acme-assurance", "rana.restricted")
-    agent = demo.principal_for(p, "acme-assurance", "qa-agent")
+    asker = demo.principal_for(p, "q-quality", "asker.public")
+    curator = demo.principal_for(p, "q-quality", "curator")
+    restricted = demo.principal_for(p, "q-quality", "asker.public")
+    agent = demo.principal_for(p, "q-quality", "qa-agent")
 
     rule("2. GROUNDED ANSWER — cited to exact coordinates across modalities")
     show(svc.ask(asker, "what must a release achieve before promotion?"))
@@ -63,8 +63,8 @@ def main():
     rule("4. IDEMPOTENCY (I9) — re-ingesting identical content is a no-op")
     from knowledge_fabric.ingestion.intake import Intake, IngestWorker
     intake, worker = Intake(p), IngestWorker(p, None); worker.intake = intake
-    raw = intake.canonical("acme-assurance", "files", "file://qa/test-strategy.md", "Test Strategy v3",
-                           demo.CORPORA["acme-assurance"][0][4].encode(), mime="text/markdown")
+    raw = intake.canonical("q-quality", "files", "file://qa/test-strategy.md", "Test Strategy v3",
+                           demo.CORPORA["q-quality"][0][4].encode(), mime="text/markdown")
     intake.submit(raw)
     print("  re-ingest result (same content-hash):", [r["status"] for r in worker.drain()])
 
@@ -76,8 +76,8 @@ def main():
 
     rule("6. PERMISSION-BEFORE-RANKING (I6) — restricted policy never retrieved for an asker")
     qv = p.embedder.embed(["how fast must critical defects be triaged"])[0]
-    hits = p.vindex.search("acme-assurance", qv, 20, restricted.accessible_acls())
-    leaked = [pid for pid, _ in hits if "restricted" in p.passages.acl_of("acme-assurance", pid)]
+    hits = p.vindex.search("q-quality", qv, 20, restricted.accessible_acls())
+    leaked = [pid for pid, _ in hits if "restricted" in p.passages.acl_of("q-quality", pid)]
     print("  restricted passages in asker's retrieval set:", leaked, "→", "NONE ✓" if not leaked else "LEAK!")
     show(svc.ask(restricted, "how fast must critical defects be triaged?"))
     print("  (same question as curator, who MAY see the restricted policy:)")
@@ -91,61 +91,61 @@ def main():
     rule("8. AGENT PARITY (I7) — an agent uses the SAME gate and is audited")
     a = svc.ask(agent, "what must a release achieve before promotion?")
     show(a)
-    rows = p.audit.for_trace("acme-assurance", a.trajectory_id)
+    rows = p.audit.for_trace("q-quality", a.trajectory_id)
     print("  audit row:", {"subject": rows[0]["subject"], "is_agent": rows[0]["is_agent"],
                            "decision": rows[0]["decision"]})
 
     rule("9. BUDGET CAP UNDER A 100-WAY RACE (I12) — atomic, never exceeded")
-    p.policy.set_budget("acme-assurance", 10.0)
-    p.db.execute("UPDATE budgets SET spent=0 WHERE tenant=?", ("acme-assurance",))
+    p.policy.set_budget("q-quality", 10.0)
+    p.db.execute("UPDATE budgets SET spent=0 WHERE tenant=?", ("q-quality",))
     ok = []
-    ts = [threading.Thread(target=lambda: ok.append(p.policy.try_spend("acme-assurance", 1.0)))
+    ts = [threading.Thread(target=lambda: ok.append(p.policy.try_spend("q-quality", 1.0)))
           for _ in range(100)]
     [t.start() for t in ts]; [t.join() for t in ts]
-    print(f"  cap=10  requests=100  granted={sum(ok)}  spent=${p.policy.spent('acme-assurance')}  "
-          f"→ {'HELD ✓' if p.policy.spent('acme-assurance') <= 10 else 'BLOWN!'}")
+    print(f"  cap=10  requests=100  granted={sum(ok)}  spent=${p.policy.spent('q-quality')}  "
+          f"→ {'HELD ✓' if p.policy.spent('q-quality') <= 10 else 'BLOWN!'}")
 
     rule("10. PROMOTION GATE (I10) — a corrupted citation blocks going live")
     # isolated throwaway platform so the destructive corruption never poisons the demo
     gp = Platform(db_path=":memory:", blob_root="./data/demo-gate")
-    demo.seed(gp, ["acme-assurance"])
-    good = gate.evaluate(gp, "acme-assurance", 1)
+    demo.seed(gp, ["q-quality"])
+    good = gate.evaluate(gp, "q-quality", 1)
     print("  clean index → passed:", good["passed"], "metrics:", good["metrics"]["citation_coverage"],
           "coverage /", good["metrics"]["recall"], "recall")
-    gate.corrupt_citation_coordinates(gp, "acme-assurance")
-    bad = gate.promote_if_passes(gp, "acme-assurance", 2)
+    gate.corrupt_citation_coordinates(gp, "q-quality")
+    bad = gate.promote_if_passes(gp, "q-quality", 2)
     print("  corrupted index → passed:", bad["passed"], " promoted:", bad["promoted"],
           " regressions:", bad["regressions"])
 
     rule("11. ECONOMICS & HEALTH — one trace per answer; cost by tier/stage; risk register")
-    m = p.telemetry.metrics("acme-assurance")
+    m = p.telemetry.metrics("q-quality")
     print("  answers:", m["answers"], " p95 latency(ms):", m["latency_p95_ms"],
           " total cost:$", m["total_cost"])
     print("  cost by tier:", m["cost_by_tier"])
     print("  cost by stage:", m["cost_by_stage"])
     print("  clarify-back rate:", m["clarify_back_rate"], " citation coverage:", m["citation_coverage"])
-    print("  risk register:", health.risk_register(p, "acme-assurance"))
+    print("  risk register:", health.risk_register(p, "q-quality"))
 
     # ================= leadership-agreed capabilities (roadmap) =========
     rule("12. WS1 CONNECT — automated ingestion from GitHub + Jira + files (one canonical record)")
     from knowledge_fabric.ingestion.sync import SyncManager
     from knowledge_fabric.connectors import registry as _reg
     sm = SyncManager(p)
-    print("  seed already auto-synced:", summary["acme-assurance"].get("connectors"))
+    print("  seed already auto-synced:", summary["q-quality"].get("connectors"))
     print("  registry (plug-and-play):", _reg.available())
     # a NEW Jira issue arrives -> only the delta is ingested (change detection)
     new_issue = dict(project="REL", key="REL-99", summary="Audit every promotion decision",
                      status="Open", updated=999999, acl=["public"],
                      description="The audit trail must capture every promotion decision with its trace id.")
-    delta = sm.sync("acme-assurance", "jira", {"projects": ["REL"]},
-                    records=demo.JIRA_RECORDS["acme-assurance"] + [new_issue])
+    delta = sm.sync("q-quality", "jira", {"projects": ["REL"]},
+                    records=demo.JIRA_RECORDS["q-quality"] + [new_issue])
     print(f"  new Jira issue REL-99 → pulled {delta['pulled']} (delta only), ingested {delta['ingested']}")
-    print("  source health:", sm.source_health("acme-assurance"))
+    print("  source health:", sm.source_health("q-quality"))
 
     rule("13. WS2 DECIDE — 4-level model selector with an explainable WHY + EN/FR/ES/JA")
     p.model = __import__("knowledge_fabric.adapters.model", fromlist=["MockModelClient"]).MockModelClient()
-    p.policy.set_budget("acme-assurance", 100.0)
-    p.db.execute("UPDATE budgets SET spent=0 WHERE tenant=?", ("acme-assurance",))
+    p.policy.set_budget("q-quality", 100.0)
+    p.db.execute("UPDATE budgets SET spent=0 WHERE tenant=?", ("q-quality",))
     for q in ["what is the coverage target?",
               "why does a component with an open defect block its dependent releases?",
               "quel est le critère d acceptation pour la couverture?"]:
@@ -158,7 +158,7 @@ def main():
     rule("14. WS3 PROVE — caching savings by technique + filtered analytics (24h/7d, user, role)")
     # repeat a question to show the answer cache saving model spend
     svc.ask(asker, "what is the coverage target?")
-    a7 = p.telemetry.analytics("acme-assurance", "7d")
+    a7 = p.telemetry.analytics("q-quality", "7d")
     print(f"  answers={a7['answers']} tokens_in={a7['tokens_in']} tokens_out={a7['tokens_out']} "
           f"cost=${a7['total_cost']} saved=${a7['total_cost_saved']} cache_hit_rate={a7['cache_hit_rate']}")
     print("  routing by level:", a7["routing_by_level"])
@@ -166,7 +166,7 @@ def main():
     print("  savings by technique:", a7["savings_by_technique"])
     print("  per role:", a7["per_role"])
     print("  by language:", a7["by_language"])
-    a24 = p.telemetry.analytics("acme-assurance", "24h", role="asker")
+    a24 = p.telemetry.analytics("q-quality", "24h", role="asker")
     print(f"  filter[24h, role=asker]: answers={a24['answers']} users={list(a24['per_user'])}")
 
 
@@ -178,7 +178,7 @@ def main():
     from knowledge_fabric.connectors import admin as _cadmin
     from knowledge_fabric.health import kb_eval as _kb
     from knowledge_fabric.ingestion.intake import Intake as _Intake, IngestWorker as _Worker
-    T = "acme-assurance"
+    T = "q-quality"
     p.cache.invalidate(T)   # fresh numbers for the Stage-2 sections (no answer-cache replay)
 
     rule("15. MULTISTEP & CONDITIONAL REASONING — decomposed, every step governed")
@@ -196,8 +196,8 @@ def main():
 
     rule("16. QUERY COMPLEXITY (simple / medium / complex) → MULTI-MODEL ROUTING, tokens in/out")
     p.cache.invalidate(T)
-    mo = demo.principal_for(p, "meridian-health", "mo.asker")
-    nia = demo.principal_for(p, "northwind-air", "nia.asker")
+    mo = demo.principal_for(p, "q-health", "asker.public")
+    nia = demo.principal_for(p, "q-airlines", "asker.public")
     for prin, q in [(mo, "what does triage category 1 require?"),
                     (nia, "which aircraft system was deferred?"),
                     (asker, "why does a component with an open defect block its dependent releases and what must a release achieve?")]:
@@ -208,7 +208,7 @@ def main():
     rule("17. AUTHORITATIVE SOURCE — ranks per source, curator-marked docs win, conflicts flagged")
     print("  source ranks:", [(r["source"], r["rank"]) for r in _auth.list_ranks(p, T)])
     strat = p.documents.by_source_uri(T, "files", "file://qa/test-strategy.md")
-    _auth.mark_authoritative(p, T, strat["id"], True, "carl.curator"); p.cache.invalidate(T)
+    _auth.mark_authoritative(p, T, strat["id"], True, "curator"); p.cache.invalidate(T)
     a = svc.ask(asker, "what must a release achieve before promotion?")
     card = a.authoritative_source or {}
     print(f"  authoritative for this answer: {card.get('document_title')} ({card.get('source')}) — {card.get('reason')}")
@@ -223,7 +223,7 @@ def main():
     print("  history:", [(h["version"], h["passages"]) for h in hist])
     d = _ver.diff(p, T, strat["id"], 1, 2)
     print(f"  diff v1→v2: +{len(d['added'])} −{len(d['removed'])} ={d['unchanged']} | added: {d['added'][0][:60] if d['added'] else ''}")
-    rb = _ver.rollback(p, T, strat["id"], 1, "carl.curator"); p.cache.invalidate(T)
+    rb = _ver.rollback(p, T, strat["id"], 1, "curator"); p.cache.invalidate(T)
     print("  rollback to v1 →", rb)
     print("  dataset versions:", [(x["version"], x["reason"][:28]) for x in _ver.list_dataset_versions(p, T, 3)])
     pid = p.passages.by_document(T, strat["id"])[0].id
@@ -254,7 +254,7 @@ def main():
         print(f"   {doc['suggestion'].upper():7s} score={doc['score']:.2f} {doc['title'][:34]:34s} — {'; '.join(doc['reasons'])[:80]}")
 
     rule("21. ADMIN — connector permissions, bulk delete, AWS readiness")
-    _cadmin.disable(p, T, "github", "adar.admin")
+    _cadmin.disable(p, T, "github", "admin")
     print("  github enabled after admin disable:", _cadmin.is_enabled(p, T, "github"), "| allow/scopes:", {k: _cadmin.get(p, T, 'github')[k] for k in ('allow', 'scopes')})
     ups = [d for d in p.documents.list(T) if d["source"] == "upload"]
     for d in ups:

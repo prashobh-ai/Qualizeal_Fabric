@@ -53,7 +53,7 @@ def main(argv=None):
     ok = [r for r in res if r["status"] in ("ok", "updated")]
     print(f"[✓] ingested {len(ok)} docs · {p.passages.count(TENANT)} passages · "
           f"{sum(r.get('entities',0) for r in ok)} entities")
-    print("    try:  python -m knowledge_fabric.cli ask qualizeal asha.asker \"what is ValidAIte?\"")
+    print("    try:  python -m knowledge_fabric.cli ask qualizeal asker.public \"what is ValidAIte?\"")
     return 0
 
 

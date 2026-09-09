@@ -6,7 +6,7 @@ from knowledge_fabric.ingestion.intake import Intake, IngestWorker
 from knowledge_fabric.stores import versioning as ver
 from tests.util import seeded
 
-T = "acme-assurance"
+T = "q-quality"
 V1 = ("# Release Gate\n\nA release needs zero open critical defects before promotion.\n\n"
       "Coverage of priority-1 requirements must reach 95 percent.\n")
 V2 = ("# Release Gate\n\nA release needs zero open critical defects before promotion.\n\n"
@@ -113,7 +113,7 @@ class TestHistoryAndDiff(VersioningBase):
 
     def test_history_is_tenant_scoped(self):
         doc_id = self._two_versions()
-        self.assertEqual(ver.history(self.p, "northwind-air", doc_id), [])
+        self.assertEqual(ver.history(self.p, "q-airlines", doc_id), [])
         with self.assertRaises(PermissionError):
             ver.history(self.p, "", doc_id)
 
@@ -125,7 +125,7 @@ class TestRollback(VersioningBase):
         before = self.p.passages.count(T)
         audits_before = len(self.p.audit.for_tenant(T, 500))
 
-        out = ver.rollback(self.p, T, doc_id, 1, by_subject="carl.curator")
+        out = ver.rollback(self.p, T, doc_id, 1, by_subject="curator")
         self.assertEqual(out["new_version"], 3)
         self.assertEqual(out["reactivated"], len(v1_ids))
         self.assertEqual(out["restored_version"], 1)
@@ -164,12 +164,12 @@ class TestRollback(VersioningBase):
         self.assertEqual(len(entries), audits_before + 1)
         top = entries[0]
         self.assertEqual(top["action"], "version.rollback")
-        self.assertEqual(top["subject"], "carl.curator")
+        self.assertEqual(top["subject"], "curator")
         self.assertIn(doc_id, top["resource"])
 
     def test_rollback_reingest_of_restored_content_is_noop(self):
         doc_id = self._two_versions()
-        ver.rollback(self.p, T, doc_id, 1, by_subject="carl.curator")
+        ver.rollback(self.p, T, doc_id, 1, by_subject="curator")
         res = self._ingest(V1, "1")
         self.assertEqual(res["status"], "noop")       # idempotent-by-hash after restore
         res = self._ingest(V2, "3")
@@ -180,8 +180,8 @@ class TestRollback(VersioningBase):
 
     def test_rollback_forward_again(self):
         doc_id = self._two_versions()
-        ver.rollback(self.p, T, doc_id, 1, by_subject="carl.curator")
-        out = ver.rollback(self.p, T, doc_id, 2, by_subject="carl.curator")
+        ver.rollback(self.p, T, doc_id, 1, by_subject="curator")
+        out = ver.rollback(self.p, T, doc_id, 2, by_subject="curator")
         self.assertEqual(out["new_version"], 4)
         live = self._live(doc_id)
         self.assertEqual({p.version for p in live}, {2})
@@ -191,7 +191,7 @@ class TestRollback(VersioningBase):
         self._ingest(V1, "1")
         r2 = self._ingest(V2, "2")
         doc_id = r2["document_id"]
-        out = ver.rollback(self.p, T, doc_id, 1, by_subject="carl.curator")
+        out = ver.rollback(self.p, T, doc_id, 1, by_subject="curator")
         self.assertEqual(out["new_version"], 3)
         self.assertEqual({p.version for p in self._live(doc_id)}, {1})
 
@@ -199,7 +199,7 @@ class TestRollback(VersioningBase):
         doc_id = self._two_versions()
         v1_ids = [p.id for p in self.p.passages.by_document(T, doc_id) if p.version == 1]
         self.p.vindex.delete(T, v1_ids)
-        ver.rollback(self.p, T, doc_id, 1, by_subject="carl.curator")
+        ver.rollback(self.p, T, doc_id, 1, by_subject="curator")
         for pid in v1_ids:
             r = self.p.db.one("SELECT COUNT(*) c FROM embeddings WHERE tenant=? AND passage_id=?", (T, pid))
             self.assertEqual(r["c"], 1)
@@ -207,11 +207,11 @@ class TestRollback(VersioningBase):
     def test_rollback_errors(self):
         doc_id = self._two_versions()
         with self.assertRaises(KeyError):
-            ver.rollback(self.p, T, doc_id, 7, by_subject="carl.curator")
+            ver.rollback(self.p, T, doc_id, 7, by_subject="curator")
         with self.assertRaises(KeyError):
-            ver.rollback(self.p, T, "doc_missing", 1, by_subject="carl.curator")
+            ver.rollback(self.p, T, "doc_missing", 1, by_subject="curator")
         with self.assertRaises(KeyError):                 # wrong tenant cannot touch it
-            ver.rollback(self.p, "northwind-air", doc_id, 1, by_subject="nia.asker")
+            ver.rollback(self.p, "q-airlines", doc_id, 1, by_subject="asker.public")
         with self.assertRaises(ValueError):
             ver.rollback(self.p, T, doc_id, 1, by_subject="")
         # nothing changed
@@ -237,7 +237,7 @@ class TestDatasetAndLineage(VersioningBase):
         self.assertEqual(rows[0]["passage_count"], self.p.passages.count(T))
         self.assertEqual(rows[0]["doc_count"], len(self.p.documents.list(T)))
         # other tenant is untouched
-        self.assertEqual(ver.current_dataset(self.p, "northwind-air"), 0)
+        self.assertEqual(ver.current_dataset(self.p, "q-airlines"), 0)
 
     def test_lineage_resolves_passage_to_origin(self):
         doc_id = self._two_versions()
@@ -259,7 +259,7 @@ class TestDatasetAndLineage(VersioningBase):
         self.assertEqual(lin_old["superseded_by"], "v2")
         self.assertEqual(lin_old["source_version"], "1")
         # tenant isolation: another tenant cannot resolve it
-        self.assertIsNone(ver.lineage(self.p, "northwind-air", live.id))
+        self.assertIsNone(ver.lineage(self.p, "q-airlines", live.id))
         self.assertIsNone(ver.lineage(self.p, T, "pas_nope"))
 
 

@@ -36,6 +36,10 @@ class Platform:
         idp_secret = idp_secret or os.environ.get("KF_IDP_SECRET", "local-dev-secret-change-me")
 
         env = dict(os.environ)
+        # KF_PROFILE = lite (default, stdlib) | full (real engines: Postgres+pgvector+pg_trgm,
+        # OTel collector, Jaeger, Prometheus). The profile only sets *groups* of the env
+        # vars below; nothing about the contract shape or invariants changes.
+        self.profile = (env.get("KF_PROFILE") or "lite").lower()
         # AWS parity: the same code selects local or cloud adapters purely by env
         # (KF_DB_URL / KF_OBJECTSTORE=s3 / KF_QUEUE=sqs); application code never
         # learns which shape it runs in.

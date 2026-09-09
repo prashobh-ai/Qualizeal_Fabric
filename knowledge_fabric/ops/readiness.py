@@ -436,7 +436,7 @@ def probe_health(timeout_s: float = 10.0) -> tuple[int, dict]:
 
     if http_api._platform is None:                          # seed a throwaway in-memory platform
         p = Platform(db_path=":memory:", blob_root=tempfile.mkdtemp(prefix="kf-doctor-"))
-        demo.seed(p, ["acme-assurance"])
+        demo.seed(p, ["q-quality"])
         http_api._platform, http_api._svc = p, AnswerService(p)
     srv = _QuietServer(("127.0.0.1", 0), http_api.Handler)
     port = srv.server_address[1]

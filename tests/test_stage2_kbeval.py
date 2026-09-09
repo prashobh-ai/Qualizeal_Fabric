@@ -7,8 +7,8 @@ from knowledge_fabric.ingestion.intake import Intake, IngestWorker
 from knowledge_fabric.tenants import demo
 from tests.util import seeded
 
-T = "acme-assurance"
-OTHER = "northwind-air"
+T = "q-quality"
+OTHER = "q-airlines"
 DAY_MS = 86_400_000
 
 
@@ -18,7 +18,7 @@ class KbEvalBase(unittest.TestCase):
     def setUp(self):
         self.p = seeded([T, OTHER])
         self.svc = AnswerService(self.p)
-        self.asker = demo.principal_for(self.p, T, "asha.asker")
+        self.asker = demo.principal_for(self.p, T, "asker.public")
         self.answers = [self.svc.ask(self.asker, q) for q, _, _ in demo.QUESTION_BANK[T][:3]]
         self.docs = {d["uri"]: d for d in self.p.documents.list(T)}
         self.strategy = self.docs["file://qa/test-strategy.md"]

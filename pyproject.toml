@@ -1,0 +1,81 @@
+[project]
+name = "qualizeal-knowledge-fabric"
+version = "0.3.0"
+description = "QualiZeal Knowledge Fabric — grounded answers with citations, multi-tenant, deployment-portable"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "QualiZeal AI-COE" }]
+
+# Runtime stays stdlib-only (ADR-0001). Every group below is optional; missing
+# packages degrade to the stdlib adapter, tests skip rather than fail, and CI
+# still runs green on a plain interpreter.
+dependencies = []
+
+[project.optional-dependencies]
+# Real conversion + embedding + tokenisation + language detection engines.
+# All permissive (MIT / Apache-2.0 / BSD).
+engines = [
+  "docling>=2.0",                       # MIT
+  "sentence-transformers>=3.0",         # Apache-2.0
+  "torch>=2.2",                         # BSD-3
+  "transformers>=4.44",                 # Apache-2.0
+  "lingua-language-detector>=2.0",      # Apache-2.0
+  "spacy>=3.7",                         # MIT
+  "tiktoken>=0.7",                      # MIT
+]
+
+# Postgres + pgvector engines behind the same contracts. pg8000 is BSD-3
+# (permissive) so it stays inside the licence gate; psycopg is NOT used.
+db = [
+  "pg8000>=1.31",                       # BSD-3
+]
+
+# OpenTelemetry SDK adapter behind the Telemetry protocol. All Apache-2.0.
+otel = [
+  "opentelemetry-api>=1.27",
+  "opentelemetry-sdk>=1.27",
+  "opentelemetry-exporter-otlp-proto-http>=1.27",
+  "opentelemetry-semantic-conventions>=0.48b0",
+  "opentelemetry-instrumentation>=0.48b0",
+]
+
+# Provider gateway (OpenAI / Bedrock / vLLM). Apache-2.0 / MIT.
+providers = [
+  "openai>=1.40",                       # Apache-2.0
+  "boto3>=1.34",                        # Apache-2.0
+]
+
+# Read-only, allow-listed, ACL-propagating connectors.
+connectors = [
+  "msal>=1.28",                          # MIT
+  "atlassian-python-api>=3.41",          # Apache-2.0
+  "google-api-python-client>=2.140",     # Apache-2.0
+  "PyGithub>=2.3",                       # LGPL-3.0 — external-service-only usage
+]
+
+# Speech: ASR + VAD + TTS, CPU-friendly int8 defaults.
+speech = [
+  "faster-whisper>=1.0",                # MIT
+  "silero-vad>=5.1",                    # MIT
+  "kokoro>=0.3",                        # Apache-2.0
+  "soundfile>=0.12",                    # BSD-3
+  "numpy>=1.26",                        # BSD-3
+]
+
+# Developer + CI extras.
+dev = [
+  "ruff>=0.6",                          # MIT
+  "mypy>=1.11",                         # MIT
+]
+
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["knowledge_fabric"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

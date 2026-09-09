@@ -6,7 +6,10 @@ PORT ?= 8080
 export KF_DB
 export PYTHONPATH := .
 
-.PHONY: help up down health test demo seed ask serve mcp demo-reset licences ci
+.PHONY: help up down health test demo seed ask serve mcp demo-reset licences ci compose-up compose-down
+
+PROFILE ?= lite
+export KF_PROFILE := $(PROFILE)
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -29,8 +32,8 @@ demo: ## Run the narrated end-to-end execution demo
 seed: ## Seed synthetic demo tenants (identifier-safety validated)
 	@$(PY) -m knowledge_fabric.cli seed
 
-ask: ## make ask Q="your question" [TENANT=acme-assurance USER=asha.asker]
-	@$(PY) -m knowledge_fabric.cli ask $(or $(TENANT),acme-assurance) $(or $(USER),asha.asker) "$(Q)"
+ask: ## make ask Q="your question" [TENANT=q-quality USER=asker.public]
+	@$(PY) -m knowledge_fabric.cli ask $(or $(TENANT),q-quality) $(or $(USER),asker.public) "$(Q)"
 
 serve: ## Serve the HTTP surfaces (Ask console at http://localhost:$(PORT)/)
 	@KF_PORT=$(PORT) $(PY) -m knowledge_fabric.surfaces.http_api
@@ -51,7 +54,7 @@ consoles: ## Print the console URLs (Ask / Curator / Admin / Dashboard)
 	@echo "Ask: http://localhost:$(PORT)/   Curator: /curator   Admin: /admin   Dashboard: /dashboard"
 
 sync: ## Show connector source health + registry
-	@$(PY) -c "from knowledge_fabric.app import Platform;from knowledge_fabric.tenants import demo;from knowledge_fabric.ingestion.sync import SyncManager;from knowledge_fabric.connectors import registry;p=Platform(db_path='$(KF_DB)');print('connectors:',registry.available());print('sources:',SyncManager(p).source_health('acme-assurance'))"
+	@$(PY) -c "from knowledge_fabric.app import Platform;from knowledge_fabric.tenants import demo;from knowledge_fabric.ingestion.sync import SyncManager;from knowledge_fabric.connectors import registry;p=Platform(db_path='$(KF_DB)');print('connectors:',registry.available());print('sources:',SyncManager(p).source_health('q-quality'))"
 
 demo-reset: down seed ## One-command reset to a clean, seeded, known-good state
 	@echo "reset to seeded state"
@@ -61,3 +64,9 @@ licences: ## Licence gate (I14): fails on any non-permissive runtime dependency
 
 ci: test licences ## What CI runs
 	@$(PY) -c "from knowledge_fabric.tenants import demo; assert demo.validate_identifiers()==[]; print('identifier-safety: PASS')"
+
+compose-up: ## Bring the stack up under a profile: make compose-up PROFILE=lite|full
+	@cd deploy/compose && KF_PROFILE=$(PROFILE) docker compose --profile $(PROFILE) up -d
+
+compose-down: ## Tear the stack down
+	@cd deploy/compose && docker compose --profile lite --profile full down

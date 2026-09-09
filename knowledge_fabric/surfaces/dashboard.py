@@ -65,14 +65,14 @@ th{color:var(--mut);font-weight:600}
 <main id="view"></main>
 <script>
 const TABS=["Overview","Trust","Sources","Models","Usage","Cost & Caching"];
-let TAB="Overview", TOKEN=null, DATA=null, SOURCES=null, TENANTS=["acme-assurance","qualizeal","northwind-air"];
+let TAB="Overview", TOKEN=null, DATA=null, SOURCES=null, TENANTS=["q-quality","qualizeal","q-airlines"];
 const $=s=>document.querySelector(s);
 const COL=["#4f7cff","#3ecf8e","#f0b429","#c77dff","#4bd6e5","#f06a6a"];
 function fmt(n){return (n||0).toLocaleString()}
 function money(n){return "$"+(n||0).toFixed(4)}
 
 async function login(tenant){
- const r=await fetch('/login',{method:'POST',body:JSON.stringify({tenant,subject:'adar.admin'})});
+ const r=await fetch('/login',{method:'POST',body:JSON.stringify({tenant,subject:'admin'})});
  return (await r.json()).token;
 }
 async function load(){
