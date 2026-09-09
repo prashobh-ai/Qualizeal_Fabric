@@ -157,11 +157,14 @@ def escalate(decision: dict, confidence: float, floor: float) -> dict:
 
 
 def _explain(name, reasons, doc_spread, grounding) -> str:
+    # Reader-facing wording only: the level is named by its reader word, never
+    # by an internal code or the routing tier (L1.5 / D11 — this string is shown
+    # verbatim in the answer card's "Why" row).
     lead = {
-        "lookup": "Answered by the extractive core with no model — a direct look-up",
-        "fast": "Routed to the fast tier — light synthesis",
-        "reason": "Routed to the deep tier — this needs reasoning across evidence",
-        "escalation": "Escalated to the strongest tier",
+        "lookup": "Looked it up — a direct answer from the source",
+        "fast": "Quoted the most relevant passages — a light synthesis",
+        "reason": "Summarised across the evidence",
+        "escalation": "Reasoned across the strongest evidence",
     }[name]
-    tail = f" across {doc_spread} documents" if doc_spread >= 2 else ""
+    tail = f" spanning {doc_spread} documents" if doc_spread >= 2 else ""
     return f"{lead}{tail} (grounding {round(grounding, 2)})."

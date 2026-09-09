@@ -44,10 +44,12 @@ T = "test-fabric"
 PAGES = {"ask": ASK_HTML, "curator": CURATOR_HTML, "admin": ADMIN_HTML}
 
 # element ids each page must render into (contract Section G)
-ASK_IDS = ["ask-form", "question", "ask-btn", "samples", "answer-card", "answer-text", "confidence-meter",
-           "citations", "why-card", "model-used", "tokens-in", "tokens-out", "complexity", "language",
-           "cache-hit", "cost-saved", "authoritative-source", "conflicts", "dataset-version",
-           "reasoning", "reasoning-steps", "trajectory-id", "clarify-back"]
+# L2 — the three-column Workspace: threads · conversation · right rail.
+ASK_IDS = ["ws", "threads", "thread-list", "new-chat", "corpus-strip",
+           "tile-documents", "tile-passages", "tile-entities", "tile-relationships", "tile-domains",
+           "messages", "question", "ask-btn", "ask-status", "answer-lang", "mic-btn", "read-aloud",
+           "galaxy", "galaxy-stats", "explain-btn", "answer-card", "usage-body", "usage-subject",
+           "page-drawer", "explain-drawer"]
 CURATOR_IDS = ["quality-tiles", "risk-register", "gaps-list", "contradictions-list", "review-list",
                "doc-table", "doc-rows", "doc-filter", "doc-search", "history-panel", "versions-rows",
                "dataset-rows", "add-doc-form", "add-filename", "add-text", "add-btn", "authority-ranks"]
@@ -197,12 +199,15 @@ class TestContract(unittest.TestCase):
         for field in ANSWER_FIELDS:
             self.assertIn(field, ASK_HTML, f"Ask page never reads '{field}'")
         self.assertIn("'/ask'", ASK_HTML)
-        self.assertIn("Reasoning steps", ASK_HTML)
-        self.assertIn("Model used", ASK_HTML)
-        self.assertIn("Tokens in", ASK_HTML)
-        self.assertIn("Tokens out", ASK_HTML)
-        self.assertIn("AUTHORITATIVE", ASK_HTML)
-        self.assertIn("condition", ASK_HTML)
+        # L2 card rows + the galaxy/usage endpoints the Workspace owns.
+        self.assertIn("Answered by", ASK_HTML)
+        self.assertIn("Moved levels", ASK_HTML)
+        self.assertIn("Model", ASK_HTML)
+        self.assertIn("Tokens", ASK_HTML)
+        self.assertIn("Authoritative source", ASK_HTML)
+        self.assertIn("condition", ASK_HTML)                     # reasoning branch
+        self.assertIn("/api/galaxy", ASK_HTML)
+        self.assertIn("/api/usage", ASK_HTML)
         for path in CURATOR_ENDPOINTS + ADMIN_ENDPOINTS:
             self.assertNotIn(path, ASK_HTML, f"Ask page must not call {path}")
 
@@ -343,6 +348,12 @@ class TestServedPages(unittest.TestCase):
         if a["why"]:
             for k in ("level_name", "explain", "reasons"):
                 self.assertIn(k, a["why"])
+            # L2.3 — the Trust bars (five grounding signals) and Sources found/cited.
+            self.assertIn("signals", a["why"])
+            self.assertEqual(set(a["why"]["signals"]),
+                             {"retrieval", "semantic", "coverage", "agreement", "resolvable"})
+            self.assertIn("retrieved", a["why"])
+            self.assertGreaterEqual(a["why"]["retrieved"], len(a["citations"]))
         # multistep question → reasoning timeline payload
         code, a = self._json("POST", "/ask", {"question": "what must a release achieve before promotion and "
                                                           "which requirement has a traceability gap?"},
@@ -353,6 +364,62 @@ class TestServedPages(unittest.TestCase):
         for s in a["reasoning"]["steps"]:
             for k in ("id", "question", "kind", "answer_text", "grounding", "condition"):
                 self.assertIn(k, s)
+
+    def test_runtime_why_text_has_no_internal_words(self):
+        # L1.5 / D11 at RUNTIME — the answer card shows ``why.explain`` verbatim,
+        # so the server must never frame the answer with an internal routing word
+        # (the static HTML audit cannot see server-generated strings).
+        banned = ["tier", "trajectory", "pgvector", "rrf", "kf-mock", "token ledger",
+                  "routed to"]
+        tok = self.tokens["asker.public"]
+        for q in ("what must a release achieve before promotion?",
+                  "what is the release gate?",
+                  "compare the release gate and the incident policy and explain the difference"):
+            _, a = self._json("POST", "/ask", {"question": q}, tok)
+            explain = ((a.get("why") or {}).get("explain") or "").lower()
+            for w in banned:
+                self.assertNotIn(w, explain, f"why.explain leaks {w!r} for {q!r}: {explain!r}")
+
+    def test_usage_is_self_scoped(self):
+        # L2.5 — /api/usage returns the CALLER's own aggregates across
+        # today / 7d / 30d, plus the tenant budget bar; a signed-in asker can
+        # read it (no curate role needed) and only sees their own subject.
+        tok = self.tokens["asker.public"]
+        self._json("POST", "/ask", {"question": "what must a release achieve before promotion?"}, tok)
+        code, u = self._json("GET", "/api/usage", token=tok)
+        self.assertEqual(code, 200)
+        self.assertEqual(u["subject"], "asker.public")
+        for win in ("today", "7d", "30d"):
+            self.assertIn(win, u["windows"])
+            for k in ("questions", "answered", "declined", "tokens_in", "tokens_out",
+                      "cost", "cost_saved", "by_level"):
+                self.assertIn(k, u["windows"][win])
+        self.assertGreaterEqual(u["windows"]["30d"]["questions"], 1)
+        self.assertIn("budget", u)
+        # unauthenticated is refused
+        code, _ = self._json("GET", "/api/usage")
+        self.assertEqual(code, 401)
+
+    def test_galaxy_is_self_scoped_and_activates(self):
+        # L2.4 — /api/galaxy lights up the graph for one answer's trace; an
+        # asker may only see their OWN trace; an unknown trace is empty (not an
+        # error) so the rail degrades gracefully.
+        tok = self.tokens["asker.public"]
+        code, a = self._json("POST", "/ask",
+                             {"question": "what must a release achieve before promotion?"}, tok)
+        tid = a["trajectory_id"]
+        code, g = self._json("GET", f"/api/galaxy?trace_id={tid}", token=tok)
+        self.assertEqual(code, 200)
+        for k in ("nodes", "edges", "stats"):
+            self.assertIn(k, g)
+        self.assertIn("activated", g["stats"])
+        # a foreign / unknown trace yields an empty galaxy, not a leak
+        code, g2 = self._json("GET", "/api/galaxy?trace_id=does-not-exist", token=tok)
+        self.assertEqual(code, 200)
+        self.assertEqual(g2["nodes"], [])
+        # unauthenticated is refused
+        code, _ = self._json("GET", f"/api/galaxy?trace_id={tid}")
+        self.assertEqual(code, 401)
 
     def test_unauthenticated_and_forbidden(self):
         code, j = self._json("POST", "/ask", {"question": "x"})
