@@ -46,8 +46,25 @@ def demo_directory() -> dict:
 # brand stylesheet (dashboard palette + console components)
 # --------------------------------------------------------------------------
 BRAND_CSS = r"""
-:root{--navy:#0E1A45;--navy2:#132257;--ink:#0b1020;--panel:#0f1a3a;--panel2:#152351;--line:#26356b;
---fg:#e8ecf7;--mut:#9fb0d8;--accent:#4f7cff;--good:#3ecf8e;--warn:#f0b429;--bad:#f06a6a;--info:#4bd6e5;--violet:#c77dff;}
+:root{
+ /* QualiZeal brand tokens (P1.1 — lifted verbatim from the demo styles/main.css).
+    These name the palette; the console component tokens below map onto them so
+    a rebrand is a token swap, never a search-and-replace across CSS. */
+ --qz-blue:#4D7CFF;--qz-blue-deep:#2E5DDB;--qz-blue-soft:rgba(77,124,255,.16);
+ --qz-pink:#EE1C5C;--qz-pink-deep:#C81550;--qz-pink-soft:rgba(238,28,92,.16);
+ --qz-violet:#7B5BFF;--qz-cyan:#4DD0E8;
+ /* navy canvas: only the .galaxy and .health-ring components paint themselves
+    onto this dark canvas so the graph looks exactly like the demo; the rest of
+    the shell keeps its business-grade dark chrome. */
+ --qz-canvas:#0E1A45;--qz-canvas-1:#142158;--qz-canvas-2:#1A2A6E;
+ /* existing console shell — unchanged so the current consoles keep their look. */
+ --navy:#0E1A45;--navy2:#132257;--ink:#0b1020;--panel:#0f1a3a;--panel2:#152351;--line:#26356b;
+ --fg:#e8ecf7;--mut:#9fb0d8;--accent:#4f7cff;--good:#3ecf8e;--warn:#f0b429;--bad:#f06a6a;--info:#4bd6e5;--violet:#c77dff;
+}
+/* Galaxy panel + health ring: navy canvas only, per §1 rule. */
+.galaxy,.health-ring{background:var(--qz-canvas);color:#eef2ff;border-radius:14px;
+ background-image:radial-gradient(1200px 480px at 20% 0,rgba(77,124,255,.18),transparent 60%),
+                  radial-gradient(900px 380px at 90% 100%,rgba(238,28,92,.14),transparent 55%)}
 *{box-sizing:border-box}html{color-scheme:dark}
 body{margin:0;background:var(--ink);color:var(--fg);font:14px/1.5 Inter,system-ui,Segoe UI,Roboto,sans-serif}
 a{color:var(--accent)}

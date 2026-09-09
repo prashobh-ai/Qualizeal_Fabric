@@ -147,6 +147,22 @@ class TestMarkup(unittest.TestCase):
         self.assertIn("gate(e,'admin')", ADMIN_HTML)
         self.assertIn("gate(e,'asker')", ASK_HTML)
 
+    def test_brand_tokens_present(self):
+        """P1.1 — the QualiZeal brand tokens ship in every served page.
+
+        The dark shell is unchanged; the four brand tokens (blue/pink/violet/
+        cyan) plus the navy-canvas variables must be defined, and the galaxy
+        + health-ring rule that pins the canvas must be present.
+        """
+        for name, html in PAGES.items():
+            with self.subTest(page=name):
+                for token in ("--qz-blue:#4D7CFF", "--qz-pink:#EE1C5C",
+                              "--qz-violet:#7B5BFF", "--qz-cyan:#4DD0E8",
+                              "--qz-canvas:#0E1A45"):
+                    self.assertIn(token, html, f"{name} lacks {token}")
+                # navy canvas scoped to .galaxy and .health-ring only
+                self.assertIn(".galaxy,.health-ring", html)
+
 
 # ==========================================================================
 # 2. contract
@@ -406,6 +422,63 @@ class TestServedPages(unittest.TestCase):
         self.assertEqual(code, 200); self.assertIn("ranks", ranks)
         code, rd = self._json("POST", "/admin/refresh/run-due", {}, tok)
         self.assertEqual(code, 200); self.assertIn("ran", rd)
+
+
+class TestStaticAssets(unittest.TestCase):
+    """P1.1 — static asset serving under /static/*.
+
+    The brand assets, the vendor JS/CSS, and self-hosted fonts must ship from
+    ``surfaces/static/`` with a cache header, and path traversal must never
+    resolve outside that directory.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.platform = seeded([T])
+        cls._saved = (http_api._platform, http_api._svc)
+        http_api._platform = cls.platform
+        http_api._svc = AnswerService(cls.platform)
+        cls.srv = ThreadingHTTPServer(("127.0.0.1", 0), http_api.Handler)
+        cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}"
+        cls.thread = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.srv.server_close()
+        http_api._platform, http_api._svc = cls._saved
+
+    def _get(self, path):
+        try:
+            with urllib.request.urlopen(self.base + path, timeout=10) as r:
+                return r.status, r.headers, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers, e.read()
+
+    def test_brand_mark_served(self):
+        code, headers, body = self._get("/static/brand/qualizeal-mark.jpg")
+        self.assertEqual(code, 200)
+        self.assertEqual(headers.get("Content-Type"), "image/jpeg")
+        self.assertGreater(len(body), 512)
+        self.assertIn("public", (headers.get("Cache-Control") or "").lower())
+
+    def test_brand_wordmark_served(self):
+        code, headers, _ = self._get("/static/brand/qualizeal-wordmark.jpeg")
+        self.assertEqual(code, 200)
+        self.assertEqual(headers.get("Content-Type"), "image/jpeg")
+
+    def test_missing_asset_returns_404(self):
+        code, _, _ = self._get("/static/vendor/nonexistent-bundle.js")
+        self.assertEqual(code, 404)
+
+    def test_path_traversal_refused(self):
+        """`/static/../etc/passwd` and its friends must all 404, not 200."""
+        for path in ("/static/..%2Fetc%2Fpasswd",
+                     "/static/./../__init__.py",
+                     "/static/..%2F..%2Fapp.py"):
+            code, _, _ = self._get(path)
+            self.assertEqual(code, 404, f"{path} should be 404, got {code}")
 
 
 if __name__ == "__main__":
