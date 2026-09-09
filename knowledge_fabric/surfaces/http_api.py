@@ -79,20 +79,9 @@ def platform() -> Platform:
 
 
 def _demo_delta(tenant: str, source: str) -> list[dict] | None:
-    """For demo tenants, synthesise ONE fresh record so 'Sync now' visibly
-    ingests a delta (real connectors pull from the live API instead)."""
-    stamp = int(time.time())
-    if source == "jira" and tenant in demo.JIRA_RECORDS:
-        return demo.JIRA_RECORDS[tenant] + [{
-            "project": "REL", "key": f"REL-{stamp % 10000}", "status": "Open", "updated": stamp,
-            "summary": "Automated sync check", "acl": ["public"],
-            "description": f"Synthetic issue created by the continuous-refresh demo at {stamp}. "
-                           "It confirms the scheduler pulls only the delta since the last cursor."}]
-    if source == "github" and tenant in demo.GITHUB_RECORDS:
-        return demo.GITHUB_RECORDS[tenant] + [{
-            "repo": "qualizeal/kf-platform", "path": f"docs/sync-{stamp}.md", "updated_at": stamp,
-            "commit": f"c{stamp % 100000:05d}", "mime": "text/markdown",
-            "content": f"# Sync note {stamp}\n\nA fresh commit picked up by the continuous-refresh demo."}]
+    """The product fabric carries no synthetic connector records (L0.2), so
+    'Sync now' runs the real connector (which pulls the live API). Returns
+    None here; the continuous-refresh demo runs against a test fabric."""
     return None
 
 
@@ -353,8 +342,9 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/admin/users":
             prin = self._require("admin")
             if not prin: return
+            rows = demo.DEMO_USERS.get(prin.tenant) or demo._ROLE_USERS
             return self._send(200, {"users": [{"subject": s, "roles": r, "scopes": sc}
-                                              for s, r, sc in demo.DEMO_USERS.get(prin.tenant, [])]})
+                                              for s, r, sc in rows]})
         if u.path == "/admin/authority":
             prin = self._require("admin")
             if not prin: return
@@ -525,18 +515,14 @@ _loops: list = []
 
 def start_refresh_loops(p: Platform) -> list:
     """Continuous refresh: one RefreshLoop per tenant (KF_REFRESH_TICK_S, default 5s).
-    Demo tenants get their offline connector records so scheduled syncs pull deltas."""
+    The product fabric carries no synthetic connector records (L0.2); real
+    connectors pull from the live API on each tick."""
     tick = float(os.environ.get("KF_REFRESH_TICK_S", "5"))
     if os.environ.get("KF_REFRESH", "1") != "1":
         return []
     loops = []
     for t in demo.DEMO_TENANTS:
-        rec = {}
-        if t.tenant in demo.JIRA_RECORDS:
-            rec["jira"] = demo.JIRA_RECORDS[t.tenant]
-        if t.tenant in demo.GITHUB_RECORDS:
-            rec["github"] = demo.GITHUB_RECORDS[t.tenant]
-        loop = scheduler.RefreshLoop(p, t.tenant, tick_s=tick, records_by_source=rec or None)
+        loop = scheduler.RefreshLoop(p, t.tenant, tick_s=tick, records_by_source=None)
         loop.start()
         loops.append(loop)
     return loops

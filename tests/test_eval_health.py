@@ -9,37 +9,40 @@ from tests.util import seeded
 
 class TestEvalHealth(unittest.TestCase):
     def setUp(self):
-        self.p = seeded(["qualizeal"])
+        self.p = seeded(["test-fabric"])
 
     def test_question_bank_passes_gate(self):
-        v = gate.evaluate(self.p, "qualizeal", candidate_version=1)
+        v = gate.evaluate(self.p, "test-fabric", candidate_version=1)
         self.assertTrue(v["passed"], v["regressions"])
         self.assertGreaterEqual(v["metrics"]["citation_coverage"], 0.75)
 
     def test_corrupted_citation_blocks_promotion(self):
         # run a clean evaluate first so the answer cache is populated — the gate
         # must still see the corruption (caches are invalidated on index change).
-        self.assertTrue(gate.evaluate(self.p, "qualizeal", 1)["passed"])
-        gate.corrupt_citation_coordinates(self.p, "qualizeal")
-        v = gate.promote_if_passes(self.p, "qualizeal", candidate_version=2)
+        self.assertTrue(gate.evaluate(self.p, "test-fabric", 1)["passed"])
+        gate.corrupt_citation_coordinates(self.p, "test-fabric")
+        v = gate.promote_if_passes(self.p, "test-fabric", candidate_version=2)
         self.assertFalse(v["passed"], "corrupt index must be blocked (I10)")
         self.assertIsNone(v["promoted"])
 
     def test_health_snapshot_and_risk_register(self):
-        h = metrics.latest(self.p, "qualizeal")
+        h = metrics.latest(self.p, "test-fabric")
         self.assertIn("coverage", h)
         self.assertGreaterEqual(h["traceability"], 1.0)   # every passage has provenance
-        risks = metrics.risk_register(self.p, "qualizeal")
+        risks = metrics.risk_register(self.p, "test-fabric")
         self.assertIsInstance(risks, list)
 
     def test_identifier_safety_validation(self):
-        problems = demo.validate_identifiers()
-        self.assertEqual(problems, [], f"demo data must be identifier-safe: {problems}")
+        # The product fabric ships no documents (L0.2), so demo.validate is
+        # trivially empty; the synthetic fixture validates its own corpus.
+        self.assertEqual(demo.validate_identifiers(), [])
+        from tests.fixtures import synthetic_corpus
+        self.assertEqual(synthetic_corpus.validate_identifiers(), [],
+                         "synthetic fixture corpus must be identifier-safe")
 
     def test_identifier_safety_fails_on_real_identifier(self):
         # inject a real-looking phone number and confirm the validator would catch it
-        import re
-        from knowledge_fabric.tenants.demo import _UNSAFE
+        from tests.fixtures.synthetic_corpus import _UNSAFE
         bad = "call us at 212-555-9034 today"
         hit = any(lbl and pat.search(bad) for pat, lbl in _UNSAFE)
         self.assertTrue(hit)

@@ -16,7 +16,7 @@ def _cit(doc, pid, n=1):
 
 def _ans(text, cits, g=0.8, conf=0.8, kind=AnswerKind.ANSWER, clarify=None):
     return Answer(kind, text, cits, conf, "traj_x", 0.0, 0, "none", grounding_score=g,
-                  clarify_back=clarify, tenant="qualizeal")
+                  clarify_back=clarify, tenant="test-fabric")
 
 
 def _gap(text="The corpus does not contain enough grounded evidence to answer this."):

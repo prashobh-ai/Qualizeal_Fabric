@@ -35,9 +35,10 @@ from knowledge_fabric.surfaces.admin_ui import ADMIN_HTML
 from knowledge_fabric.surfaces.ask_ui import ASK_HTML
 from knowledge_fabric.surfaces.curator_ui import CURATOR_HTML
 from knowledge_fabric.tenants import demo
+from tests.fixtures import synthetic_corpus
 from tests.util import seeded
 
-T = "qualizeal"
+T = "test-fabric"
 PAGES = {"ask": ASK_HTML, "curator": CURATOR_HTML, "admin": ADMIN_HTML}
 
 # element ids each page must render into (contract Section G)
@@ -128,8 +129,13 @@ class TestMarkup(unittest.TestCase):
     def test_demo_directory_matches_seed_and_is_embedded(self):
         d = ui_common.demo_directory()
         self.assertEqual([t["tenant"] for t in d["tenants"]], list(demo.DEMO_USERS))
-        self.assertEqual([u["subject"] for u in d["users"][T]], [s for s, _, _ in demo.DEMO_USERS[T]])
-        self.assertEqual(d["questions"][T], [q for q, _, _ in demo.QUESTION_BANK[T]])
+        # The product directory carries the single `qualizeal` fabric and its
+        # role users; questions now come from /api/suggestions (L0.2/L0.3),
+        # so the static question list is empty.
+        prod = "qualizeal"
+        self.assertEqual([u["subject"] for u in d["users"][prod]],
+                         [s for s, _, _ in demo.DEMO_USERS[prod]])
+        self.assertEqual(d["questions"][prod], [])
         self.assertEqual(ui_common.demo_directory(), d)          # deterministic
         for html in PAGES.values():
             m = re.search(r"window\.KF_DIRECTORY=(\{.*?\});</script>", html, re.S)
@@ -377,7 +383,16 @@ class TestServedPages(unittest.TestCase):
         self.assertIn("connector", out); self.assertIn("health", out)
         for k in ("freshness_minutes", "last_status", "error_count", "next_run", "interval_s", "items", "sla_breach"):
             self.assertIn(k, out["health"])
-        code, s = self._json("POST", "/admin/sync", {"source": "jira"}, tok)
+        # The product fabric carries no synthetic delta (L0.2); a real
+        # connector supplies the records. Pass a fresh record (not already in
+        # the fixture load) so the sync ingests a delta through all 7 stages.
+        fresh_jira = synthetic_corpus.JIRA_RECORDS + [{
+            "project": "REL", "key": "REL-901", "summary": "Fresh sync record",
+            "status": "Open", "updated": 9999, "acl": ["public"],
+            "description": "A new issue supplied by the connector to exercise the "
+                           "seven-stage ingestion pipeline on Sync now."}]
+        code, s = self._json("POST", "/admin/sync",
+                             {"source": "jira", "records": fresh_jira}, tok)
         self.assertEqual(code, 200); self.assertIn("run_id", s)
         code, r = self._json("GET", "/admin/runs?limit=12", token=tok)
         self.assertEqual(code, 200)
@@ -409,7 +424,7 @@ class TestServedPages(unittest.TestCase):
             self.assertIn(k, b)
         code, u = self._json("GET", "/admin/users", token=tok)
         self.assertEqual(code, 200)
-        self.assertEqual({x["subject"] for x in u["users"]}, {s for s, _, _ in demo.DEMO_USERS[T]})
+        self.assertEqual({x["subject"] for x in u["users"]}, {s for s, _, _ in demo._ROLE_USERS})
         for x in u["users"]:
             for k in ("subject", "roles", "scopes"):
                 self.assertIn(k, x)

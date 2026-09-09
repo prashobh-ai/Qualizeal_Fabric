@@ -7,7 +7,7 @@ from knowledge_fabric.governance import authority as auth
 from knowledge_fabric.tenants import demo
 from tests.util import seeded
 
-T = "qualizeal"
+T = "test-fabric"
 
 
 def _cite(doc: dict, passage_id: str = "pas_x") -> Citation:

@@ -27,7 +27,7 @@ from tests.util import seeded
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "ci" / "licence_manifest.json"
 GATE = ROOT / "scripts" / "licence_gate.py"
-T = "qualizeal"
+T = "test-fabric"
 T2 = "isolation-check"
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
 HEX16 = re.compile(r"^[0-9a-f]{16}$")

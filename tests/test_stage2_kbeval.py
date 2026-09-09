@@ -6,8 +6,9 @@ from knowledge_fabric.health import kb_eval
 from knowledge_fabric.ingestion.intake import Intake, IngestWorker
 from knowledge_fabric.tenants import demo
 from tests.util import seeded
+from tests.fixtures import synthetic_corpus
 
-T = "qualizeal"
+T = "test-fabric"
 OTHER = "isolation-check"
 DAY_MS = 86_400_000
 
@@ -19,14 +20,14 @@ class KbEvalBase(unittest.TestCase):
         self.p = seeded([T, OTHER])
         self.svc = AnswerService(self.p)
         self.asker = demo.principal_for(self.p, T, "asker.public")
-        self.answers = [self.svc.ask(self.asker, q) for q, _, _ in demo.QUESTION_BANK[T][:3]]
+        self.answers = [self.svc.ask(self.asker, q) for q, _, _ in synthetic_corpus.QUESTION_BANK[:3]]
         self.docs = {d["uri"]: d for d in self.p.documents.list(T)}
         self.strategy = self.docs["file://qa/test-strategy.md"]
         self.restricted = self.docs["file://qa/defect-policy.md"]   # asker cannot see it -> uncited
 
     def _upload_duplicate(self, filename="test-strategy-copy.md", acl=None) -> str:
         """Upload the Test Strategy body again through the upload door; returns the new doc id."""
-        body = next(b for uri, _, _, _, _, b in demo.CORPORA[T] if uri == "qa/test-strategy.md")
+        body = next(b for uri, _, _, _, _, b in synthetic_corpus.CORPORA if uri == "qa/test-strategy.md")
         intake = Intake(self.p)
         intake.upload(T, filename, body.encode(), acl=acl)
         results = IngestWorker(self.p, intake).drain()

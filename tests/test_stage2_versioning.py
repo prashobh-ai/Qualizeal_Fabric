@@ -6,7 +6,7 @@ from knowledge_fabric.ingestion.intake import Intake, IngestWorker
 from knowledge_fabric.stores import versioning as ver
 from tests.util import seeded
 
-T = "qualizeal"
+T = "test-fabric"
 V1 = ("# Release Gate\n\nA release needs zero open critical defects before promotion.\n\n"
       "Coverage of priority-1 requirements must reach 95 percent.\n")
 V2 = ("# Release Gate\n\nA release needs zero open critical defects before promotion.\n\n"

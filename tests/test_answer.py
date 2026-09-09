@@ -10,9 +10,9 @@ from tests.util import seeded
 
 class TestAnswer(unittest.TestCase):
     def setUp(self):
-        self.p = seeded(["qualizeal"])
+        self.p = seeded(["test-fabric"])
         self.svc = AnswerService(self.p)
-        self.asker = demo.principal_for(self.p, "qualizeal", "asker.public")
+        self.asker = demo.principal_for(self.p, "test-fabric", "asker.public")
 
     def test_grounded_answer_has_citations_that_resolve(self):
         a = self.svc.ask(self.asker, "what must a release achieve before promotion?")
@@ -35,7 +35,7 @@ class TestAnswer(unittest.TestCase):
         qvec = self.p.embedder.embed(["coverage acceptance criteria"])[0]
         from knowledge_fabric.contracts.types import Candidate
         cands = [Candidate(passage=p, vector_score=0.5, fused_score=0.02)
-                 for p in self.p.passages.for_tenant("qualizeal")[:4]]
+                 for p in self.p.passages.for_tenant("test-fabric")[:4]]
         signals, g = self.svc._grounding("coverage acceptance criteria", qvec, cands)
         self.assertEqual(set(signals), {"retrieval", "semantic", "coverage", "agreement", "resolvable"})
         self.assertTrue(0.0 <= g <= 1.0)
@@ -56,10 +56,10 @@ class TestAnswer(unittest.TestCase):
 
     def test_model_off_still_returns_cited_answer(self):
         os.environ["KF_MODEL_MODE"] = "off"
-        p = seeded(["qualizeal"], model_mode="off")
+        p = seeded(["test-fabric"], model_mode="off")
         svc = AnswerService(p)
         self.assertFalse(p.model_available())
-        asker = demo.principal_for(p, "qualizeal", "asker.public")
+        asker = demo.principal_for(p, "test-fabric", "asker.public")
         a = svc.ask(asker, "what must a release achieve before promotion?")
         self.assertEqual(a.kind, AnswerKind.ANSWER)
         self.assertTrue(a.citations)
@@ -68,7 +68,7 @@ class TestAnswer(unittest.TestCase):
 
     def test_post_check_drops_unsupported_sentences(self):
         from knowledge_fabric.contracts.types import Candidate
-        sel = [Candidate(passage=p) for p in self.p.passages.for_tenant("qualizeal")[:3]]
+        sel = [Candidate(passage=p) for p in self.p.passages.for_tenant("test-fabric")[:3]]
         text = "Coverage is ninety five percent. Elephants live in the Arctic tundra always."
         kept = self.svc._postcheck(text, sel)
         self.assertNotIn("Elephants", kept)

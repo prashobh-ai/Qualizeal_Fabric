@@ -24,10 +24,14 @@ jobs:
           from knowledge_fabric.app import Platform
           from knowledge_fabric.tenants import demo
           from knowledge_fabric.evaluation import gate
-          p = Platform(); demo.seed(p, ["qualizeal"])
-          assert gate.evaluate(p, "qualizeal", 1)["passed"], "clean index must pass"
-          gate.corrupt_citation_coordinates(p, "qualizeal")
-          v = gate.promote_if_passes(p, "qualizeal", 2)
+          from tests.fixtures import synthetic_corpus
+          # The product fabric ships no documents (L0.2); the gate proof loads
+          # the synthetic corpus into a test fabric.
+          t = "gate-fabric"
+          p = Platform(); demo.seed(p); synthetic_corpus.load_into(p, t)
+          assert gate.evaluate(p, t, 1)["passed"], "clean index must pass"
+          gate.corrupt_citation_coordinates(p, t)
+          v = gate.promote_if_passes(p, t, 2)
           assert not v["passed"] and v["promoted"] is None, "corrupt index must be blocked"
           print("promotion gate proven")
           PY
