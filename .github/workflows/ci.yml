@@ -14,6 +14,8 @@ jobs:
           python-version: "3.11"
       - name: Test suite (Section 20 checklist)
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Licence gate (I14, approved open-source stack only)
+        run: python scripts/licence_gate.py
       - name: Identifier-safety gate (Section 19)
         run: python -c "from knowledge_fabric.tenants import demo; assert demo.validate_identifiers()==[], demo.validate_identifiers()"
       - name: Promotion gate proves it blocks a corrupt index (Section 15)

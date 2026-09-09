@@ -1,0 +1,549 @@
+{
+  "schema_version": 1,
+  "title": "QualiZeal Knowledge Fabric - licence manifest (invariant I14: licence-clean)",
+  "maintained_by": "hand-maintained; validated on every CI run by scripts/licence_gate.py",
+  "policy": {
+    "description": "Licences are grouped into classes; each linkage kind lists the classes it may use. 'runtime' means code imported into the shipped Python process; 'optional-runtime' is a guarded import (try/except ImportError) selected by env; 'model-weights' are downloaded artefacts; 'tooling' runs at build/deploy time and never ships; 'external-service' is reached over the network and its code is never linked; 'managed-service' is a cloud-provider service behind an open protocol (S3/SQS-class) with an open-source equivalent listed.",
+    "licence_classes": {
+      "permissive": [
+        "PSF-2.0",
+        "MIT",
+        "Apache-2.0",
+        "BSD-2-Clause",
+        "BSD-3-Clause",
+        "ISC",
+        "PostgreSQL",
+        "0BSD",
+        "Unlicense",
+        "Zlib",
+        "blessing",
+        "CC0-1.0",
+        "CC-BY-4.0"
+      ],
+      "weak_copyleft": [
+        "MPL-2.0",
+        "LGPL-2.1-only",
+        "LGPL-2.1-or-later",
+        "LGPL-3.0-only",
+        "LGPL-3.0-or-later",
+        "EPL-2.0"
+      ],
+      "network_copyleft": [
+        "AGPL-3.0-only",
+        "AGPL-3.0-or-later"
+      ],
+      "strong_copyleft": [
+        "GPL-2.0-only",
+        "GPL-2.0-or-later",
+        "GPL-3.0-only",
+        "GPL-3.0-or-later"
+      ],
+      "source_available": [
+        "SSPL-1.0",
+        "BUSL-1.1",
+        "Elastic-2.0",
+        "LicenseRef-RSALv2",
+        "LicenseRef-Commons-Clause"
+      ],
+      "commercial_service": [
+        "LicenseRef-Cloud-Provider-Terms"
+      ],
+      "proprietary": [
+        "LicenseRef-Proprietary"
+      ]
+    },
+    "linkage_rules": {
+      "runtime": [
+        "permissive"
+      ],
+      "optional-runtime": [
+        "permissive"
+      ],
+      "model-weights": [
+        "permissive"
+      ],
+      "tooling": [
+        "permissive",
+        "weak_copyleft",
+        "strong_copyleft",
+        "network_copyleft"
+      ],
+      "external-service": [
+        "permissive",
+        "weak_copyleft",
+        "network_copyleft",
+        "strong_copyleft"
+      ],
+      "managed-service": [
+        "permissive",
+        "commercial_service"
+      ]
+    },
+    "scan": {
+      "packages": [
+        "knowledge_fabric",
+        "scripts"
+      ],
+      "requirements_files": [
+        "requirements.txt",
+        "requirements-prod.txt",
+        "pyproject.toml"
+      ],
+      "note": "Every non-stdlib import found under 'packages' must be declared below with matching import_names; optional-runtime imports must be guarded by try/except ImportError so the shipped process never hard-depends on them."
+    },
+    "notes": [
+      "Copyleft (AGPL MinIO, Grafana, Tempo) is acceptable ONLY as an external service: we talk to it over the network, never import or vendor its code, never ship it in our image.",
+      "MPL-2.0 (OpenTofu) is file-level copyleft and acceptable for tooling: we do not modify or redistribute its sources. Tooling in general (GNU Make, OpenTofu) is RUN at build/deploy time and never shipped, so any OSI licence is acceptable there; source-available and proprietary tooling is not.",
+      "Proprietary and source-available (SSPL/BUSL/Elastic) components are never approved; they appear here only as rejected alternatives so the decision is on record.",
+      "Model weights carry their own licence and are cleared per deployment; only permissive weights (bge-m3 MIT) are pre-approved."
+    ]
+  },
+  "components": [
+    {
+      "name": "Python standard library",
+      "role": "runtime",
+      "linkage": "runtime",
+      "licence": "PSF-2.0",
+      "licence_name": "Python Software Foundation License 2.0",
+      "approved": true,
+      "status": "in-use",
+      "import_names": [],
+      "distributions": [],
+      "why": "The ONLY runtime dependency of the shipped process (sqlite3, hmac, json, http.server, urllib, unittest).",
+      "evidence": "deploy/Dockerfile (python:3.11-slim, no pip install), docs/decisions/ADR-0001-local-stdlib-adapters.md"
+    },
+    {
+      "name": "SQLite (bundled in Python sqlite3)",
+      "role": "store / vector / lexical / graph / queue (local)",
+      "linkage": "runtime",
+      "licence": "blessing",
+      "licence_name": "SQLite Blessing (public domain)",
+      "approved": true,
+      "status": "in-use",
+      "import_names": [],
+      "distributions": [],
+      "why": "Local adapter for every store; tenant filter enforced at the repository layer.",
+      "evidence": "knowledge_fabric/stores/db.py"
+    },
+    {
+      "name": "boto3 / botocore",
+      "role": "object store + queue client (AWS shape)",
+      "linkage": "optional-runtime",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [
+        "boto3",
+        "botocore"
+      ],
+      "distributions": [
+        "boto3",
+        "botocore"
+      ],
+      "why": "Only imported when KF_OBJECTSTORE=s3 / KF_QUEUE=sqs; guarded import raises CloudNotReady when absent.",
+      "evidence": "knowledge_fabric/adapters/cloud.py"
+    },
+    {
+      "name": "pg8000",
+      "role": "PostgreSQL driver (AWS shape)",
+      "linkage": "optional-runtime",
+      "licence": "BSD-3-Clause",
+      "licence_name": "BSD 3-Clause",
+      "approved": true,
+      "status": "optional",
+      "import_names": [
+        "pg8000"
+      ],
+      "distributions": [
+        "pg8000"
+      ],
+      "why": "Pure-Python driver chosen over psycopg (LGPL-3.0) so the runtime stays permissive-only.",
+      "evidence": "knowledge_fabric/adapters/cloud.py"
+    },
+    {
+      "name": "Docling",
+      "role": "document converter (PDF/Office/OCR)",
+      "linkage": "optional-runtime",
+      "licence": "MIT",
+      "licence_name": "MIT License",
+      "approved": true,
+      "status": "planned",
+      "import_names": [
+        "docling"
+      ],
+      "distributions": [
+        "docling"
+      ],
+      "why": "Drop-in behind the DocumentConverter contract for binary PDFs/scans; DoclingLite (native, stdlib) covers text/markdown/csv/transcripts today.",
+      "evidence": "knowledge_fabric/adapters/converter.py"
+    },
+    {
+      "name": "PostgreSQL",
+      "role": "relational store (cloud shape)",
+      "linkage": "external-service",
+      "licence": "PostgreSQL",
+      "licence_name": "PostgreSQL License",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Managed RDS Postgres in deploy/aws; reached over the network via pg8000.",
+      "evidence": "deploy/aws/main.tf (aws_db_instance), knowledge_fabric/adapters/cloud.py"
+    },
+    {
+      "name": "pgvector",
+      "role": "vector index (cloud shape)",
+      "linkage": "external-service",
+      "licence": "PostgreSQL",
+      "licence_name": "PostgreSQL License",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Vector search inside Postgres; same tenant-filtered contract as the SQLite vector index.",
+      "evidence": "deploy/aws/main.tf (aws_db_parameter_group), docs/licences.md"
+    },
+    {
+      "name": "MinIO",
+      "role": "object store (self-hosted S3-class)",
+      "linkage": "external-service",
+      "licence": "AGPL-3.0-only",
+      "licence_name": "GNU Affero General Public License v3.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "AGPL: allowed ONLY as an external service spoken to over the S3 protocol. Its code is never imported, vendored or shipped in our image.",
+      "evidence": "deploy/compose/docker-compose.yml (commented service)"
+    },
+    {
+      "name": "Amazon S3 / SQS / RDS / ECS / Secrets Manager / CloudWatch / Cognito",
+      "role": "managed infrastructure (AWS shape)",
+      "linkage": "managed-service",
+      "licence": "LicenseRef-Cloud-Provider-Terms",
+      "licence_name": "AWS Customer Agreement (service, not software)",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Infrastructure behind open protocols (S3 API, OIDC, OTLP); open-source equivalents are MinIO, PostgreSQL, Keycloak. Application code never learns which shape it runs in.",
+      "evidence": "deploy/aws/main.tf, docs/AWS_READINESS.md"
+    },
+    {
+      "name": "Keycloak",
+      "role": "identity provider (OIDC)",
+      "linkage": "external-service",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Enterprise SSO: the same identity adapter points at the corporate JWKS instead of the local HS256 IdP.",
+      "evidence": "knowledge_fabric/adapters/identity.py, deploy/compose/docker-compose.yml"
+    },
+    {
+      "name": "Dex",
+      "role": "identity provider (OIDC, lightweight alternative)",
+      "linkage": "external-service",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Federating OIDC issuer when Keycloak is too heavy.",
+      "evidence": "docs/licences.md"
+    },
+    {
+      "name": "bge-m3 (BAAI)",
+      "role": "embedding model weights",
+      "linkage": "model-weights",
+      "licence": "MIT",
+      "licence_name": "MIT License",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "GPU-box embedder behind the Embedder contract; the deterministic hashing embedder is the local default (I9: never re-embed on provider swap).",
+      "evidence": "knowledge_fabric/adapters/embedder.py"
+    },
+    {
+      "name": "vLLM",
+      "role": "LLM serving (self-hosted, OpenAI-compatible)",
+      "linkage": "external-service",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Serves open weights behind the OpenAI-compatible HostedModelClient (KF_MODEL_BASE_URL); model weights cleared per deployment.",
+      "evidence": "knowledge_fabric/adapters/model.py"
+    },
+    {
+      "name": "OpenTelemetry Collector (OTLP/HTTP receiver)",
+      "role": "observability pipeline",
+      "linkage": "external-service",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Receives our OTLP/JSON traces (stdlib urllib POST, no SDK) and fans out to any backend; the app never links the OTel SDK.",
+      "evidence": "knowledge_fabric/adapters/otel_export.py, deploy/aws/variables.tf (otlp_endpoint)"
+    },
+    {
+      "name": "Jaeger",
+      "role": "trace backend / UI",
+      "linkage": "external-service",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Permissive trace UI that accepts OTLP directly (Jaeger v2).",
+      "evidence": "docs/OBSERVABILITY_DECISION.md"
+    },
+    {
+      "name": "Prometheus",
+      "role": "metrics backend",
+      "linkage": "external-service",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Scrapes /metrics; optional when the built-in dashboard is enough.",
+      "evidence": "knowledge_fabric/surfaces/http_api.py (/metrics)"
+    },
+    {
+      "name": "Grafana",
+      "role": "dashboards (optional, alongside /dashboard)",
+      "linkage": "external-service",
+      "licence": "AGPL-3.0-only",
+      "licence_name": "GNU Affero General Public License v3.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "AGPL: external service only, fed by OTLP/Prometheus; the shipped dashboard is our own (knowledge_fabric/surfaces/dashboard.py).",
+      "evidence": "docs/OBSERVABILITY_DECISION.md"
+    },
+    {
+      "name": "Grafana Tempo",
+      "role": "trace backend (optional)",
+      "linkage": "external-service",
+      "licence": "AGPL-3.0-only",
+      "licence_name": "GNU Affero General Public License v3.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "AGPL: external service only; receives OTLP from the collector.",
+      "evidence": "docs/OBSERVABILITY_DECISION.md"
+    },
+    {
+      "name": "OpenTofu",
+      "role": "infrastructure as code",
+      "linkage": "tooling",
+      "licence": "MPL-2.0",
+      "licence_name": "Mozilla Public License 2.0",
+      "approved": true,
+      "status": "in-use",
+      "import_names": [],
+      "distributions": [],
+      "why": "MPL-2.0 is file-level weak copyleft: acceptable for tooling we run unmodified at deploy time. Chosen over Terraform (BUSL-1.1, source-available).",
+      "evidence": "deploy/aws/main.tf, deploy/aws/variables.tf"
+    },
+    {
+      "name": "Docker Engine (Moby) + python:3.11-slim image",
+      "role": "container build/runtime",
+      "linkage": "tooling",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0 (Moby); image contents PSF-2.0 + Debian DFSG-free packages",
+      "approved": true,
+      "status": "in-use",
+      "import_names": [],
+      "distributions": [],
+      "why": "Single portable image, identical across local / interim / client.",
+      "evidence": "deploy/Dockerfile, deploy/compose/docker-compose.yml"
+    },
+    {
+      "name": "GNU Make",
+      "role": "CI entrypoint (make ci)",
+      "linkage": "tooling",
+      "licence": "GPL-3.0-or-later",
+      "licence_name": "GNU General Public License v3.0 or later",
+      "approved": true,
+      "status": "in-use",
+      "import_names": [],
+      "distributions": [],
+      "why": "GPL tooling run unmodified; nothing of it ships. Listed for completeness and honesty.",
+      "evidence": "Makefile"
+    },
+    {
+      "name": "GitHub Actions runners",
+      "role": "CI execution",
+      "linkage": "managed-service",
+      "licence": "LicenseRef-Cloud-Provider-Terms",
+      "licence_name": "GitHub Terms of Service (service, not software)",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Runs `make ci` (unittest + licence gate + identifier-safety). Any runner that has Python 3.11 works.",
+      "evidence": "Makefile (ci target)"
+    },
+    {
+      "name": "unittest (stdlib) + our own dashboard/surfaces",
+      "role": "test framework + dashboards",
+      "linkage": "runtime",
+      "licence": "PSF-2.0",
+      "licence_name": "Python Software Foundation License 2.0",
+      "approved": true,
+      "status": "in-use",
+      "import_names": [],
+      "distributions": [],
+      "why": "No pytest, no charting library: the Power BI-style dashboard is inline SVG served by the platform.",
+      "evidence": "tests/, knowledge_fabric/surfaces/dashboard.py"
+    },
+    {
+      "name": "LangSmith",
+      "role": "LLM observability (SaaS)",
+      "linkage": "runtime",
+      "licence": "LicenseRef-Proprietary",
+      "licence_name": "LangChain Inc. proprietary terms (SDK MIT, service proprietary + per-seat/per-trace pricing)",
+      "approved": false,
+      "status": "rejected",
+      "import_names": [
+        "langsmith"
+      ],
+      "distributions": [
+        "langsmith"
+      ],
+      "why": "Not needed: the telemetry spine already records one trace per answer with tier, tokens in/out, cost, why, cache savings, model, complexity, per user/role, and exports OTLP. Proprietary licence + trace data leaving the tenant boundary.",
+      "evidence": "docs/OBSERVABILITY_DECISION.md"
+    },
+    {
+      "name": "LangFuse",
+      "role": "LLM observability (self-host or cloud)",
+      "linkage": "external-service",
+      "licence": "MIT",
+      "licence_name": "MIT (core); ee/ directory and Cloud under a commercial licence",
+      "approved": false,
+      "status": "rejected",
+      "import_names": [
+        "langfuse"
+      ],
+      "distributions": [
+        "langfuse"
+      ],
+      "why": "Licence-acceptable (MIT core) but redundant: it would duplicate our spans table, dashboard and curator queue and add a ClickHouse+Postgres+Redis/S3 stack to operate. Revisit only if prompt-versioning UI or human-annotation queues become a product requirement not met by the question bank + curation queue.",
+      "evidence": "docs/OBSERVABILITY_DECISION.md"
+    },
+    {
+      "name": "LangChain / LangGraph",
+      "role": "orchestration framework",
+      "linkage": "runtime",
+      "licence": "MIT",
+      "licence_name": "MIT License",
+      "approved": false,
+      "status": "rejected",
+      "import_names": [
+        "langchain",
+        "langchain_core",
+        "langchain_community",
+        "langgraph"
+      ],
+      "distributions": [
+        "langchain",
+        "langchain-core",
+        "langgraph"
+      ],
+      "why": "Licence-acceptable but not adopted: the reasoning planner, selector and grounding gate are deterministic, testable stdlib code; a framework would hide the 'why' the roadmap asks us to show.",
+      "evidence": "knowledge_fabric/answer/reasoning.py, knowledge_fabric/answer/selector.py"
+    },
+    {
+      "name": "Elasticsearch",
+      "role": "lexical index (alternative)",
+      "linkage": "external-service",
+      "licence": "SSPL-1.0",
+      "licence_name": "SSPL / Elastic License 2.0 / AGPL-3.0 (triple-licensed)",
+      "approved": false,
+      "status": "rejected",
+      "import_names": [
+        "elasticsearch"
+      ],
+      "distributions": [
+        "elasticsearch"
+      ],
+      "why": "Not approved: source-available primary licence. OpenSearch (Apache-2.0) or Postgres full-text are the approved routes if SQLite FTS is outgrown.",
+      "evidence": "knowledge_fabric/adapters/lexicalindex.py"
+    },
+    {
+      "name": "OpenSearch",
+      "role": "lexical index (approved alternative)",
+      "linkage": "external-service",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Permissive lexical/vector engine if the SQLite/Postgres lexical index is outgrown.",
+      "evidence": "knowledge_fabric/adapters/lexicalindex.py"
+    },
+    {
+      "name": "Terraform (HashiCorp)",
+      "role": "infrastructure as code (alternative)",
+      "linkage": "tooling",
+      "licence": "BUSL-1.1",
+      "licence_name": "Business Source License 1.1",
+      "approved": false,
+      "status": "rejected",
+      "import_names": [],
+      "distributions": [],
+      "why": "Source-available since 1.6; OpenTofu (MPL-2.0) applies the same HCL modules.",
+      "evidence": "deploy/aws/README.md"
+    },
+    {
+      "name": "PyJWT",
+      "role": "OIDC/JWKS token verification (cloud identity adapter, KF_IDENTITY=oidc)",
+      "linkage": "optional-runtime",
+      "licence": "MIT",
+      "licence_name": "MIT License",
+      "approved": true,
+      "status": "optional",
+      "import_names": [
+        "jwt"
+      ],
+      "distributions": [
+        "PyJWT"
+      ],
+      "why": "Verifies RS256/ES256 tokens from Cognito or a corporate IdP; guarded import, fails closed when absent.",
+      "evidence": "knowledge_fabric/adapters/cloud.py"
+    },
+    {
+      "name": "cryptography",
+      "role": "asymmetric signature primitives used by PyJWT for RS256/ES256",
+      "linkage": "optional-runtime",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0 (dual-licensed with BSD-3-Clause)",
+      "approved": true,
+      "status": "optional",
+      "import_names": [
+        "cryptography"
+      ],
+      "distributions": [
+        "cryptography"
+      ],
+      "why": "Only present in the cloud-capable image (KF_EXTRAS); never imported directly by application code.",
+      "evidence": "knowledge_fabric/adapters/cloud.py"
+    }
+  ]
+}

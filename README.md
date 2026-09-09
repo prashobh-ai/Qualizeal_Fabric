@@ -11,16 +11,17 @@ third-party packages** (Python standard library only) and demonstrates the
 things enterprises pay for — identity, tenant isolation, permission-aware
 retrieval, budget caps and a full audit trail — before any cloud exists.
 
-> **Scope of this build.** The Release-1 spine is fully implemented, tested and
-> executed end-to-end, plus the Release-2/3 elements that prove the platform
-> thesis: graph expansion, ontology packs, incrementality, the evaluation
-> promotion gate, knowledge-health, the Curator/Admin read surfaces, the
-> **MCP agent tool**, per-agent identity, budget caps, and the connector SDK
-> (GitHub + Files). Remaining connectors (Jira/Xray/Figma/Confluence/Drive/
-> email/chat/transcripts) are **additive** against the connector SDK, and the
-> dashboard *data* ships (JSON) without the charting UI. See
-> [`docs/CHECKLIST.md`](docs/CHECKLIST.md) for the item-by-item status mapped to
-> tests. Nothing here is a stub pretending to work: every ✅ has a passing test.
+> **Scope of this build.** The full spine is implemented, tested and executed
+> end-to-end: ingestion from files/GitHub/Jira with continuous refresh, the
+> governed answer path with multistep/conditional reasoning and a 4-level
+> multi-model selector, data versioning and authoritative-source policy, the
+> evaluation promotion gate, knowledge-base evaluation, the Ask / Curator /
+> Admin / Dashboard surfaces, the **MCP agent tool**, and AWS-parity adapters
+> + IaC. Remaining connectors (Confluence/SharePoint/Drive/email/chat/
+> transcripts) are **additive** against the connector SDK. See
+> [`docs/CHECKLIST.md`](docs/CHECKLIST.md) and
+> [`docs/ROADMAP_ALIGNMENT.md`](docs/ROADMAP_ALIGNMENT.md) for item-by-item
+> status mapped to tests. Nothing here is a stub pretending to work.
 
 ## Quickstart (under a minute, no dependencies)
 
@@ -29,8 +30,21 @@ make test            # 61 tests mapped to Build Plan Section 20 + roadmap WS1/WS
 make demo            # narrated end-to-end execution of every invariant + capability
 make serve           # Ask console (/) + telemetry dashboard (/dashboard) + JSON API
 make dashboard       # build a self-contained dashboard snapshot with real seeded data
+make doctor TARGET=aws   # AWS deployment-readiness report (exact gap list)
 make load-corpus DIR=<folder-of-docx>   # ingest QualiZeal's own .docx corpus
 ```
+
+## Stage 2 — leadership review list
+
+Covered and executed (`make demo` §15–21; map in [`docs/ROADMAP_ALIGNMENT.md`](docs/ROADMAP_ALIGNMENT.md)):
+**multistep & conditional reasoning** (decomposed, every step governed) · **query complexity simple/medium/complex
+→ multi-model routing** with model used + tokens in/out on every answer · **authoritative source** (ranks, curator
+marks, conflicts) · **data versioning** (history / diff / rollback / dataset versions / lineage) · **continuous
+refresh** (schedules, delta-only, SLA health) · **Curator console** (`/curator`: KB evaluation suggests
+keep/review/delete with reasons, data-quality dashboard, history/rollback) distinct from the **Admin console**
+(`/admin`: connectors + permissions + health, live pipeline runs, bulk upload/delete, budgets, users, audit, AWS
+readiness) · **AWS deployment readiness** (IaC module, cloud adapters, `make doctor TARGET=aws`) · **approved
+open-source stack** with the LangSmith/LangFuse decision (not needed) in `docs/OBSERVABILITY_DECISION.md`.
 
 ## QualiZeal Core Build Roadmap coverage (QZ-KF-BLD-001)
 

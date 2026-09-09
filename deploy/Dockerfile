@@ -14,6 +14,10 @@ COPY knowledge_fabric ./knowledge_fabric
 COPY scripts ./scripts
 COPY tests ./tests
 
+# Cloud-capable image from the SAME Dockerfile: build with
+#   --build-arg KF_EXTRAS="boto3 pg8000"   (Apache-2.0 / BSD-3) for the AWS shape.
+ARG KF_EXTRAS=""
+RUN [ -z "$KF_EXTRAS" ] || pip install --no-cache-dir $KF_EXTRAS
 RUN useradd -m kf && mkdir -p /data && chown -R kf /data /app
 USER kf
 VOLUME ["/data"]

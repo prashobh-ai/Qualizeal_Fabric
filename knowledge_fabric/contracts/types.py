@@ -213,6 +213,11 @@ class Answer:
     cost_saved: float = 0.0
     tokens_in: int = 0
     tokens_out: int = 0
+    model_name: str = ""                 # which model ran (multi-model gateway)
+    complexity: str = ""                 # simple | medium | complex
+    authoritative_source: Optional[dict] = None
+    dataset_version: int = 0
+    reasoning: Optional[dict] = None     # multistep/conditional trace (Section A)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -225,6 +230,11 @@ class Answer:
             "cost_saved": round(self.cost_saved, 6),
             "tokens_in": self.tokens_in,
             "tokens_out": self.tokens_out,
+            "model_name": self.model_name,
+            "complexity": self.complexity,
+            "authoritative_source": self.authoritative_source,
+            "dataset_version": self.dataset_version,
+            "reasoning": self.reasoning,
             "citations": [
                 {
                     "document_id": c.document_id,
