@@ -238,6 +238,4 @@ $('#budget-btn').onclick=setBudget;$('#authority-btn').onclick=setAuthority;$('#
 if(KF.session)loadAll();else gate({status:401,message:''},'admin');
 """
 
-ADMIN_HTML = shell("Knowledge Fabric · Admin",
-                   "Admin console · connectors, permissions, refresh, bulk data, budgets, users, audit, cloud readiness",
-                   _BODY, _JS, "Admin", _CSS)
+ADMIN_HTML = shell("Admin", "", _BODY, _JS, "Admin", _CSS)

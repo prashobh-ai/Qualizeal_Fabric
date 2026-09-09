@@ -59,6 +59,10 @@ try:
     from .admin_ui import ADMIN_HTML
 except Exception:  # pragma: no cover
     ADMIN_HTML = "<!doctype html><title>Admin</title><p>Admin UI not built.</p>"
+try:
+    from .signin_ui import SIGNIN_HTML
+except Exception:  # pragma: no cover
+    SIGNIN_HTML = "<!doctype html><title>Sign in</title><p>Sign-in not built.</p>"
 
 _platform: Platform | None = None
 _svc: AnswerService | None = None
@@ -184,6 +188,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_static(u.path[len("/static/"):])
 
         # pages
+        if u.path == "/signin":
+            return self._send(200, SIGNIN_HTML, "text/html; charset=utf-8")
         if u.path in ("/", "/ask"):
             return self._send(200, ASK_HTML, "text/html; charset=utf-8")
         if u.path == "/dashboard":

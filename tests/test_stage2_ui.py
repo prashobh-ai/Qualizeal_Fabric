@@ -34,6 +34,8 @@ from knowledge_fabric.surfaces import http_api, ui_common
 from knowledge_fabric.surfaces.admin_ui import ADMIN_HTML
 from knowledge_fabric.surfaces.ask_ui import ASK_HTML
 from knowledge_fabric.surfaces.curator_ui import CURATOR_HTML
+from knowledge_fabric.surfaces.dashboard import DASHBOARD_HTML
+from knowledge_fabric.surfaces.signin_ui import SIGNIN_HTML
 from knowledge_fabric.tenants import demo
 from tests.fixtures import synthetic_corpus
 from tests.util import seeded
@@ -54,10 +56,15 @@ ADMIN_IDS = ["connectors", "runs-panel", "runs", "runs-live", "run-due-btn", "bu
              "delete-btn", "budget", "budget-cap", "budget-btn", "users", "users-rows",
              "authority-editor", "audit-tail", "audit-rows", "aws-panel", "doctor-target", "doctor-btn",
              "doctor-report"]
-SHELL_IDS = ["kf-nav", "kf-login", "kf-tenant", "kf-subject", "kf-login-btn", "kf-who", "kf-gate"]
+# L1.2 — the product top bar: nav, the user menu (#kf-who) and the gate.
+# No tenant selector, no inline sign-in bar (sign-in is at /signin).
+SHELL_IDS = ["kf-nav", "kf-who", "kf-gate"]
 
 # Answer dict fields the Ask page must read (contract Section G + conflicts)
-ANSWER_FIELDS = ["kind", "answer_text", "citations", "confidence", "grounding_score", "tier", "level",
+# The Ask console consumes every reader-facing Answer field. The raw ``tier``
+# and ``level`` integers are deliberately NOT read here: the reader only ever
+# sees the level as a word, mapped from ``why.level_name`` (L1.5 / D11).
+ANSWER_FIELDS = ["kind", "answer_text", "citations", "confidence", "grounding_score",
                  "why", "lang", "cache_hit", "cost_saved", "tokens_in", "tokens_out", "cost", "model_name",
                  "complexity", "authoritative_source", "conflicts", "dataset_version", "reasoning",
                  "trajectory_id", "clarify_back", "document_title", "coordinate_render", "snippet",
@@ -85,7 +92,7 @@ class TestMarkup(unittest.TestCase):
             with self.subTest(page=name):
                 self.assertIsInstance(html, str)
                 self.assertTrue(html.startswith("<!doctype html>"))
-                self.assertIn("<title>Knowledge Fabric · ", html)
+                self.assertIn("<title>QualiZeal Knowledge Fabric — ", html)  # L1.2 title
                 self.assertTrue(html.rstrip().endswith("</html>"))
                 self.assertEqual(html.count("<script>"), html.count("</script>"))
                 self.assertEqual(html.count("<script>"), 3)     # directory, runtime, page
@@ -93,30 +100,44 @@ class TestMarkup(unittest.TestCase):
                 self.assertGreater(len(html), 10_000)
 
     def test_zero_external_dependencies(self):
+        # No EXTERNAL resources: no http(s) URLs, no @import, no external
+        # scripts. Same-origin /static assets (favicon <link>, lockup <img>)
+        # are allowed (L1.1/L1.2).
         for name, html in PAGES.items():
             with self.subTest(page=name):
-                self.assertNotIn("<script src", html)
-                self.assertNotIn("<link ", html)
+                self.assertNotIn('src="http', html)
+                self.assertNotIn('href="http', html)
                 self.assertNotIn("@import", html)
                 self.assertNotIn("https://", html)
                 self.assertNotIn("http://", html)
-                self.assertIn("<svg", html)                     # inline SVG only
+                # any <link>/<script src> must point at /static (same origin)
+                for m in re.findall(r'<(?:link|script)[^>]*?(?:href|src)="([^"]+)"', html):
+                    self.assertTrue(m.startswith("/static/"),
+                                    f"{name} references non-static asset {m!r}")
 
     def test_brand_shell(self):
         for name, html in PAGES.items():
             with self.subTest(page=name):
-                self.assertIn("--navy:#0E1A45", html)           # dashboard palette
+                # white product chrome: surface white, panels the light token
+                self.assertIn("--qz-surface:#FFFFFF", html)
+                self.assertIn("--qz-panel:#F4F8FC", html)
+                self.assertNotIn('data-theme="dark"', html)      # no dark theme (L1.1)
                 self.assertIn("QualiZeal Knowledge Fabric", html)
-                self.assertIn('data-theme="dark"', html)
+                # top bar: lockup + role page switcher (L1.2)
+                self.assertIn("qualizeal-lockup.png", html)
+                self.assertIn("favicon-32.png", html)
+                self.assertIn("qz-watermark", html)              # L1.3
+                self.assertIn("QualiZeal. All rights reserved.", html)
                 for id_ in SHELL_IDS:
                     self.assertTrue(_has_id(html, id_), f"{name} lacks #{id_}")
-                for path in ("/", "/curator", "/admin", "/dashboard"):
+                for path in ("/", "/curator", "/admin"):
                     self.assertIn(f'href="{path}"', html)
-                self.assertIn("'/login'", html)                 # sign-in flow
+                self.assertNotIn('id="kf-tenant"', html)         # no tenant selector (D5)
+                self.assertIn("'/login'", html)                  # sign-in flow
                 self.assertIn("sessionStorage", html)
-        self.assertIn('<a href="/" class="active">Ask</a>', ASK_HTML)
-        self.assertIn('<a href="/curator" class="active">Curator</a>', CURATOR_HTML)
-        self.assertIn('<a href="/admin" class="active">Admin</a>', ADMIN_HTML)
+        self.assertIn('<a href="/" class="active">Workspace</a>', ASK_HTML)
+        self.assertIn('<a href="/curator" class="active"', CURATOR_HTML)
+        self.assertIn('<a href="/admin" class="active"', ADMIN_HTML)
 
     def test_page_ids(self):
         for id_ in ASK_IDS:
@@ -154,17 +175,15 @@ class TestMarkup(unittest.TestCase):
         self.assertIn("gate(e,'asker')", ASK_HTML)
 
     def test_brand_tokens_present(self):
-        """P1.1 — the QualiZeal brand tokens ship in every served page.
-
-        The dark shell is unchanged; the four brand tokens (blue/pink/violet/
-        cyan) plus the navy-canvas variables must be defined, and the galaxy
-        + health-ring rule that pins the canvas must be present.
+        """L1.1 — the QualiZeal deck-template tokens ship in every served page,
+        the navy canvas is scoped to .galaxy/.health-ring only, and the page
+        surface is white.
         """
         for name, html in PAGES.items():
             with self.subTest(page=name):
-                for token in ("--qz-blue:#4D7CFF", "--qz-pink:#EE1C5C",
-                              "--qz-violet:#7B5BFF", "--qz-cyan:#4DD0E8",
-                              "--qz-canvas:#0E1A45"):
+                for token in ("--qz-blue:#0096FF", "--qz-coral:#F53E5A",
+                              "--qz-purple:#7048E8", "--qz-green:#0CA678",
+                              "--qz-surface:#FFFFFF", "--qz-canvas:#0E1A45"):
                     self.assertIn(token, html, f"{name} lacks {token}")
                 # navy canvas scoped to .galaxy and .health-ring only
                 self.assertIn(".galaxy,.health-ring", html)
@@ -277,11 +296,25 @@ class TestServedPages(unittest.TestCase):
         return code, json.loads(raw)
 
     def test_pages_are_served(self):
-        for path, html in (("/", ASK_HTML), ("/ask", ASK_HTML), ("/curator", CURATOR_HTML), ("/admin", ADMIN_HTML)):
+        for path, html in (("/", ASK_HTML), ("/ask", ASK_HTML), ("/curator", CURATOR_HTML),
+                           ("/admin", ADMIN_HTML), ("/signin", SIGNIN_HTML)):
             code, ctype, raw = self._call("GET", path)
             self.assertEqual(code, 200)
             self.assertTrue(ctype.startswith("text/html"))
             self.assertEqual(raw.decode("utf-8"), html)
+
+    def test_signin_page_is_public(self):
+        # L1.4 — /signin is reachable with no session (it is where the gate
+        # sends the reader) and carries the lockup, the local IdP form and the
+        # disabled SSO placeholder.
+        code, ctype, raw = self._call("GET", "/signin")
+        self.assertEqual(code, 200)
+        body = raw.decode("utf-8")
+        self.assertIn("Sign in to QualiZeal Knowledge Fabric", body)
+        self.assertIn('id="signin-form"', body)
+        self.assertIn("qualizeal-lockup.png", body)
+        self.assertIn("Single sign-on", body)        # SSO placeholder
+        self.assertIn("Showcase sign-in", body)       # demo identity picker
 
     def test_login_shape_used_by_sign_in_bar(self):
         code, j = self._json("POST", "/login", {"tenant": T, "subject": "curator"})
@@ -647,6 +680,83 @@ class TestSuggestedQuestions(unittest.TestCase):
         # relation stays provable without the cap dropping earlier common
         # items); the Ask console slices to six chips on the client side.
         self.assertIn(".slice(0,6)", ASK_HTML)
+
+
+# ==========================================================================
+# 4. L1.5 — the name / words audit (D11)
+# ==========================================================================
+import html as _htmllib  # noqa: E402
+
+# every page a signed-in or signed-out reader can reach.
+_AUDIT_PAGES = {"ask": ASK_HTML, "curator": CURATOR_HTML, "admin": ADMIN_HTML,
+                "dashboard": DASHBOARD_HTML, "signin": SIGNIN_HTML}
+
+# words that must never reach the reader as visible text (internal plumbing,
+# storage engines, mis-spellings). Level numbers are checked separately.
+_FORBIDDEN_WORDS = ["tenant", "tier", "trajectory", "kf-mock", "RRF",
+                    "pgvector", "token ledger", "console"]
+# only ``QualiZeal`` is correct — these spellings must never appear anywhere.
+_BAD_SPELLINGS = ["Qualizeal", "QUALIZEAL", "Quali Zeal", "QUALI ZEAL", "qualiZeal"]
+# a level shown as a number ("L2", "Level 3") anywhere the reader can see it.
+_LEVEL_NUMBER = re.compile(r"\bL[0-9]\b|\blevel\s*[0-9]\b", re.I)
+# the four reader words the selector level is allowed to surface as.
+_LEVEL_WORDS = ["Look it up", "Quote it", "Summarise it", "Reason about it"]
+
+
+def _visible_text(doc):
+    """Approximate what a reader actually sees: text nodes, the visible
+    attributes, and prose-like string literals the inline JS injects into the
+    DOM. Deliberately excludes ``<style>``/``<script>`` machinery, element ids,
+    CSS selectors and ``console.*`` calls — none of which reach the reader.
+    """
+    doc = re.sub(r"<!--.*?-->", " ", doc, flags=re.S)
+    doc = re.sub(r"<style\b[^>]*>.*?</style>", " ", doc, flags=re.S | re.I)
+    scripts = re.findall(r"<script\b[^>]*>(.*?)</script>", doc, flags=re.S | re.I)
+    doc_ns = re.sub(r"<script\b[^>]*>.*?</script>", " ", doc, flags=re.S | re.I)
+    attrs = re.findall(r'(?:placeholder|title|alt|aria-label)="([^"]*)"', doc)
+    text = _htmllib.unescape(re.sub(r"<[^>]+>", " ", doc_ns))
+    prose = []
+    for s in scripts:
+        for a, b in re.findall(r"'([^'\\]*)'|\"([^\"\\]*)\"", s):
+            v = a or b
+            # prose the JS renders reads as a sentence/label: it has a space
+            # and none of the punctuation that marks a selector or code token.
+            if " " in v and not re.search(r"[#<>{}=/();]", v):
+                prose.append(v)
+    return text + " || " + " || ".join(attrs) + " || " + " || ".join(prose)
+
+
+class TestWordsAudit(unittest.TestCase):
+    """L1.5 / D11 — nothing internal, mis-spelled or numeric leaks to the reader."""
+
+    def test_no_forbidden_words_in_visible_text(self):
+        for name, doc in _AUDIT_PAGES.items():
+            vt = _visible_text(doc)
+            for word in _FORBIDDEN_WORDS:
+                with self.subTest(page=name, word=word):
+                    self.assertNotIn(word.lower(), vt.lower(),
+                                     f"{name}: forbidden word {word!r} is visible to the reader")
+
+    def test_qualizeal_spelt_correctly_everywhere(self):
+        # spelling is checked against the whole document, not just visible text:
+        # the product name must never be mis-cased even in a title or comment.
+        for name, doc in _AUDIT_PAGES.items():
+            for bad in _BAD_SPELLINGS:
+                with self.subTest(page=name, spelling=bad):
+                    self.assertNotIn(bad, doc, f"{name}: mis-spelled {bad!r} (must be 'QualiZeal')")
+            self.assertIn("QualiZeal", doc, f"{name}: the product name is missing")
+
+    def test_levels_are_words_never_numbers(self):
+        for name, doc in _AUDIT_PAGES.items():
+            vt = _visible_text(doc)
+            hits = _LEVEL_NUMBER.findall(vt)
+            with self.subTest(page=name):
+                self.assertEqual(hits, [], f"{name}: a level number is visible: {hits}")
+
+    def test_ask_surfaces_the_four_level_words(self):
+        # the Ask console must be able to render every reader level as a word.
+        for word in _LEVEL_WORDS:
+            self.assertIn(word, ASK_HTML, f"Ask console can never show level {word!r}")
 
 
 if __name__ == "__main__":

@@ -9,9 +9,9 @@ token and renders the complete ``Answer`` dict (``contracts/types.py``) as an
   (answer / clarify / gap) and the clarify-back question when present;
 * a confidence meter plus the grounding score;
 * citations — click a citation to expand its snippet and passage id;
-* the why-card (selector level, tier, explanation, reason codes);
+* the why-card (the reader-facing level word, explanation, reason codes);
 * MODEL USED, TOKENS IN / OUT, cost, cache hit + cost saved, language,
-  complexity badge, dataset version, trajectory id;
+  complexity badge, dataset version, trace id;
 * the authoritative-source badge with its reason and the conflicts the
   authority layer detected between cited sources;
 * a collapsible "Reasoning steps" timeline whenever ``reasoning`` is non-null
@@ -30,7 +30,7 @@ _CSS = r"""
 .askbox{display:flex;gap:10px;align-items:flex-start}
 .askbox textarea{min-height:64px;font-size:15px}
 .samples{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
-.chip{background:#182449;border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:12px;cursor:pointer;color:var(--fg)}
+.chip{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:12px;cursor:pointer;color:var(--fg)}
 .chip:hover{border-color:var(--accent)}
 .answer-text{font-size:16px;line-height:1.65;margin:8px 0 4px}
 .answer-text sup.ref{color:var(--accent);cursor:pointer;font-weight:700;margin-left:2px}
@@ -40,7 +40,7 @@ _CSS = r"""
 .cite{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:6px 0;cursor:pointer;background:var(--panel2)}
 .cite:hover{border-color:var(--accent)}
 .cite .n{display:inline-block;min-width:22px;color:var(--accent);font-weight:700}
-.cite .snippet{margin-top:8px;padding:8px 10px;background:#0a0f26;border-radius:8px;font-size:13px;white-space:pre-wrap}
+.cite .snippet{margin-top:8px;padding:8px 10px;background:var(--panel);border-radius:8px;font-size:13px;white-space:pre-wrap}
 .cite.hit{border-color:var(--warn)}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
 .fact{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
@@ -126,9 +126,8 @@ _BODY = """
       <div class="fact"><div class="l">Cost saved</div><div class="v mono" id="cost-saved"></div></div>
       <div class="fact"><div class="l">Complexity</div><div class="v" id="complexity"></div></div>
       <div class="fact"><div class="l">Language</div><div class="v" id="language"></div></div>
-      <div class="fact"><div class="l">Tier / level</div><div class="v" id="tier-level"></div></div>
       <div class="fact"><div class="l">Dataset version</div><div class="v" id="dataset-version"></div></div>
-      <div class="fact"><div class="l">Trajectory</div><div class="v mono small" id="trajectory-id"></div></div>
+      <div class="fact"><div class="l">Trace</div><div class="v mono small" id="trajectory-id"></div></div>
     </div>
   </div>
 
@@ -158,12 +157,21 @@ _BODY = """
 _JS = r"""
 const {$,esc,num,pct,money,toast,gate,api}=KF;
 const HISTORY=[];
-const SAMPLE_EXTRA=[
- 'what must a release achieve before promotion and which requirement has a traceability gap?',
- 'if a component has an open defect, then what happens to its dependent releases?',
- 'compare the test strategy and the release runbook'];
 const KIND_CLS={answer:'good',clarify:'warn',gap:'bad'};
 const CPLX_CLS={simple:'good',medium:'warn',complex:'violet'};
+// The reader only ever sees the level as a plain word, never a number or an
+// internal code (D11). The selector's four working levels map onto the four
+// reader words in escalating order; the special outcomes read as sentences.
+const LEVEL_WORDS={
+ lookup:{word:'Look it up',cls:'lv-look'},
+ fast:{word:'Quote it',cls:'lv-quote'},
+ reason:{word:'Summarise it',cls:'lv-sum'},
+ escalation:{word:'Reason about it',cls:'lv-reason'},
+ clarify:{word:'Needs a clearer question',cls:''},
+ gap:{word:'Outside the knowledge base',cls:''}};
+function levelWord(name){const k=String(name||'');
+ if(k.indexOf('reasoning')===0)return {word:'Reason about it',cls:'lv-reason'};
+ return LEVEL_WORDS[k]||{word:'—',cls:''}}
 
 function _renderChips(qs){$('#samples').innerHTML=qs.map(q=>'<span class="chip" data-q="'+esc(q)+'">'+esc(q)+'</span>').join('');
  KF.$$('#samples .chip').forEach(c=>c.onclick=()=>{$('#question').value=c.dataset.q;$('#question').focus()})}
@@ -174,15 +182,14 @@ async function samples(){
  if(KF.session){try{const j=await api('/api/suggestions');
   const qs=(j.suggestions||[]).map(s=>s.question).slice(0,6);
   if(qs.length){_renderChips(qs);return}}catch(e){/* fall through to seed */}}
- const t=(KF.session&&KF.session.tenant)||$('#kf-tenant').value;
- const qs=(KF.DIR.questions[t]||[]).concat(t==='qualizeal'?SAMPLE_EXTRA:[]);
+ const qs=(KF.DIR.questions['qualizeal']||[]);
  _renderChips(qs)}
 
 function markers(text){return esc(text).replace(/\[(\d+)\]/g,(m,n)=>'<sup class="ref" data-n="'+n+'">['+n+']</sup>')}
 
 function meter(conf){const v=Math.max(0,Math.min(1,Number(conf)||0));const col=v>=0.7?'var(--good)':v>=0.4?'var(--warn)':'var(--bad)';
  return '<svg viewBox="0 0 300 14" preserveAspectRatio="none" width="100%" height="14">'+
-  '<rect x="0" y="2" width="300" height="10" rx="5" fill="#182449"/>'+
+  '<rect x="0" y="2" width="300" height="10" rx="5" fill="#E4EEF9"/>'+
   '<rect x="0" y="2" width="'+(v*300).toFixed(1)+'" height="10" rx="5" fill="'+col+'"/>'+
   '<line x1="120" y1="0" x2="120" y2="14" stroke="var(--mut)" stroke-dasharray="2 2"/><line x1="210" y1="0" x2="210" y2="14" stroke="var(--mut)" stroke-dasharray="2 2"/></svg>'}
 
@@ -190,8 +197,8 @@ function citation(c,i){return '<div class="cite" data-i="'+i+'" id="cite-'+(i+1)
  '<b>'+esc(c.document_title)+'</b> <span class="muted small mono">'+esc(c.coordinate_render)+'</span>'+
  '<div class="snippet hidden">'+esc(c.snippet)+'<div class="muted small mono" style="margin-top:6px">passage '+esc(c.passage_id)+' · doc '+esc(c.document_id)+'</div></div></div>'}
 
-function whyCard(a){const w=a.why||{};
- $('#why-level').innerHTML='<span class="pill accent">L'+esc(a.level)+' · '+esc(w.level_name||'—')+'</span> <span class="pill">'+esc(a.tier||w.tier||'')+'</span>';
+function whyCard(a){const w=a.why||{};const lw=levelWord(w.level_name);
+ $('#why-level').innerHTML='<span class="pill '+lw.cls+'">'+esc(lw.word)+'</span>';
  $('#why-explain').textContent=w.explain||'No selector explanation was recorded.';
  $('#why-reasons').innerHTML=(w.reasons||[]).map(r=>'<span class="pill info" title="'+esc(r.detail||'')+'">'+esc(r.code)+(r.signal!=null?' · '+esc(r.signal):'')+'</span>').join('')||'<span class="empty">no reason codes</span>'}
 
@@ -200,10 +207,9 @@ function facts(a){$('#model-used').textContent=a.model_name||'—';$('#tokens-in
  $('#cache-hit').innerHTML=a.cache_hit?'<span class="pill good">HIT</span>':'<span class="pill">miss</span>';
  $('#complexity').innerHTML='<span class="pill '+(CPLX_CLS[a.complexity]||'')+'">'+esc(a.complexity||'n/a')+'</span>';
  $('#language').innerHTML='<span class="pill">'+esc((a.lang||'en').toUpperCase())+'</span>';
- $('#tier-level').textContent=(a.tier||'—')+' / L'+(a.level||0);
  $('#dataset-version').textContent='v'+(a.dataset_version||0);$('#trajectory-id').textContent=a.trajectory_id||'—'}
 
-function shield(){return '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5l8-3z" fill="#3ecf8e"/><path d="M8.5 12.2l2.4 2.4 4.8-5" fill="none" stroke="#0b1020" stroke-width="2" stroke-linecap="round"/></svg>'}
+function shield(){return '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5l8-3z" fill="#0CA678"/><path d="M8.5 12.2l2.4 2.4 4.8-5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/></svg>'}
 
 function authority(a){const s=a.authoritative_source;const titles={};(a.citations||[]).forEach(c=>titles[c.document_id]=c.document_title);
  const name=id=>titles[id]||id;
@@ -275,6 +281,4 @@ $('#question').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e
 if(!KF.session)gate({status:401,message:''},'asker');
 """
 
-ASK_HTML = shell("Knowledge Fabric · Ask",
-                 "Ask · one governed path · every answer cited, costed and explained",
-                 _BODY, _JS, "Ask", _CSS)
+ASK_HTML = shell("Workspace", "", _BODY, _JS, "Workspace", _CSS)

@@ -9,27 +9,29 @@ by cache technique.
 """
 
 DASHBOARD_HTML = r"""<!doctype html>
-<html lang="en" data-theme="dark"><head>
+<html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Knowledge Fabric · Telemetry</title>
+<title>QualiZeal Knowledge Fabric — Telemetry</title>
+<link rel="icon" href="/static/assets/brand/logo/favicon-32.png">
 <style>
-:root{--navy:#0E1A45;--navy2:#132257;--ink:#0b1020;--panel:#0f1a3a;--line:#26356b;
---fg:#e8ecf7;--mut:#9fb0d8;--accent:#4f7cff;--good:#3ecf8e;--warn:#f0b429;--bad:#f06a6a;
---c1:#4f7cff;--c2:#3ecf8e;--c3:#f0b429;--c4:#c77dff;--c5:#4bd6e5;--c6:#f06a6a;}
-*{box-sizing:border-box}body{margin:0;background:var(--ink);color:var(--fg);
-font:14px/1.5 Inter,system-ui,Segoe UI,Roboto,sans-serif}
-header{background:linear-gradient(90deg,var(--navy),var(--navy2));padding:14px 22px;
+:root{--surface:#FFFFFF;--ink:#0D1523;--panel:#F4F8FC;--line:#CFE0F0;--navy:#FFFFFF;--navy2:#FFFFFF;
+--fg:#2B3B4A;--mut:#5A6B7C;--accent:#0096FF;--good:#0CA678;--warn:#E8A23A;--bad:#F53E5A;
+--c1:#0096FF;--c2:#0CA678;--c3:#E8A23A;--c4:#7048E8;--c5:#4DD0E8;--c6:#F53E5A;}
+*{box-sizing:border-box}html{color-scheme:light}body{margin:0;background:var(--surface);color:var(--fg);
+font:14px/1.5 "Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums}
+header{background:var(--surface);height:56px;padding:0 24px;
 display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--line)}
-header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.3px}
+header h1{font-size:16px;margin:0;font-weight:600;color:var(--ink)}
+header .lockup{height:18px;width:auto}
 header .sub{color:var(--mut);font-size:12px}
-.filters{display:flex;gap:10px;flex-wrap:wrap;padding:12px 22px;background:var(--navy);
+.filters{display:flex;gap:10px;flex-wrap:wrap;padding:12px 24px;background:var(--surface);
 border-bottom:1px solid var(--line);align-items:center}
-select{background:var(--ink);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+select{background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 9px}
 label{color:var(--mut);font-size:12px;margin-right:4px}
-.tabs{display:flex;gap:2px;padding:0 22px;background:var(--navy);border-bottom:1px solid var(--line)}
-.tab{padding:11px 16px;cursor:pointer;color:var(--mut);border-bottom:2px solid transparent;font-weight:500}
-.tab.active{color:#fff;border-bottom-color:var(--accent)}
-main{padding:20px 22px;max-width:1200px;margin:0 auto}
+.tabs{display:flex;gap:2px;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--line)}
+.tab{padding:11px 16px;cursor:pointer;color:var(--mut);border-bottom:2px solid transparent;font-weight:600}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+main{padding:20px 24px;max-width:1200px;margin:0 auto}
 .grid{display:grid;gap:14px}.kpis{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
 .cards{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
@@ -45,14 +47,16 @@ th{color:var(--mut);font-weight:600}
 .mono{font-family:JetBrains Mono,ui-monospace,monospace}
 .bar-row{display:flex;align-items:center;gap:8px;margin:5px 0}.bar-row .n{width:150px;color:var(--mut);font-size:12px}
 .bar-row .t{width:44px;text-align:right;font-size:12px}
-.trk{flex:1;height:12px;background:#182449;border-radius:6px;overflow:hidden}.trk>i{display:block;height:100%}
+.trk{flex:1;height:12px;background:var(--panel);border-radius:6px;overflow:hidden}.trk>i{display:block;height:100%}
+.qz-watermark{position:fixed;right:24px;bottom:56px;width:220px;height:220px;pointer-events:none;z-index:0;
+ background:url("/static/assets/brand/logo/qualizeal-mark.png") no-repeat center/contain;opacity:.04}
+.qz-footer{height:40px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;
+ font-size:12px;color:#7C8DA1;border-top:1px solid var(--line);background:var(--surface)}
 </style></head><body>
 <header>
-  <h1>QualiZeal Knowledge Fabric</h1>
-  <span class="sub">Telemetry · one trace per answer · cost, grounding &amp; savings observable</span>
+  <a href="/" title="QualiZeal Knowledge Fabric"><img class="lockup" src="/static/assets/brand/logo/qualizeal-lockup.png" alt="QualiZeal Knowledge Fabric"></a>
 </header>
 <div class="filters">
-  <span><label>Tenant</label><select id="tenant"></select></span>
   <span><label>Window</label><select id="window">
     <option value="24h">Last 24 hours</option><option value="7d" selected>Last 7 days</option>
     <option value="all">All time</option></select></span>
@@ -63,20 +67,27 @@ th{color:var(--mut);font-weight:600}
 </div>
 <div class="tabs" id="tabs"></div>
 <main id="view"></main>
+<div class="qz-watermark" aria-hidden="true"></div>
+<footer class="qz-footer">
+  <span>&copy; QualiZeal. All rights reserved.</span>
+  <span>QualiZeal Knowledge Fabric &middot; Internal</span>
+  <span>v0.3</span>
+</footer>
 <script>
 const TABS=["Overview","Trust","Sources","Models","Usage","Cost & Caching"];
-let TAB="Overview", TOKEN=null, DATA=null, SOURCES=null, TENANTS=["qualizeal","qualizeal","isolation-check"];
+let TAB="Overview", TOKEN=null, DATA=null, SOURCES=null;
+const FABRIC="qualizeal";   // single in-house fabric (no tenant selector)
 const $=s=>document.querySelector(s);
-const COL=["#4f7cff","#3ecf8e","#f0b429","#c77dff","#4bd6e5","#f06a6a"];
+const COL=["#0096FF","#0CA678","#E8A23A","#7048E8","#4DD0E8","#F53E5A"];
 function fmt(n){return (n||0).toLocaleString()}
 function money(n){return "$"+(n||0).toFixed(4)}
 
-async function login(tenant){
- const r=await fetch('/login',{method:'POST',body:JSON.stringify({tenant,subject:'admin'})});
+async function login(){
+ const r=await fetch('/login',{method:'POST',body:JSON.stringify({tenant:FABRIC,subject:'admin'})});
  return (await r.json()).token;
 }
 async function load(){
- const tenant=$('#tenant').value; TOKEN=await login(tenant);
+ TOKEN=await login();
  const qs=new URLSearchParams({window:$('#window').value});
  if($('#user').value)qs.set('subject',$('#user').value);
  if($('#role').value)qs.set('role',$('#role').value);
@@ -150,7 +161,7 @@ function render(){
  }
  if(TAB==="Usage"){
   const ur=Object.entries(d.per_user||{}).map(([k,v])=>`<tr><td>${k}</td><td>${fmt(v.answers)}</td><td>${fmt(v.tokens)}</td><td class="mono">${money(v.cost)}</td></tr>`).join('');
-  const rr=Object.entries(d.per_role||{}).map(([k,v])=>`<tr><td><span class="pill" style="background:#182449">${k}</span></td><td>${fmt(v.answers)}</td><td class="mono">${money(v.cost)}</td></tr>`).join('');
+  const rr=Object.entries(d.per_role||{}).map(([k,v])=>`<tr><td><span class="pill" style="background:var(--panel)">${k}</span></td><td>${fmt(v.answers)}</td><td class="mono">${money(v.cost)}</td></tr>`).join('');
   h+=`<div class="grid cards">
    <div class="card"><h3>Per user</h3><table><tr><th>User</th><th>Answers</th><th>Tokens</th><th>Cost</th></tr>${ur||'<tr><td colspan=4 style=color:var(--mut)>no data</td></tr>'}</table></div>
    <div class="card"><h3>Per role</h3><table><tr><th>Role</th><th>Answers</th><th>Cost</th></tr>${rr||'<tr><td colspan=3 style=color:var(--mut)>no data</td></tr>'}</table></div>
@@ -175,8 +186,7 @@ function render(){
 function setTab(t){TAB=t;render();}
 window.setTab=setTab;
 (function init(){
- const ts=$('#tenant');TENANTS.forEach(t=>{let o=document.createElement('option');o.value=o.text=t;ts.add(o)});
- ['tenant','window','user','role'].forEach(id=>$('#'+id).addEventListener('change',load));
+ ['window','user','role'].forEach(id=>$('#'+id).addEventListener('change',load));
  load();
 })();
 </script></body></html>"""
