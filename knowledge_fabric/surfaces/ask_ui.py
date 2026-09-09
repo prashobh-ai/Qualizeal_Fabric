@@ -70,6 +70,10 @@ main{max-width:none;padding:0;display:flex;flex-direction:column}
 .chipcite:hover{border-color:var(--qz-blue)}
 .decline{border-left:3px solid var(--qz-amber);background:#FCF7EC;border-radius:0 8px 8px 0;padding:10px 12px;font-size:14px;color:var(--qz-ink)}
 .decline .why{color:var(--mut);font-size:13px;margin-top:6px}
+.fbbar{display:flex;align-items:center;gap:6px;margin-top:10px}
+.fbbtn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:2px 8px;cursor:pointer;font-size:13px}
+.fbbtn:hover{border-color:var(--qz-blue)}.fbbtn:disabled{opacity:.45;cursor:default}
+.fbmsg{margin-left:4px}
 
 /* ---- composer ---- */
 .composer{border-top:1px solid var(--line);padding:11px 16px 13px;background:var(--surface)}
@@ -253,7 +257,7 @@ function renderMessages(){const box=$('#messages');const t=curThread();
  box.innerHTML=t.turns.map((tn,i)=>'<div class="turn" data-i="'+i+'">'+
    '<div class="msg user">'+esc(tn.q)+'</div>'+aiBlock(tn.a,i)+'</div>').join('');
  $$('#messages .msg.ai').forEach(el=>el.onclick=()=>selectAnswer(t.turns[+el.dataset.i]));
- wireCites();box.scrollTop=box.scrollHeight}
+ wireCites();wireFeedback();box.scrollTop=box.scrollHeight}
 function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
  const badges='<span class="pill '+(KIND_CLS[a.kind]||'')+'">'+esc(a.kind)+'</span>'+
   (a.kind==='answer'?'<span class="pill '+lw.cls+'">'+esc(lw.word)+'</span>':'')+
@@ -265,7 +269,11 @@ function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
  else{const reason=(a.why||{}).explain||(a.clarify_back||'');
   body='<div class="decline">'+esc(a.kind==='clarify'?(a.clarify_back||DECLINE):DECLINE)+
    (reason&&a.kind!=='clarify'?'<div class="why">'+esc(reason)+'</div>':'')+'</div>';}
- return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+'</div>'+body+'</div>'}
+ const fb='<div class="fbbar" data-i="'+i+'"><span class="muted small">Was this helpful?</span>'+
+  '<button class="fbbtn up" title="Helpful">&#128077;</button>'+
+  '<button class="fbbtn down" title="Not helpful — flag for the curators">&#128078;</button>'+
+  '<span class="fbmsg muted small"></span></div>';
+ return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+'</div>'+body+fb+'</div>'}
 // inline citation chips: [n] -> "Title · p.14" (opens the page viewer, L2.2).
 function withChips(a){const cs=a.citations||[];
  return esc(a.answer_text||'').replace(/\[(\d+)\]/g,(m,n)=>{const c=cs[+n-1];if(!c)return '';
@@ -273,6 +281,15 @@ function withChips(a){const cs=a.citations||[];
 function wireCites(){const t=curThread();if(!t)return;
  $$('#messages .chipcite').forEach(el=>el.onclick=ev=>{ev.stopPropagation();
   const turn=t.turns[+el.closest('.msg.ai').dataset.i];openPage((turn.a.citations||[])[+el.dataset.cite-1])})}
+// L6 — a reader flags an answer; 👎 records negative feedback for the curators.
+function wireFeedback(){const t=curThread();if(!t)return;
+ $$('#messages .fbbar').forEach(bar=>{const turn=t.turns[+bar.dataset.i];if(!turn)return;
+  const done=v=>{bar.querySelector('.fbmsg').textContent=v==='down'?'Thanks — flagged for the curators.':'Thanks for the feedback.';
+   bar.querySelectorAll('.fbbtn').forEach(b=>b.disabled=true)};
+  bar.querySelector('.up').onclick=e=>{e.stopPropagation();done('up')};
+  bar.querySelector('.down').onclick=e=>{e.stopPropagation();
+   api('/feedback',{method:'POST',body:{question:turn.q,trace_id:turn.a.trajectory_id,
+    level:(turn.a.why||{}).level_name||'',verdict:'down'}}).catch(()=>{});done('down')}})}
 
 // ===================== the card (L2.3) ===============================
 function bars(sig){const order=['retrieval','semantic','coverage','agreement','resolvable'];

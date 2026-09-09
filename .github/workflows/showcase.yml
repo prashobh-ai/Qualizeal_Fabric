@@ -1,10 +1,11 @@
-# F0.2 — GitHub Pages showcase workflow.
+# F8.1 — GitHub Pages showcase workflow.
 #
-# Builds `dist/showcase/` on every push to main and deploys it to Pages.
-# Until F8.1 lands, the build assembles a placeholder shell — the product
-# chrome with a "showcase build pending" banner — so the URL stops rendering
-# the README through Jekyll. F8.1 replaces the placeholder builder with the
-# real static snapshot of the product.
+# Builds `dist/showcase/` on every push to main and deploys it to Pages. The
+# build seeds an in-memory fabric, drives a realistic question spread, captures
+# the real endpoint JSON per role into snapshot.json, and emits the actual
+# product surfaces (Workspace, Admin, Curator, Sign-in, Telemetry) plus a
+# landing page — all static, driven client-side by engine.js. No server, no
+# keys, standard library only.
 #
 # One manual step for the repository owner (in the GitHub web UI):
 #   Settings → Pages → Build and deployment → Source: GitHub Actions.
@@ -35,7 +36,9 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build showcase (placeholder until F8.1)
+      - name: Build the interactive showcase (seed + bake + emit surfaces)
+        env:
+          KF_MODEL_MODE: mock
         run: python scripts/build_showcase.py --out dist/showcase
 
       - name: Verify no external URLs and required data files present

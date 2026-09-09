@@ -421,6 +421,19 @@ class Handler(BaseHTTPRequestHandler):
                                     "contradictions": p.curation.list(prin.tenant, "contradiction"),
                                     "review_queue": p.curation.list(prin.tenant, "low-confidence"),
                                     "risk_register": health.risk_register(p, prin.tenant)})
+        if u.path == "/curator/feedback":
+            # L6 — negative feedback from readers, for the curator to check.
+            prin = self._require("curate")
+            if not prin: return
+            out = []
+            for r in p.curation.list(prin.tenant, "negative-feedback"):
+                try:
+                    d = json.loads(r.get("item") or "{}")
+                except Exception:
+                    d = {"question": r.get("item", "")}
+                d.update(id=r.get("id"), at=r.get("at"), status=r.get("status", "open"))
+                out.append(d)
+            return self._send(200, {"feedback": out})
         if u.path == "/curator/quality":
             prin = self._require("curate")
             if not prin: return
@@ -522,6 +535,22 @@ class Handler(BaseHTTPRequestHandler):
             except PermissionError as e:
                 return self._send(401, {"error": str(e)})
             return self._send(200, _svc.ask(prin, self._body().get("question", "")).to_dict())
+        if u.path == "/feedback":
+            # L3/L6 — a reader flags an answer (👎). Negative feedback lands in
+            # the curator review queue as a 'negative-feedback' item; anyone
+            # signed in may leave it (scoped to their own subject).
+            try:
+                prin = self._principal()
+            except PermissionError as e:
+                return self._send(401, {"error": str(e)})
+            b = self._body()
+            if (b.get("verdict") or "down") == "down":
+                item = json.dumps({"subject": prin.subject, "question": b.get("question", ""),
+                                   "trace_id": b.get("trace_id", ""), "level": b.get("level", ""),
+                                   "note": b.get("note", "")})
+                p.curation.add(prin.tenant, item, "negative-feedback", now_ms())
+                self._audit(prin, "feedback", b.get("trace_id", ""), "down")
+            return self._send(200, {"ok": True})
 
         # ---- curator -------------------------------------------------
         if u.path == "/curator/upload":
@@ -637,6 +666,34 @@ class Handler(BaseHTTPRequestHandler):
             p.policy.set_budget(prin.tenant, float(b["cap"]))
             self._audit(prin, "set_budget", prin.tenant, f"cap={b['cap']}")
             return self._send(200, {"tenant": prin.tenant, "cap": b["cap"], "spent": p.policy.spent(prin.tenant)})
+        if u.path == "/admin/users":
+            # L3.4 — Users & Access: add or disable a demo user. Roles are
+            # attributes of users (F2.3); the directory is in memory for the
+            # showcase/laptop deploy (the corporate directory replaces it live).
+            prin = self._require("admin")
+            if not prin: return
+            b = self._body()
+            subject = (b.get("subject") or "").strip()
+            if not subject:
+                return self._send(400, {"error": "subject required"})
+            rows = demo.DEMO_USERS.setdefault(prin.tenant, list(demo._ROLE_USERS))
+            existing = {s for s, _, _ in rows}
+            if b.get("action") == "delete":
+                if subject in ("admin",):
+                    return self._send(400, {"error": "cannot remove the built-in admin"})
+                demo.DEMO_USERS[prin.tenant] = [r for r in rows if r[0] != subject]
+                self._audit(prin, "delete_user", subject, "removed")
+            else:
+                roles = b.get("roles") or ["asker"]
+                scopes = (b.get("scopes") or (["public", "restricted"]
+                          if ({"admin", "curator"} & set(roles)) else ["public"]))
+                if subject not in existing:
+                    rows.append((subject, list(roles), list(scopes)))
+                    self._audit(prin, "add_user", subject, ",".join(roles))
+                demo.DEMO_USERS[prin.tenant] = rows
+            out = demo.DEMO_USERS.get(prin.tenant, demo._ROLE_USERS)
+            return self._send(200, {"ok": True, "users": [{"subject": s, "roles": r, "scopes": sc}
+                                                          for s, r, sc in out]})
         return self._send(404, {"error": "not found"})
 
 

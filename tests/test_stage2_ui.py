@@ -137,9 +137,11 @@ class TestMarkup(unittest.TestCase):
                 self.assertNotIn('id="kf-tenant"', html)         # no tenant selector (D5)
                 self.assertIn("'/login'", html)                  # sign-in flow
                 self.assertIn("sessionStorage", html)
-        self.assertIn('<a href="/" class="active">Workspace</a>', ASK_HTML)
-        self.assertIn('<a href="/curator" class="active"', CURATOR_HTML)
-        self.assertIn('<a href="/admin" class="active"', ADMIN_HTML)
+        # nav links carry data-path so the client can prefix the deploy base
+        # (server default base is '' — the href stays absolute).
+        self.assertIn('<a href="/" data-path="/" class="active">Workspace</a>', ASK_HTML)
+        self.assertIn('<a href="/curator" data-path="/curator" class="active"', CURATOR_HTML)
+        self.assertIn('<a href="/admin" data-path="/admin" class="active"', ADMIN_HTML)
 
     def test_page_ids(self):
         for id_ in ASK_IDS:

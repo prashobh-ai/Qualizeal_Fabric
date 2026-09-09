@@ -90,9 +90,16 @@ _BUDGET = card("Budget",
                '<div class="small" style="margin-top:8px">Spent: <b id="budget-spent">—</b> <span class="muted" id="budget-note">enforced before every model call</span></div>',
                "budget")
 
-_USERS = card("Users &amp; roles",
-              '<div class="tablewrap"><table id="users-table"><thead><tr><th>Subject</th><th>Roles</th><th>Scopes</th></tr></thead>'
-              '<tbody id="users-rows"><tr><td colspan="3" class="empty">—</td></tr></tbody></table></div>', "users")
+_USERS = card("Users &amp; access",
+              '<div class="row" id="add-user-form" style="margin-bottom:10px;gap:6px">'
+              '<input id="nu-subject" placeholder="user id (e.g. analyst.jo)" style="flex:1;min-width:150px">'
+              '<select id="nu-role"><option value="asker">Asker</option>'
+              '<option value="curator">Curator</option><option value="admin">Admin</option></select>'
+              '<label class="small muted"><input type="checkbox" id="nu-restricted"> restricted</label>'
+              '<button class="btn primary sm" id="add-user-btn">Add user</button></div>'
+              '<div class="tablewrap"><table id="users-table">'
+              '<thead><tr><th>Subject</th><th>Roles</th><th>Scopes</th><th></th></tr></thead>'
+              '<tbody id="users-rows"><tr><td colspan="4" class="empty">—</td></tr></tbody></table></div>', "users")
 
 _AUTHORITY = card("Source authority",
                   '<div id="authority-ranks" class="row"></div>'
@@ -212,8 +219,17 @@ async function bulkDelete(){const ids=$('#delete-ids').value.split(/[\s,]+/).map
 // ---------------------------------------------------------------- budget / users / authority / audit / doctor
 async function setBudget(){try{const out=await api('/admin/budget',{method:'POST',body:{cap:+$('#budget-cap').value}});
  $('#budget-spent').textContent=KF.money(out.spent);$('#budget-note').textContent='cap $'+Number(out.cap).toFixed(2)+' for '+out.tenant;toast('Budget cap set to $'+out.cap,'good')}catch(e){toast(e.message,'bad')}}
-async function loadUsers(){try{const d=await api('/admin/users');
- $('#users-rows').innerHTML=(d.users||[]).map(u=>'<tr><td><b>'+esc(u.subject)+'</b></td><td>'+(u.roles||[]).map(r=>'<span class="pill '+({admin:'violet',curator:'info',asker:'good',agent:'warn'}[r]||'')+'">'+esc(r)+'</span>').join(' ')+'</td><td class="mono">'+esc((u.scopes||[]).join(', '))+'</td></tr>').join('')||'<tr><td colspan="3" class="empty">no users</td></tr>'}catch(e){}}
+function renderUsers(users){
+ $('#users-rows').innerHTML=(users||[]).map(u=>'<tr><td><b>'+esc(u.subject)+'</b></td><td>'+(u.roles||[]).map(r=>'<span class="pill '+({admin:'violet',curator:'info',asker:'good',agent:'warn'}[r]||'')+'">'+esc(r)+'</span>').join(' ')+'</td><td class="mono">'+esc((u.scopes||[]).join(', '))+'</td><td>'+(u.subject==='admin'?'':'<button class="btn sm danger del-user" data-s="'+esc(u.subject)+'">Remove</button>')+'</td></tr>').join('')||'<tr><td colspan="4" class="empty">no users</td></tr>';
+ KF.$$('#users-rows .del-user').forEach(b=>b.onclick=()=>delUser(b.dataset.s))}
+async function loadUsers(){try{const d=await api('/admin/users');renderUsers(d.users)}catch(e){}}
+async function addUser(){const subject=$('#nu-subject').value.trim();if(!subject){toast('Enter a user id','warn');return}
+ const role=$('#nu-role').value;const scopes=($('#nu-restricted').checked||role!=='asker')?['public','restricted']:['public'];
+ try{const d=await api('/admin/users',{method:'POST',body:{subject,roles:[role],scopes}});renderUsers(d.users);
+  $('#nu-subject').value='';toast('Added '+subject,'good');loadAudit()}catch(e){toast(e.message,'bad')}}
+async function delUser(subject){if(!confirm('Remove user '+subject+'?'))return;
+ try{const d=await api('/admin/users',{method:'POST',body:{subject,action:'delete'}});renderUsers(d.users);
+  toast('Removed '+subject,'good');loadAudit()}catch(e){toast(e.message,'bad')}}
 async function loadAuthority(){try{const d=await api('/admin/authority');
  $('#authority-ranks').innerHTML=(d.ranks||[]).map(r=>'<span class="pill '+(r.rank===1?'good':'')+'" title="weight '+esc(r.weight)+'">'+esc(r.source)+' · rank '+esc(r.rank)+(r.overridden?' *':'')+'</span>').join('')}catch(e){}}
 async function setAuthority(){try{await api('/admin/authority',{method:'POST',body:{source:$('#authority-source').value,rank:+$('#authority-rank').value}});toast('Authority rank saved','good');await Promise.all([loadAuthority(),loadAudit()])}catch(e){toast(e.message,'bad')}}
@@ -235,6 +251,7 @@ KF.initBar({preferRole:'admin'});
 $('#connectors-refresh').onclick=loadAll;$('#run-due-btn').onclick=runDue;
 $('#upload-add').onclick=addToBatch;$('#upload-btn').onclick=upload;$('#delete-btn').onclick=bulkDelete;
 $('#budget-btn').onclick=setBudget;$('#authority-btn').onclick=setAuthority;$('#audit-refresh').onclick=loadAudit;$('#doctor-btn').onclick=doctor;
+$('#add-user-btn').onclick=addUser;
 if(KF.session)loadAll();else gate({status:401,message:''},'admin');
 """
 
