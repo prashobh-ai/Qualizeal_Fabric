@@ -204,6 +204,4 @@ $('#add-doc-form').addEventListener('submit',addDoc);
 if(KF.session)loadAll();else gate({status:401,message:''},'curator');
 """
 
-CURATOR_HTML = shell("Knowledge Fabric · Curator",
-                     "Curator console · relevance, trust, versions and authority — no plumbing",
-                     _BODY, _JS, "Curator", _CSS)
+CURATOR_HTML = shell("Curator", "", _BODY, _JS, "Curator", _CSS)

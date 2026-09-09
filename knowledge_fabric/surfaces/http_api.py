@@ -59,6 +59,10 @@ try:
     from .admin_ui import ADMIN_HTML
 except Exception:  # pragma: no cover
     ADMIN_HTML = "<!doctype html><title>Admin</title><p>Admin UI not built.</p>"
+try:
+    from .signin_ui import SIGNIN_HTML
+except Exception:  # pragma: no cover
+    SIGNIN_HTML = "<!doctype html><title>Sign in</title><p>Sign-in not built.</p>"
 
 _platform: Platform | None = None
 _svc: AnswerService | None = None
@@ -83,6 +87,83 @@ def _demo_delta(tenant: str, source: str) -> list[dict] | None:
     'Sync now' runs the real connector (which pulls the live API). Returns
     None here; the continuous-refresh demo runs against a test fabric."""
     return None
+
+
+def _galaxy_for_trace(p, tenant: str, trace_id: str) -> dict:
+    """Assemble the compact answer galaxy (L2.4).
+
+    Activation comes from the answer span's persisted trajectory
+    (``attrs.trajectory.{selected, graph_node_keys}``): the graph nodes lit up
+    by this answer's retrieved passages and one-hop graph expansion, plus their
+    immediate neighbourhood as dim context (the client renders non-activated
+    edges at 0.04 opacity). Empty when the answer used no graph relationships.
+    Read-only and self-contained; the caller has already been authorised for
+    this tenant/trace.
+    """
+    spans = p.telemetry.trace(trace_id)
+    ans = next((s for s in spans if s.get("name") == "answer" and s.get("tenant") == tenant), None)
+    if not ans:
+        return {"trace_id": trace_id, "nodes": [], "edges": [], "stats": {}}
+    try:
+        traj = (json.loads(ans.get("attrs") or "{}") or {}).get("trajectory") or {}
+    except Exception:
+        traj = {}
+    try:
+        sources = json.loads(ans.get("sources") or "[]")
+    except Exception:
+        sources = []
+    selected = traj.get("selected") or []
+    node_keys = traj.get("graph_node_keys") or []
+    rows = {r["id"]: dict(r) for r in p.db.query(
+        "SELECT * FROM graph_nodes WHERE tenant=?", (tenant,))}
+    by_key: dict[str, str] = {}
+    for nid, row in rows.items():
+        by_key.setdefault(row["canonical_key"], nid)
+        by_key.setdefault((row["canonical_key"] or "").lower(), nid)
+    # activation from the retrieved passages: an entity node lights up when its
+    # name appears in the text the answer actually retrieved (node provenance
+    # is keyed by content hash, not passage id, so a text match is the reliable
+    # link). Graph-expansion keys from a multi-hop answer light up too.
+    texts = ""
+    if selected:
+        marks = ",".join("?" * len(selected))
+        for r in p.db.query(
+                f"SELECT text FROM passages WHERE tenant=? AND id IN ({marks})",
+                (tenant, *selected)):
+            texts += " " + (r["text"] or "").lower()
+    active: set[str] = set()
+    for nid, row in rows.items():
+        key = (row["canonical_key"] or "").lower()
+        if len(key) >= 4 and key in texts:
+            active.add(nid)
+    for k in node_keys:
+        nid = by_key.get(k) or by_key.get(str(k).lower())
+        if nid:
+            active.add(nid)
+    node_ids, edges, seen = set(active), [], set()
+    for nid in list(active):
+        for e in p.graph_repo.neighbors(tenant, nid):
+            if e["id"] in seen or len(edges) >= 200:
+                continue
+            seen.add(e["id"])
+            node_ids.add(e["src"]); node_ids.add(e["dst"])
+            edges.append({"src": e["src"], "dst": e["dst"], "relation": e.get("relation", ""),
+                          "activated": e["src"] in active and e["dst"] in active})
+
+    def _label(row):
+        try:
+            labels = json.loads(row.get("labels") or "[]")
+        except Exception:
+            labels = []
+        return (labels[0] if labels else "") or row.get("canonical_key") or row["id"]
+
+    nodes = [{"id": nid, "label": _label(rows[nid]), "type": rows[nid].get("type", ""),
+              "activated": nid in active}
+             for nid in node_ids if nid in rows]
+    return {"trace_id": trace_id, "nodes": nodes, "edges": edges,
+            "stats": {"documents": len(sources), "passages": len(selected),
+                      "relationships": len(edges), "hops": 1 if node_keys else 0,
+                      "activated": len(active)}}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -184,6 +265,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_static(u.path[len("/static/"):])
 
         # pages
+        if u.path == "/signin":
+            return self._send(200, SIGNIN_HTML, "text/html; charset=utf-8")
         if u.path in ("/", "/ask"):
             return self._send(200, ASK_HTML, "text/html; charset=utf-8")
         if u.path == "/dashboard":
@@ -276,6 +359,53 @@ class Handler(BaseHTTPRequestHandler):
                 "relationships": edges,
                 "domains": domains,
             })
+        if u.path == "/api/usage":
+            # L2.5 — the caller's OWN usage, self-scoped: an asker sees only
+            # their own subject's activity (no privilege escalation — the
+            # subject filter is fixed to the authenticated principal).
+            # Aggregated from the telemetry spine across today / 7 d / 30 d.
+            try:
+                prin = self._principal()
+            except PermissionError as e:
+                return self._send(401, {"error": str(e)})
+            windows = {"today": "24h", "7d": "7d", "30d": "all"}
+            out = {}
+            for label, win in windows.items():
+                a = p.telemetry.analytics(prin.tenant, win, subject=prin.subject)
+                by_level = a.get("routing_by_level", {}) or {}
+                declined = int(by_level.get("clarify", 0)) + int(by_level.get("gap", 0))
+                answered_levels = {k: v for k, v in by_level.items()
+                                   if k not in ("clarify", "gap", "")}
+                out[label] = {
+                    "questions": a.get("answers", 0),
+                    "answered": max(0, a.get("answers", 0) - declined),
+                    "declined": declined,
+                    "tokens_in": a.get("tokens_in", 0), "tokens_out": a.get("tokens_out", 0),
+                    "cost": a.get("total_cost", 0.0), "cost_saved": a.get("total_cost_saved", 0.0),
+                    "cache_hit_rate": a.get("cache_hit_rate", 0.0), "by_level": answered_levels,
+                }
+            cap_row = p.db.one("SELECT cap,spent FROM budgets WHERE tenant=?", (prin.tenant,))
+            budget = ({"cap": cap_row["cap"], "spent": cap_row["spent"],
+                       "remaining": cap_row["cap"] - cap_row["spent"]} if cap_row else None)
+            # speech seconds arrive with voice (L5); no per-subject speech budget yet.
+            return self._send(200, {"subject": prin.subject, "windows": out,
+                                    "budget": budget, "speech_seconds": None})
+        if u.path == "/api/galaxy":
+            # L2.4 — the compact answer galaxy for one trace, self-scoped: an
+            # asker may light up only their OWN answers; a curator/admin may
+            # inspect any trace in the tenant.
+            try:
+                prin = self._principal()
+            except PermissionError as e:
+                return self._send(401, {"error": str(e)})
+            trace_id = first("trace_id", "")
+            spans = p.telemetry.trace(trace_id)
+            ans = next((s for s in spans if s.get("name") == "answer"), None)
+            can_curate = p.policy.check(prin, "curate", {}).decision.value == "allow"
+            if (not ans or ans.get("tenant") != prin.tenant
+                    or (ans.get("subject") != prin.subject and not can_curate)):
+                return self._send(200, {"trace_id": trace_id, "nodes": [], "edges": [], "stats": {}})
+            return self._send(200, _galaxy_for_trace(p, prin.tenant, trace_id))
         if u.path == "/api/trace":
             prin = self._require("curate")
             if not prin: return

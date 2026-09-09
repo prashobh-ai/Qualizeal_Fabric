@@ -239,7 +239,10 @@ class AnswerService:
                         principal, rq, selected, tier)
                     confidence = self._confidence(g, citations, selected)
 
-            decision = {**decision, "complexity": complexity, "model_name": model_name}
+            # L2.3 — surface the five grounding signals (the Trust bars) and the
+            # retrieved-vs-cited counts (Sources: found / cited) on the why-card.
+            decision = {**decision, "complexity": complexity, "model_name": model_name,
+                        "signals": signals, "retrieved": len(selected)}
 
             if not citations:
                 if not _nested:
