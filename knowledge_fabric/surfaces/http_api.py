@@ -221,6 +221,28 @@ class Handler(BaseHTTPRequestHandler):
             if not prin: return
             return self._send(200, p.telemetry.analytics(prin.tenant, first("window", "7d"),
                                                           first("subject"), first("role")))
+        if u.path == "/api/corpus":
+            # Five-tile "corpus at a glance" for the Ask console header (P1.2).
+            # Asker-accessible: every signed-in principal can see how big
+            # their tenant's knowledge is (documents, passages, entities,
+            # relationships, domains). Restricted documents are still
+            # counted here — the ACL gate lives at retrieval time, not at
+            # the tile level.
+            try:
+                prin = self._principal()
+            except PermissionError as e:
+                return self._send(401, {"error": str(e)})
+            docs = p.documents.list(prin.tenant)
+            nodes, edges = p.graph_repo.counts(prin.tenant)
+            domains = len({d.get("source", "") for d in docs if d.get("source")})
+            return self._send(200, {
+                "tenant": prin.tenant,
+                "documents": len(docs),
+                "passages": p.passages.count(prin.tenant),
+                "entities": nodes,
+                "relationships": edges,
+                "domains": domains,
+            })
         if u.path == "/api/trace":
             prin = self._require("curate")
             if not prin: return

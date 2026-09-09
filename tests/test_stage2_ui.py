@@ -481,5 +481,68 @@ class TestStaticAssets(unittest.TestCase):
             self.assertEqual(code, 404, f"{path} should be 404, got {code}")
 
 
+class TestCorpusTiles(unittest.TestCase):
+    """P1.2 — corpus tiles: /api/corpus counts equal the store counts."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.platform = seeded([T])
+        cls._saved = (http_api._platform, http_api._svc)
+        http_api._platform = cls.platform
+        http_api._svc = AnswerService(cls.platform)
+        cls.srv = ThreadingHTTPServer(("127.0.0.1", 0), http_api.Handler)
+        cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}"
+        cls.thread = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.thread.start()
+        code, _, raw = cls._call("POST", "/login", {"tenant": T, "subject": "asker.public"})
+        assert code == 200, raw
+        cls.token = json.loads(raw)["token"]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.srv.server_close()
+        http_api._platform, http_api._svc = cls._saved
+
+    @classmethod
+    def _call(cls, method, path, body=None, token=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(cls.base + path, data=data, method=method)
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, r.headers.get("Content-Type", ""), r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers.get("Content-Type", ""), e.read()
+
+    def test_corpus_counts_match_store(self):
+        code, _, raw = self._call("GET", "/api/corpus", token=self.token)
+        self.assertEqual(code, 200)
+        c = json.loads(raw)
+        for k in ("documents", "passages", "entities", "relationships", "domains", "tenant"):
+            self.assertIn(k, c)
+        self.assertEqual(c["tenant"], T)
+        self.assertEqual(c["documents"], len(self.platform.documents.list(T)))
+        self.assertEqual(c["passages"], self.platform.passages.count(T))
+        nodes, edges = self.platform.graph_repo.counts(T)
+        self.assertEqual(c["entities"], nodes)
+        self.assertEqual(c["relationships"], edges)
+        domains = len({d.get("source") for d in self.platform.documents.list(T)
+                       if d.get("source")})
+        self.assertEqual(c["domains"], domains)
+
+    def test_corpus_requires_auth(self):
+        code, _, _ = self._call("GET", "/api/corpus")
+        self.assertEqual(code, 401)
+
+    def test_page_ships_tile_ids(self):
+        for id_ in ("tile-documents", "tile-passages", "tile-entities",
+                    "tile-relationships", "tile-domains"):
+            self.assertIn(f'id="{id_}"', ASK_HTML)
+        # animateNumber helper referenced in the Ask console script
+        self.assertIn("animateNumber", ASK_HTML)
+
+
 if __name__ == "__main__":
     unittest.main()
