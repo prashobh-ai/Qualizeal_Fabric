@@ -16,7 +16,7 @@ from knowledge_fabric.surfaces import http_api
 from knowledge_fabric.tenants import demo
 from tests.util import seeded
 
-T = "qualizeal"
+T = "test-fabric"
 
 
 class TestAnswerPathFixes(unittest.TestCase):

@@ -21,6 +21,7 @@ from knowledge_fabric.contracts.types import AnswerKind, Principal  # noqa: E402
 from knowledge_fabric.evaluation import gate                     # noqa: E402
 from knowledge_fabric.health import metrics as health            # noqa: E402
 from knowledge_fabric.tenants import demo                        # noqa: E402
+from tests.fixtures import synthetic_corpus                      # noqa: E402
 
 
 def rule(t):
@@ -43,7 +44,8 @@ def main():
 
     rule("1. SEED — synthetic demo tenants (identifier-safety validated)")
     print("  identifier-safety problems:", demo.validate_identifiers() or "NONE ✓")
-    summary = demo.seed(p)
+    demo.seed(p)
+    summary = synthetic_corpus.load_into(p, "qualizeal")   # narrated dev demo loads the synthetic corpus
     print("  ingest summary:", summary)
 
     svc = AnswerService(p)
@@ -64,7 +66,7 @@ def main():
     from knowledge_fabric.ingestion.intake import Intake, IngestWorker
     intake, worker = Intake(p), IngestWorker(p, None); worker.intake = intake
     raw = intake.canonical("qualizeal", "files", "file://qa/test-strategy.md", "Test Strategy v3",
-                           demo.CORPORA["qualizeal"][0][5].encode(), mime="text/markdown")
+                           synthetic_corpus.CORPORA[0][5].encode(), mime="text/markdown")
     intake.submit(raw)
     print("  re-ingest result (same content-hash):", [r["status"] for r in worker.drain()])
 
@@ -109,6 +111,7 @@ def main():
     # isolated throwaway platform so the destructive corruption never poisons the demo
     gp = Platform(db_path=":memory:", blob_root="./data/demo-gate")
     demo.seed(gp, ["qualizeal"])
+    synthetic_corpus.load_into(gp, "qualizeal")
     good = gate.evaluate(gp, "qualizeal", 1)
     print("  clean index → passed:", good["passed"], "metrics:", good["metrics"]["citation_coverage"],
           "coverage /", good["metrics"]["recall"], "recall")
@@ -131,14 +134,14 @@ def main():
     from knowledge_fabric.ingestion.sync import SyncManager
     from knowledge_fabric.connectors import registry as _reg
     sm = SyncManager(p)
-    print("  seed already auto-synced:", summary["qualizeal"].get("connectors"))
+    print("  seed already auto-synced:", summary.get("connectors"))
     print("  registry (plug-and-play):", _reg.available())
     # a NEW Jira issue arrives -> only the delta is ingested (change detection)
     new_issue = dict(project="REL", key="REL-99", summary="Audit every promotion decision",
                      status="Open", updated=999999, acl=["public"],
                      description="The audit trail must capture every promotion decision with its trace id.")
     delta = sm.sync("qualizeal", "jira", {"projects": ["REL"]},
-                    records=demo.JIRA_RECORDS["qualizeal"] + [new_issue])
+                    records=synthetic_corpus.JIRA_RECORDS + [new_issue])
     print(f"  new Jira issue REL-99 → pulled {delta['pulled']} (delta only), ingested {delta['ingested']}")
     print("  source health:", sm.source_health("qualizeal"))
 
@@ -216,7 +219,7 @@ def main():
 
     rule("18. DATA VERSIONING — history · diff · rollback · dataset versions · lineage")
     intake, worker = _Intake(p), _Worker(p, None); worker.intake = intake
-    v2 = demo.CORPORA[T][0][5].replace("95% automated coverage", "97% automated coverage")
+    v2 = synthetic_corpus.CORPORA[0][5].replace("95% automated coverage", "97% automated coverage")
     intake.submit(intake.canonical(T, "files", "file://qa/test-strategy.md", "Test Strategy v3", v2.encode(), mime="text/markdown"))
     worker.drain()
     hist = _ver.history(p, T, strat["id"])
@@ -232,7 +235,7 @@ def main():
     rule("19. CONTINUOUS REFRESH — schedule · due · delta-only run · 7-stage run record · SLA health")
     t0 = 1_800_000_000.0
     _sched.set_schedule(p, T, "jira", 60, {"projects": ["REL"]}, enabled=True, now=t0)
-    fresh = demo.JIRA_RECORDS[T] + [{"project": "REL", "key": "REL-777", "summary": "Refresh demo issue",
+    fresh = synthetic_corpus.JIRA_RECORDS + [{"project": "REL", "key": "REL-777", "summary": "Refresh demo issue",
                                      "status": "Open", "updated": 999_999_999, "acl": ["public"],
                                      "description": "Picked up by the scheduled refresh; only the delta is ingested."}]
     ran = _sched.run_due(p, T, now=t0 + 61, records_by_source={"jira": fresh})
@@ -245,7 +248,7 @@ def main():
     print("  last run steps:", [s["name"] for s in last["steps"]])
 
     rule("20. CURATOR — knowledge-base evaluation suggests what to delete / review / keep")
-    intake.upload(T, "duplicate-strategy.md", demo.CORPORA[T][0][5].encode()); worker.drain()
+    intake.upload(T, "duplicate-strategy.md", synthetic_corpus.CORPORA[0][5].encode()); worker.drain()
     dq = _kb.data_quality(p, T)
     print("  data quality:", {k: dq[k] for k in ("coverage", "freshness", "contradictions", "gaps", "connectedness",
                                                   "traceability", "readability_avg", "duplicate_rate", "citation_coverage")})

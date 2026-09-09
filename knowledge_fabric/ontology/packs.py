@@ -37,39 +37,17 @@ QUALITY_ASSURANCE = OntologyPack(
     },
 )
 
-AVIATION_OPS = OntologyPack(
-    name="aviation-ops", version=1,
-    entity_types=["Aircraft", "Procedure", "Checklist", "System", "Regulation", "Airport"],
-    relation_types=["applies_to", "requires", "precedes", "governed_by", "located_at"],
-    typed_facts={"procedure_step": ["Procedure", "System", "Aircraft"]},
-    salient_vocab={
-        "procedure": 1.0, "checklist": 0.9, "airworthiness": 1.0, "inspection": 0.9,
-        "maintenance": 0.9, "regulation": 0.9, "clearance": 0.7, "turnaround": 0.8,
-        "boarding": 0.6, "taxi": 0.6, "runway": 0.7, "compliance": 0.9,
-    },
-    entity_lexicon={
-        "aircraft": "Aircraft", "procedure": "Procedure", "checklist": "Checklist",
-        "system": "System", "regulation": "Regulation", "airport": "Airport",
-    },
-)
+# The QualiZeal fabric ships the quality-assurance pack. Additional
+# vertical packs (aviation, health, …) are registered at load time by
+# whatever seeds documents in those domains — the test fixtures do this
+# (L0.2), so no vertical-domain vocabulary lives in the shipped package.
+PACKS = {p.name: p for p in (QUALITY_ASSURANCE,)}
 
-HEALTH = OntologyPack(
-    name="health", version=1,
-    entity_types=["Policy", "Procedure", "Patient", "Medication", "Guideline", "Department"],
-    relation_types=["indicated_for", "contraindicated_with", "governed_by", "administered_by"],
-    typed_facts={"dosage": ["Medication", "Patient", "Guideline"]},
-    salient_vocab={
-        "protocol": 1.0, "dosage": 1.0, "contraindication": 1.0, "guideline": 0.9,
-        "consent": 0.9, "triage": 0.8, "discharge": 0.7, "medication": 0.9,
-        "policy": 0.7, "procedure": 0.7, "compliance": 0.8,
-    },
-    entity_lexicon={
-        "policy": "Policy", "procedure": "Procedure", "medication": "Medication",
-        "guideline": "Guideline", "department": "Department",
-    },
-)
 
-PACKS = {p.name: p for p in (QUALITY_ASSURANCE, AVIATION_OPS, HEALTH)}
+def register(pack: OntologyPack) -> None:
+    """Register an additional ontology pack (used by test fixtures that seed
+    documents in a non-QA domain). Idempotent."""
+    PACKS[pack.name] = pack
 
 
 def get_pack(name: str) -> OntologyPack:

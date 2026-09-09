@@ -1,0 +1,27 @@
+/* QualiZeal Knowledge Fabric — design tokens (from the QualiZeal deck template) */
+:root{
+  --qz-ink:#0D1523;        /* headings, primary text */
+  --qz-body:#2B3B4A;       /* body text */
+  --qz-muted:#5A6B7C;      /* labels, captions */
+  --qz-soft:#7C8DA1;       /* tertiary text, footers */
+  --qz-line:#CFE0F0;       /* borders, dividers */
+  --qz-line-2:#DCE4EC;     /* table rules */
+  --qz-panel:#F4F8FC;      /* card / panel background */
+  --qz-surface:#FFFFFF;    /* page background — always white */
+  --qz-blue:#0096FF;       /* brand blue: accent, links, primary buttons, Level 1 */
+  --qz-blue-deep:#00619F;  /* emphasised blue text */
+  --qz-blue-tint:#EAF4FF;  /* selected / active backgrounds */
+  --qz-coral:#F53E5A;      /* brand coral: warnings, declines, Level 3 */
+  --qz-coral-tint:#FDEEF1;
+  --qz-green:#0CA678;      /* healthy, savings, Level 0 */
+  --qz-purple:#7048E8;     /* Level 2 */
+  --qz-amber:#E8A23A;      /* medium risk */
+  --qz-radius-card:12px; --qz-radius-chip:8px; --qz-radius-pill:999px;
+  --qz-shadow:0 1px 2px rgba(13,21,35,.06),0 8px 24px rgba(13,21,35,.06);
+  --qz-font:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+body{background:var(--qz-surface);color:var(--qz-body);font-family:var(--qz-font);font-variant-numeric:tabular-nums}
+.qz-watermark{position:fixed;right:24px;bottom:56px;width:220px;height:220px;pointer-events:none;
+  background:url("./logo/qualizeal-mark.png") no-repeat center/contain;opacity:.04}
+.qz-footer{height:40px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;
+  font-size:12px;color:var(--qz-soft);border-top:1px solid var(--qz-line)}

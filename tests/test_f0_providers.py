@@ -84,7 +84,7 @@ class TestAnthropicModelClient(unittest.TestCase):
 
         client = model.AnthropicModelClient()
         with mock.patch("urllib.request.urlopen", fake_urlopen):
-            out = client.complete("qualizeal", "escalation",
+            out = client.complete("test-fabric", "escalation",
                                   [{"role": "system", "content": "You are helpful."},
                                    {"role": "user", "content": "hi"}],
                                   {"max_tokens": 128})

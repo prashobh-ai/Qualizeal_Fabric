@@ -31,7 +31,7 @@ from knowledge_fabric.contracts.types import Job
 from knowledge_fabric.ops import readiness
 
 REPO = Path(__file__).resolve().parents[1]
-T = "qualizeal"
+T = "test-fabric"
 OTHER = "isolation-check"
 
 # A complete, well-shaped AWS environment (no real endpoints are contacted).

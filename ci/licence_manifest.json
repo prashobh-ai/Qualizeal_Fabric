@@ -48,11 +48,17 @@
       "commercial_service": [
         "LicenseRef-Cloud-Provider-Terms"
       ],
+      "first_party": [
+        "LicenseRef-QualiZeal-Owned"
+      ],
       "proprietary": [
         "LicenseRef-Proprietary"
       ]
     },
     "linkage_rules": {
+      "brand-asset": [
+        "first_party"
+      ],
       "runtime": [
         "permissive"
       ],
@@ -869,6 +875,19 @@
       "distributions": ["hatchling"],
       "why": "Wheel builder invoked by `pip install`; not shipped, only runs during build.",
       "evidence": "pyproject.toml [build-system]"
+    },
+    {
+      "name": "QualiZeal brand kit (logo, mark, favicons, watermark)",
+      "role": "first-party brand assets shipped in the UI (L0.1)",
+      "linkage": "brand-asset",
+      "licence": "LicenseRef-QualiZeal-Owned",
+      "licence_name": "QualiZeal-owned — first-party brand assets, the deck template's own files",
+      "approved": true,
+      "status": "shipped",
+      "import_names": [],
+      "distributions": [],
+      "why": "Transparent PNG lockup (1674x204), mark (512x512), favicons and watermark, plus tokens.css and BRAND.md. QualiZeal owns them; served locally from /static/assets/brand/, never from a CDN.",
+      "evidence": "knowledge_fabric/surfaces/static/assets/brand/logo/"
     }
   ]
 }

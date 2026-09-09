@@ -12,9 +12,15 @@ no `http://` or `https://` script/link/img tag (enforced by
 ## Layout
 
     static/
-      brand/          # QualiZeal mark + wordmark (copied as-is from the demo)
+      assets/brand/   # QualiZeal brand kit (L0.1): logo/ (lockup, mark,
+                      #   favicons, watermark — transparent PNGs), tokens.css,
+                      #   BRAND.md. First-party assets; the deck template's own
+                      #   files. Served from /static/assets/brand/…
       vendor/         # Third-party JS bundles vendored under permissive licences
       fonts/          # Self-hosted webfonts (Inter, OFL) — see fonts/README.md
+
+The demo-era JPEGs (`brand/qualizeal-*.jpeg|jpg`, white backgrounds) were
+removed in L0.1; the transparent PNGs under `assets/brand/logo/` replace them.
 
 ## Deferred (P1.1)
 

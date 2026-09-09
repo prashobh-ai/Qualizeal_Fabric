@@ -194,7 +194,16 @@ class AnswerService:
                               why={"level_name": "gap", "explain": "Below the grounding threshold."})
 
             # H. model selector (4 levels, explainable why) -------------
-            decision = sel.classify(rq, selected, g, graph_used)
+            # Titles of the reranked top-5 let the selector apply the L0.4
+            # definition rule ('what is X' → Level 1 when X matches the top
+            # document's title). Authority (0-100) is passed when available.
+            doc_titles = {}
+            for c in list(selected)[:5]:
+                did = c.passage.document_id
+                if did not in doc_titles:
+                    d = self.p.documents.get(tenant, did)
+                    doc_titles[did] = (d or {}).get("title", "")
+            decision = sel.classify(rq, selected, g, graph_used, doc_titles=doc_titles)
             tier = decision["tier"]
             # complexity describes the QUERY (form + evidence spread), so it is fixed here from
             # the selector's level and never lowered by a later budget/model-off degradation

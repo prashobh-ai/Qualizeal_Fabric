@@ -10,13 +10,13 @@ from tests.util import seeded
 
 class TestConcurrency(unittest.TestCase):
     def setUp(self):
-        self.p = seeded(["qualizeal", "isolation-check"])
+        self.p = seeded(["test-fabric", "isolation-check"])
         self.svc = AnswerService(self.p)
 
     def test_mixed_tenant_no_leakage_and_unique_traces(self):
         principals = [
-            (demo.principal_for(self.p, "qualizeal", "asker.public"),
-             "what must a release achieve before promotion?", "qualizeal"),
+            (demo.principal_for(self.p, "test-fabric", "asker.public"),
+             "what must a release achieve before promotion?", "test-fabric"),
             (demo.principal_for(self.p, "isolation-check", "asker.public"),
              "what is required before boarding begins?", "isolation-check"),
         ]
@@ -46,14 +46,14 @@ class TestConcurrency(unittest.TestCase):
         self.assertEqual(len(set(traj_ids)), len(traj_ids), "trace ids must be unique per request")
 
     def test_audit_subject_matches_requester_under_load(self):
-        prins = [demo.principal_for(self.p, "qualizeal", u)
+        prins = [demo.principal_for(self.p, "test-fabric", u)
                  for u in ("asker.public", "curator")]
         out = []
 
         def fire(i):
             prin = prins[i % 2]
             a = self.svc.ask(prin, "coverage acceptance criteria")
-            rows = self.p.audit.for_trace("qualizeal", a.trajectory_id)
+            rows = self.p.audit.for_trace("test-fabric", a.trajectory_id)
             out.append((prin.subject, rows[0]["subject"] if rows else None))
 
         threads = [threading.Thread(target=fire, args=(i,)) for i in range(40)]

@@ -39,11 +39,29 @@ def _qtok(q):
     return [t for t in _TOKEN.findall(q.lower()) if t not in _STOP]
 
 
-def classify(question: str, selected, grounding: float, graph_used: bool) -> dict:
+_DEFINITION = re.compile(r"^\s*(?:what|who)\s+(?:is|are)\s+(.+?)\??$|^\s*define\s+(.+?)\??$", re.I)
+
+
+def _definition_target(question: str) -> str:
+    """The subject of a 'what is X / who is X / define X' question, lowercased."""
+    m = _DEFINITION.match(question.strip())
+    if not m:
+        return ""
+    target = m.group(1) or m.group(2) or ""
+    # drop a leading article and keep the salient noun tokens
+    toks = [t for t in _TOKEN.findall(target.lower()) if t not in _STOP]
+    return " ".join(toks)
+
+
+def classify(question: str, selected, grounding: float, graph_used: bool,
+             doc_titles: dict | None = None, doc_authority: dict | None = None) -> dict:
     q = question.lower()
     toks = _qtok(question)
     n_tokens = len(toks)
-    doc_spread = len({c.passage.document_id for c in selected}) if selected else 0
+    # L0.4 — evidence spread is measured over the reranked top-5 only, so a
+    # long tail of loosely-related documents cannot escalate a simple question.
+    top5 = list(selected)[:5] if selected else []
+    doc_spread = len({c.passage.document_id for c in top5})
     reasons = []
 
     is_reasoning = any(w in q for w in _REASONING)
@@ -63,23 +81,50 @@ def classify(question: str, selected, grounding: float, graph_used: bool) -> dic
         reasons.append({"code": "synthesis", "detail": "moderate synthesis question",
                         "signal": f"{n_tokens} content tokens"})
 
-    # evidence spread pushes cost up (needs cross-document synthesis)
-    if doc_spread >= 3 and level < 3:
-        level = 3
-        reasons.append({"code": "multi_document", "detail": f"evidence spans {doc_spread} documents",
-                        "signal": doc_spread})
-    elif doc_spread >= 2 and level < 2:
-        level = 2
-        reasons.append({"code": "two_document", "detail": "evidence spans 2 documents", "signal": doc_spread})
+    # L0.4 — definition rule wins early: 'what is / who is / define <X>' where
+    # <X> matches the top document's title (an authoritative source raises
+    # confidence) resolves to Level 1 Quote it, and locks against escalation
+    # by document spread. Authority is honoured when a 0-100 score is supplied
+    # (wired in F2.1); until then a title match on the top document is enough.
+    define_locked = False
+    target = "" if is_reasoning else _definition_target(question)
+    if target and top5:
+        top_doc = top5[0].passage.document_id
+        title = (doc_titles or {}).get(top_doc, "").lower()
+        auth = (doc_authority or {}).get(top_doc)
+        title_hit = bool(title) and any(w in title for w in target.split())
+        authoritative = auth is None or auth >= 60
+        if title_hit and authoritative:
+            level = 1
+            define_locked = True
+            reasons.append({"code": "definition", "signal": target,
+                            "detail": f"definition of '{target}' found in the top document title"})
 
-    if graph_used:
+    # evidence spread pushes cost up (needs cross-document synthesis). A lookup
+    # is raised at most to Level 2 by document spread; only a reasoning/
+    # comparison intent takes it to Level 3 (L0.4).
+    if not define_locked:
+        if doc_spread >= 3 and level < 3:
+            if is_reasoning:
+                level = 3
+                reasons.append({"code": "multi_document", "detail": f"evidence spans {doc_spread} documents",
+                                "signal": doc_spread})
+            elif level < 2:
+                level = 2
+                reasons.append({"code": "multi_document", "signal": doc_spread,
+                                "detail": f"evidence spans {doc_spread} documents (lookup capped at summarise)"})
+        elif doc_spread >= 2 and level < 2:
+            level = 2
+            reasons.append({"code": "two_document", "detail": "evidence spans 2 documents", "signal": doc_spread})
+
+    if graph_used and not define_locked:
         reasons.append({"code": "graph_multi_hop", "detail": "graph pulled connected cross-doc evidence",
                         "signal": True})
         if level < 2:
             level = 2
 
     # long question => more synthesis
-    if n_tokens >= 12 and level < 3:
+    if n_tokens >= 12 and level < 3 and not define_locked:
         level = 3
         reasons.append({"code": "long_query", "detail": "long, information-dense question",
                         "signal": n_tokens})

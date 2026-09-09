@@ -16,7 +16,6 @@ shipped identifier could resolve to a real entity.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from ..contracts.types import Principal
@@ -35,99 +34,6 @@ DEMO_TENANTS = [
     TenantConfig("qualizeal", "QualiZeal", "quality-assurance", 5.0),
 ]
 
-# One corpus, three ontology packs represented through the document mix.
-# The `ontology` per document lets the graph extractor apply the right
-# entity/relation vocabulary even though all documents live in one tenant.
-CORPORA = {
-    "qualizeal": [
-        ("qa/test-strategy.md", "Test Strategy v3", "text/markdown", ["public"], "quality-assurance",
-         """# Test Strategy
-
-The release regression suite must achieve full requirement traceability before promotion.
-Every requirement is verified by at least one test case, and every test case links back to a requirement.
-
-Acceptance criteria for a release: zero open critical defects and 95% automated coverage of priority-1 requirements.
-The strategy complies with ISO 29119 for software testing documentation.
-
-Regression scope is selected by impact analysis on the changed components. A component with an open defect blocks its dependent releases until the defect is resolved.
-"""),
-        ("qa/traceability-matrix.csv", "Requirement Traceability Matrix", "text/csv", ["public"], "quality-assurance",
-         "requirement,test_case,release,status\nREQ-100,TC-4501,R2026.1,covered\nREQ-101,TC-4502,R2026.1,covered\nREQ-102,TC-4503,R2026.1,gap\n"),
-        ("qa/defect-policy.md", "Defect Management Policy", "text/markdown", ["restricted"], "quality-assurance",
-         """# Defect Management Policy (Restricted)
-
-Critical defects must be triaged within 4 business hours. A critical defect blocks the affected release.
-Severity is assigned by the QA lead and reviewed at the daily defect council.
-This restricted policy is visible only to curators and admins, not to general askers.
-"""),
-        ("qa/standup.transcript", "Release Standup Recording", "audio/transcript", ["public"], "quality-assurance",
-         "[00:03] The traceability gap on REQ-102 is the last blocker for the release.\n[00:15] We agreed to add test case TC-4503 before promotion.\n[00:41] Coverage sits at ninety four percent, one point short of the acceptance bar.\n"),
-        ("ops/turnaround.md", "Aircraft Turnaround Procedure", "text/markdown", ["public"], "aviation-ops",
-         """# Turnaround Procedure
-
-The turnaround checklist applies to every narrow-body aircraft between arrival and departure.
-Ground crew requires a completed walkaround inspection before boarding begins.
-
-Pushback clearance requires confirmation from the flight deck and the ramp coordinator.
-The procedure complies with the operator's airworthiness maintenance program.
-"""),
-        ("ops/inspection-log.csv", "Daily Inspection Log", "text/csv", ["public"], "aviation-ops",
-         "aircraft,system,check,result\nNW-101,hydraulics,pre-flight,pass\nNW-101,brakes,pre-flight,pass\nNW-102,hydraulics,pre-flight,defer\n"),
-        ("clin/triage-protocol.md", "Emergency Triage Protocol", "text/markdown", ["public"], "health",
-         """# Triage Protocol
-
-Triage assigns each patient a priority category on arrival. Category 1 requires immediate clinician review.
-Consent must be obtained before any non-emergency procedure.
-
-The protocol is governed by the department's clinical guideline board and reviewed annually.
-"""),
-        ("clin/medication-guide.csv", "Medication Dosage Guide", "text/csv", ["restricted"], "health",
-         "medication,guideline,max_daily,note\nDrugA,GL-12,200mg,contraindicated with DrugB\nDrugB,GL-13,50mg,monitor renal function\n"),
-    ],
-}
-
-# Automated ingestion sources for the single tenant. Identifier-safe: invented
-# org/repo/key names only.
-GITHUB_RECORDS = {
-    "qualizeal": [
-        {"repo": "qualizeal/kf-platform", "path": "docs/release-runbook.md", "updated_at": 1700,
-         "commit": "a1b2c3", "mime": "text/markdown",
-         "content": "# Release Runbook\n\nA release is cut only after the regression suite is green and "
-                    "requirement traceability is complete. The runbook requires sign-off from the QA lead "
-                    "before promotion to production."},
-        {"repo": "qualizeal/kf-platform", "path": "CHANGELOG.md", "updated_at": 1710, "commit": "d4e5f6",
-         "mime": "text/markdown",
-         "content": "# Changelog\n\nR2026.1 closed the traceability gap on REQ-102 by adding automated "
-                    "coverage for the checkout component."},
-    ],
-}
-JIRA_RECORDS = {
-    "qualizeal": [
-        {"project": "REL", "key": "REL-42", "summary": "Close traceability gap on REQ-102",
-         "status": "In Progress", "updated": 1720, "acl": ["public"],
-         "description": "REQ-102 has no linked test case. Add TC-4503 and link it to the requirement "
-                        "before the R2026.1 release can be promoted."},
-        {"project": "REL", "key": "REL-43", "summary": "Regression suite flakiness on payments",
-         "status": "Open", "updated": 1730, "acl": ["public"],
-         "description": "Intermittent failures in the payments regression pack are blocking a clean run. "
-                        "Owner is investigating a race in the test fixtures."},
-    ],
-}
-
-# One question bank for the fabric; the family tag drives the eval mix.
-QUESTION_BANK = {
-    "qualizeal": [
-        ("what must a release achieve before promotion?", ["qa/test-strategy.md"], "policy"),
-        ("what is the acceptance criteria for coverage?", ["qa/test-strategy.md"], "threshold"),
-        ("which requirement has a traceability gap?", ["qa/traceability-matrix.csv"], "lookup"),
-        ("what blocks the release according to the standup?", ["qa/standup.transcript"], "evidence"),
-        ("how fast must critical defects be triaged?", ["qa/defect-policy.md"], "policy"),
-        ("what is required before boarding begins?", ["ops/turnaround.md"], "procedure"),
-        ("which aircraft system was deferred?", ["ops/inspection-log.csv"], "lookup"),
-        ("what does triage category 1 require?", ["clin/triage-protocol.md"], "procedure"),
-    ],
-}
-
 # Role-based user ids (F0.1 keeps P0.3's role slugs). No people's names —
 # the subject is the role. `asker.public` cannot see `restricted`;
 # `asker.restricted` is the elevated asker who can (P1.6 direction).
@@ -140,69 +46,30 @@ _ROLE_USERS = [
 ]
 DEMO_USERS = {"qualizeal": list(_ROLE_USERS)}
 
-# identifier-safety: patterns that would indicate a REAL-resolvable identifier
-_UNSAFE = [
-    (re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?(?!01[0-9]{2})\d{3}[-.\s]?\d{4}\b"), "real-looking phone"),
-    (re.compile(r"@(?!example\.(?:com|org|net)\b)[a-z0-9.-]+\.(?:com|org|net|io|gov)", re.I), "real domain email"),
-    (re.compile(r"\b(?:192\.0\.2\.|198\.51\.100\.|203\.0\.113\.)"), None),   # RFC5737 -> SAFE
-]
-
-
 def validate_identifiers() -> list[str]:
-    """Fail the build if any shipped identifier could resolve to a real entity."""
-    problems = []
-    for tenant, docs in CORPORA.items():
-        for uri, title, mime, acl, ontology, body in docs:
-            for pat, label in _UNSAFE:
-                if label is None:
-                    continue
-                for m in pat.findall(body):
-                    problems.append(f"{tenant}:{uri} contains {label}: {m!r}")
-    return problems
+    """No documents are shipped in the product fabric (L0.2), so there are no
+    shipped identifiers to validate. The synthetic corpus that used to live
+    here now lives in ``tests/fixtures/synthetic_corpus.py`` and validates
+    itself in the test suite. Kept so the CI identifier-safety gate keeps a
+    stable entry point."""
+    return []
 
 
 def seed(platform, tenants: list[str] | None = None) -> dict:
-    """Load the QualiZeal tenant, users, budget, corpus and question bank."""
-    from ..ingestion.intake import Intake, IngestWorker
+    """Seed the QualiZeal fabric configuration and budget ONLY — no documents.
 
-    problems = validate_identifiers()
-    if problems:
-        raise AssertionError("identifier-safety validation FAILED:\n" + "\n".join(problems))
-
-    intake = Intake(platform)
-    worker = IngestWorker(platform, intake)
+    Documents enter ``qualizeal`` exclusively via ``make load-corpus`` (the
+    48-document QualiZeal corpus). This keeps every synthetic fixture out of
+    the product fabric (L0.2 / defect D1). Users come from the static
+    ``DEMO_USERS`` directory and need no seeding.
+    """
     chosen = tenants or [t.tenant for t in DEMO_TENANTS]
     summary = {}
     for cfg in DEMO_TENANTS:
         if cfg.tenant not in chosen:
             continue
         platform.policy.set_budget(cfg.tenant, cfg.budget)
-        if cfg.tenant not in CORPORA:
-            summary[cfg.tenant] = {"documents": 0, "ingested": 0, "passages": 0}
-            continue
-        for uri, title, mime, acl, ontology, body in CORPORA[cfg.tenant]:
-            raw = intake.canonical(cfg.tenant, "files", f"file://{uri}", title,
-                                   body.encode(), mime=mime, acl=acl, ontology=ontology)
-            intake.submit(raw)
-        for qid, (q, docs, fam) in enumerate(QUESTION_BANK.get(cfg.tenant, [])):
-            platform.db.execute(
-                "INSERT OR REPLACE INTO question_bank(id,tenant,question,expected_docs,family) VALUES(?,?,?,?,?)",
-                (f"{cfg.tenant}-q{qid}", cfg.tenant, q, ",".join(docs), fam))
-        res = worker.drain()
-        summary[cfg.tenant] = {"documents": len(CORPORA[cfg.tenant]),
-                               "ingested": len([r for r in res if r["status"] in ("ok", "updated")]),
-                               "passages": sum(r.get("passages", 0) for r in res)}
-        sources = []
-        if cfg.tenant in GITHUB_RECORDS:
-            sources.append({"source": "github", "config": {"repos": ["qualizeal/kf-platform"]},
-                            "records": GITHUB_RECORDS[cfg.tenant]})
-        if cfg.tenant in JIRA_RECORDS:
-            sources.append({"source": "jira", "config": {"projects": ["REL"]},
-                            "records": JIRA_RECORDS[cfg.tenant]})
-        if sources:
-            from ..ingestion.sync import SyncManager
-            syncs = SyncManager(platform).run_all(cfg.tenant, sources)
-            summary[cfg.tenant]["connectors"] = {s["source"]: s["ingested"] for s in syncs}
+        summary[cfg.tenant] = {"documents": 0, "ingested": 0, "passages": 0}
     return summary
 
 

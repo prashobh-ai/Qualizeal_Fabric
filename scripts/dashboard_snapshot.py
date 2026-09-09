@@ -19,6 +19,7 @@ from knowledge_fabric.answer.service import AnswerService
 from knowledge_fabric.ingestion.sync import SyncManager
 from knowledge_fabric.surfaces.dashboard import DASHBOARD_HTML
 from knowledge_fabric.tenants import demo
+from tests.fixtures import synthetic_corpus
 
 TENANT = "qualizeal"
 SCRIPT = [
@@ -42,6 +43,7 @@ SCRIPT = [
 def main():
     p = Platform(db_path=":memory:", blob_root="./data/snap-blobs")
     demo.seed(p, [TENANT])
+    synthetic_corpus.load_into(p, TENANT)   # snapshot demo loads the synthetic corpus
     svc = AnswerService(p)
     for user, q in SCRIPT:
         try:

@@ -6,7 +6,7 @@ from knowledge_fabric.connectors import admin, registry
 from knowledge_fabric.ingestion import runs, scheduler
 from tests.util import seeded
 
-T = "qualizeal"
+T = "test-fabric"
 OTHER = "isolation-check"
 INTERVAL = 600
 # a fixed "now" far past the seed's real wall-clock syncs, so freshness maths is exact

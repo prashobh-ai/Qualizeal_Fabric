@@ -38,7 +38,10 @@ def demo_directory() -> dict:
     tenants = [{"tenant": t, "display": display.get(t, t)} for t in demo.DEMO_USERS]
     users = {t: [{"subject": s, "roles": list(r)} for s, r, _ in rows]
              for t, rows in demo.DEMO_USERS.items()}
-    questions = {t: [q for q, _, _ in bank] for t, bank in demo.QUESTION_BANK.items()}
+    # Suggested questions now come from the live question bank over the real
+    # corpus (P1.6 / L0.3) via GET /api/suggestions; the static directory
+    # carries no synthetic question list (L0.2).
+    questions = {t: [] for t in demo.DEMO_USERS}
     return {"tenants": tenants, "users": users, "questions": questions}
 
 
