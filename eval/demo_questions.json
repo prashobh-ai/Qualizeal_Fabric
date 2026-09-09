@@ -1,0 +1,48 @@
+{
+  "_comment": "Six hand-curated golden demo questions for the leadership script (F9.1) and the Pages showcase build (F8.3). Each names the expected level word and family; the answer, card, switches and citations are recorded at build time when ANTHROPIC_API_KEY is present. These reference the real QualiZeal corpus (products NexaAI / QMentisAI / ValidAIte / QualiCentral, the company and its services).",
+  "tenant": "qualizeal",
+  "questions": [
+    {
+      "id": "golden-definition",
+      "question": "What is ValidAIte?",
+      "family": "definition",
+      "expected_level": "Quote it",
+      "note": "A definition backed by the ValidAIte product document; cited to the page, Level 1."
+    },
+    {
+      "id": "golden-comparison",
+      "question": "Compare QMentisAI and ValidAIte for AI system testing.",
+      "family": "comparison",
+      "expected_level": "Reason about it",
+      "note": "Cross-product comparison; Level 3 with relationships and the two products cited."
+    },
+    {
+      "id": "golden-service-scope",
+      "question": "What services does QualiZeal offer for AI and ML model quality assurance?",
+      "family": "service",
+      "expected_level": "Summarise it",
+      "note": "Service scope synthesised across service documents."
+    },
+    {
+      "id": "golden-company-fact",
+      "question": "What is QualiZeal's mission?",
+      "family": "company",
+      "expected_level": "Quote it",
+      "note": "A company fact quoted from the company / mission document."
+    },
+    {
+      "id": "golden-procedure",
+      "question": "What must a release achieve before it can be promoted?",
+      "family": "procedure",
+      "expected_level": "Summarise it",
+      "note": "A procedure drawn from the delivery / quality documents."
+    },
+    {
+      "id": "golden-decline",
+      "question": "What is the capital of France?",
+      "family": "out-of-fabric",
+      "expected_level": "Decline",
+      "note": "Out-of-fabric: declared gap, never a guess."
+    }
+  ]
+}

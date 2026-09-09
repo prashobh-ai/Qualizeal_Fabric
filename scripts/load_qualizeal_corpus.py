@@ -17,15 +17,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pathlib import Path
 from knowledge_fabric.app import Platform
+from knowledge_fabric.evaluation import bank as qbank
 from knowledge_fabric.ingestion.intake import Intake, IngestWorker
 
 TENANT = "qualizeal"
-QBANK = [
-    ("what does ValidAIte do?", "product"),
-    ("what services does QualiZeal offer for AI/ML model testing?", "service"),
-    ("what is QMentisAI?", "product"),
-    ("what is QualiZeal's mission?", "company"),
-]
 
 
 def main(argv=None):
@@ -47,12 +42,12 @@ def main(argv=None):
                          path.read_bytes(), mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
         intake.upload(TENANT, path.name, path.read_bytes())
     res = worker.drain()
-    for qid, (q, fam) in enumerate(QBANK):
-        p.db.execute("INSERT OR REPLACE INTO question_bank(id,tenant,question,expected_docs,family) VALUES(?,?,?,?,?)",
-                     (f"{TENANT}-q{qid}", TENANT, q, "", fam))
+    # L0.3 — generate the question bank FROM the loaded corpus, so every
+    # suggestion references a document that is actually in the fabric.
+    kept = qbank.generate(p, TENANT)
     ok = [r for r in res if r["status"] in ("ok", "updated")]
     print(f"[✓] ingested {len(ok)} docs · {p.passages.count(TENANT)} passages · "
-          f"{sum(r.get('entities',0) for r in ok)} entities")
+          f"{sum(r.get('entities',0) for r in ok)} entities · {kept} suggested questions")
     print("    try:  python -m knowledge_fabric.cli ask qualizeal asker.public \"what is ValidAIte?\"")
     return 0
 
