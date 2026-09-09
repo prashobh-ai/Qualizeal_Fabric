@@ -56,9 +56,29 @@ _CSS = r"""
 .conflict{border-left:3px solid var(--warn);padding:4px 10px;margin:6px 0;font-size:12px;background:rgba(240,180,41,.06);border-radius:0 8px 8px 0}
 .hist{cursor:pointer;padding:6px 8px;border-radius:8px;border:1px solid transparent}
 .hist:hover{border-color:var(--line);background:var(--panel2)}
+/* P1.2 — corpus tiles ("the corpus at a glance"), animated once on load. */
+.tiles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px}
+@media(max-width:820px){.tiles{grid-template-columns:repeat(2,1fr)}}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;position:relative;overflow:hidden}
+.tile:before{content:"";position:absolute;inset:0;background:linear-gradient(120deg,var(--qz-blue-soft),transparent 60%);opacity:.35;pointer-events:none}
+.tile .n{font-size:26px;font-weight:800;letter-spacing:.3px;font-variant-numeric:tabular-nums}
+.tile .l{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+.tile[data-key="documents"] .n{color:var(--qz-blue)}
+.tile[data-key="passages"] .n{color:var(--qz-cyan)}
+.tile[data-key="entities"] .n{color:var(--qz-violet)}
+.tile[data-key="relationships"] .n{color:var(--qz-pink)}
+.tile[data-key="domains"] .n{color:var(--good)}
 """
 
 _BODY = """
+<div class="tiles" id="corpus-tiles" aria-label="Corpus at a glance">
+  <div class="tile" data-key="documents"><div class="n" id="tile-documents">0</div><div class="l">Documents</div></div>
+  <div class="tile" data-key="passages"><div class="n" id="tile-passages">0</div><div class="l">Passages</div></div>
+  <div class="tile" data-key="entities"><div class="n" id="tile-entities">0</div><div class="l">Entities</div></div>
+  <div class="tile" data-key="relationships"><div class="n" id="tile-relationships">0</div><div class="l">Relationships</div></div>
+  <div class="tile" data-key="domains"><div class="n" id="tile-domains">0</div><div class="l">Domains</div></div>
+</div>
+
 <div class="card" id="ask-card">
   <h3>Ask the knowledge fabric <span class="right muted" id="ask-status"></span></h3>
   <form class="askbox" id="ask-form">
@@ -145,10 +165,18 @@ const SAMPLE_EXTRA=[
 const KIND_CLS={answer:'good',clarify:'warn',gap:'bad'};
 const CPLX_CLS={simple:'good',medium:'warn',complex:'violet'};
 
-function samples(){const t=(KF.session&&KF.session.tenant)||$('#kf-tenant').value;
- const qs=(KF.DIR.questions[t]||[]).concat(t==='q-quality'?SAMPLE_EXTRA:[]);
- $('#samples').innerHTML=qs.map(q=>'<span class="chip" data-q="'+esc(q)+'">'+esc(q)+'</span>').join('');
+function _renderChips(qs){$('#samples').innerHTML=qs.map(q=>'<span class="chip" data-q="'+esc(q)+'">'+esc(q)+'</span>').join('');
  KF.$$('#samples .chip').forEach(c=>c.onclick=()=>{$('#question').value=c.dataset.q;$('#question').focus()})}
+async function samples(){
+ // P1.6 — signed-in asker gets ACL-filtered suggestions from the question
+ // bank (a restricted asker never sees a question whose supporting document
+ // they could not retrieve). Unsigned users see the seed-bank preview.
+ if(KF.session){try{const j=await api('/api/suggestions');
+  const qs=(j.suggestions||[]).map(s=>s.question).slice(0,6);
+  if(qs.length){_renderChips(qs);return}}catch(e){/* fall through to seed */}}
+ const t=(KF.session&&KF.session.tenant)||$('#kf-tenant').value;
+ const qs=(KF.DIR.questions[t]||[]).concat(t==='q-quality'?SAMPLE_EXTRA:[]);
+ _renderChips(qs)}
 
 function markers(text){return esc(text).replace(/\[(\d+)\]/g,(m,n)=>'<sup class="ref" data-n="'+n+'">['+n+']</sup>')}
 
@@ -227,8 +255,20 @@ async function ask(ev){if(ev)ev.preventDefault();const q=$('#question').value.tr
  catch(e){gate(e,'asker');$('#ask-status').textContent='failed';toast(e.message,'bad')}
  finally{btn.disabled=false}}
 
-window.KF_ON_SESSION=s=>{gate(null);samples();if(s)$('#ask-status').textContent='ready for '+s.subject};
-KF.initBar({preferRole:'asker'});samples();
+// P1.2 — corpus tiles: fetch /api/corpus for the caller's tenant and
+// animate the numbers once on load. Every re-sign-in (window.KF_ON_SESSION)
+// refreshes them so a tenant switch shows that tenant's counts.
+function animateNumber(el,target,ms){target=Number(target)||0;const from=Number(el.textContent.replace(/[^0-9]/g,''))||0;
+ if(ms==null)ms=600;const t0=performance.now();
+ function step(t){const p=Math.min(1,(t-t0)/ms);const v=Math.round(from+(target-from)*(1-Math.pow(1-p,3)));
+  el.textContent=num(v);if(p<1)requestAnimationFrame(step)}
+ requestAnimationFrame(step)}
+async function corpusTiles(){if(!KF.session)return;
+ try{const c=await api('/api/corpus');
+  ['documents','passages','entities','relationships','domains'].forEach(k=>{const el=$('#tile-'+k);if(el)animateNumber(el,c[k]||0)})}
+ catch(e){/* silent on the header strip — the answer card owns error messaging */}}
+window.KF_ON_SESSION=s=>{gate(null);samples();corpusTiles();if(s)$('#ask-status').textContent='ready for '+s.subject};
+KF.initBar({preferRole:'asker'});samples();corpusTiles();
 $('#ask-form').addEventListener('submit',ask);
 $('#question').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')ask(e)});
 if(!KF.session)gate({status:401,message:''},'asker');
