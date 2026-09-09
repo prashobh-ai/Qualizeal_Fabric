@@ -36,15 +36,15 @@ only the environment differs (`docs/AWS_READINESS.md` has the exact mapping).
 ```bash
 cd deploy/aws
 tofu init
-tofu plan  -var tenant_slug=acme -var region=eu-west-1 -var model_mode=off
-tofu apply -var tenant_slug=acme -var region=eu-west-1 -var model_mode=off
+tofu plan  -var tenant_slug=qualizeal -var region=eu-west-1 -var model_mode=off
+tofu apply -var tenant_slug=qualizeal -var region=eu-west-1 -var model_mode=off
 ```
 
 Recommended `terraform.tfvars` for a real client (never commit secrets — pass
 them with `-var` or `TF_VAR_model_api_key` from your secret manager):
 
 ```hcl
-tenant_slug           = "acme"
+tenant_slug           = "qualizeal"
 region                = "eu-west-1"
 model_mode            = "hosted"            # hosted | self-hosted | mock | off
 model_base_url        = "https://gateway.example.internal/v1"

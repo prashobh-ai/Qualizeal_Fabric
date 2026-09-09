@@ -9,27 +9,27 @@ from tests.util import seeded
 
 class TestEvalHealth(unittest.TestCase):
     def setUp(self):
-        self.p = seeded(["q-quality"])
+        self.p = seeded(["qualizeal"])
 
     def test_question_bank_passes_gate(self):
-        v = gate.evaluate(self.p, "q-quality", candidate_version=1)
+        v = gate.evaluate(self.p, "qualizeal", candidate_version=1)
         self.assertTrue(v["passed"], v["regressions"])
         self.assertGreaterEqual(v["metrics"]["citation_coverage"], 0.75)
 
     def test_corrupted_citation_blocks_promotion(self):
         # run a clean evaluate first so the answer cache is populated — the gate
         # must still see the corruption (caches are invalidated on index change).
-        self.assertTrue(gate.evaluate(self.p, "q-quality", 1)["passed"])
-        gate.corrupt_citation_coordinates(self.p, "q-quality")
-        v = gate.promote_if_passes(self.p, "q-quality", candidate_version=2)
+        self.assertTrue(gate.evaluate(self.p, "qualizeal", 1)["passed"])
+        gate.corrupt_citation_coordinates(self.p, "qualizeal")
+        v = gate.promote_if_passes(self.p, "qualizeal", candidate_version=2)
         self.assertFalse(v["passed"], "corrupt index must be blocked (I10)")
         self.assertIsNone(v["promoted"])
 
     def test_health_snapshot_and_risk_register(self):
-        h = metrics.latest(self.p, "q-quality")
+        h = metrics.latest(self.p, "qualizeal")
         self.assertIn("coverage", h)
         self.assertGreaterEqual(h["traceability"], 1.0)   # every passage has provenance
-        risks = metrics.risk_register(self.p, "q-quality")
+        risks = metrics.risk_register(self.p, "qualizeal")
         self.assertIsInstance(risks, list)
 
     def test_identifier_safety_validation(self):

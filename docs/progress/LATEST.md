@@ -1,1 +1,1 @@
-Current: P1.6
+Current: F0.4

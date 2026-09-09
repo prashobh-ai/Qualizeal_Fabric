@@ -27,8 +27,8 @@ from tests.util import seeded
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "ci" / "licence_manifest.json"
 GATE = ROOT / "scripts" / "licence_gate.py"
-T = "q-quality"
-T2 = "q-airlines"
+T = "qualizeal"
+T2 = "isolation-check"
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
 HEX16 = re.compile(r"^[0-9a-f]{16}$")
 
@@ -343,7 +343,7 @@ class OtlpExportTests(unittest.TestCase):
     def test_tenant_isolation(self):
         other = ox.export(self.p, T2, None)
         names = {s["name"] for s in other["resourceSpans"][0]["scopeSpans"][0]["spans"]}
-        self.assertNotIn("answer", names)                 # northwind asked nothing
+        self.assertNotIn("answer", names)                 # isolation tenant asked nothing
         tenants = {_attrs({"attributes": r["resource"]["attributes"]})["kf.tenant"]
                    for r in other["resourceSpans"]}
         self.assertEqual(tenants, {T2})
@@ -368,7 +368,7 @@ class OtlpExportTests(unittest.TestCase):
         th.start()
         try:
             url = f"http://127.0.0.1:{srv.server_address[1]}"
-            with mock.patch.dict(os.environ, {ox.HEADERS_ENV: "Authorization=Bearer t0k,X-Tenant=acme"}):
+            with mock.patch.dict(os.environ, {ox.HEADERS_ENV: "Authorization=Bearer t0k,X-Tenant=qualizeal"}):
                 res = ox.export(self.p, T, url, headers={"X-Extra": "1"})
             self.assertTrue(res["ok"])
             self.assertEqual(res["http_status"], 200)

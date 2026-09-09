@@ -175,7 +175,7 @@ async function samples(){
   const qs=(j.suggestions||[]).map(s=>s.question).slice(0,6);
   if(qs.length){_renderChips(qs);return}}catch(e){/* fall through to seed */}}
  const t=(KF.session&&KF.session.tenant)||$('#kf-tenant').value;
- const qs=(KF.DIR.questions[t]||[]).concat(t==='q-quality'?SAMPLE_EXTRA:[]);
+ const qs=(KF.DIR.questions[t]||[]).concat(t==='qualizeal'?SAMPLE_EXTRA:[]);
  _renderChips(qs)}
 
 function markers(text){return esc(text).replace(/\[(\d+)\]/g,(m,n)=>'<sup class="ref" data-n="'+n+'">['+n+']</sup>')}

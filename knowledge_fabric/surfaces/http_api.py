@@ -68,7 +68,7 @@ def platform() -> Platform:
     global _platform, _svc
     if _platform is None:
         _platform = Platform(db_path=os.environ.get("KF_DB", "./data/kf.db"))
-        if not _platform.documents.list("q-quality"):
+        if not _platform.documents.list("qualizeal"):
             demo.seed(_platform)
         cap = os.environ.get("KF_BUDGET_CAP_USD")          # injected by the AWS module
         if cap:
@@ -90,7 +90,7 @@ def _demo_delta(tenant: str, source: str) -> list[dict] | None:
                            "It confirms the scheduler pulls only the delta since the last cursor."}]
     if source == "github" and tenant in demo.GITHUB_RECORDS:
         return demo.GITHUB_RECORDS[tenant] + [{
-            "repo": "acme/assurance-platform", "path": f"docs/sync-{stamp}.md", "updated_at": stamp,
+            "repo": "qualizeal/kf-platform", "path": f"docs/sync-{stamp}.md", "updated_at": stamp,
             "commit": f"c{stamp % 100000:05d}", "mime": "text/markdown",
             "content": f"# Sync note {stamp}\n\nA fresh commit picked up by the continuous-refresh demo."}]
     return None
@@ -213,7 +213,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/connectors":
             return self._send(200, {"connectors": registry.available()})
         if u.path == "/metrics":
-            return self._send(200, p.telemetry.metrics(first("tenant", "q-quality")))
+            return self._send(200, p.telemetry.metrics(first("tenant", "qualizeal")))
 
         # curator + admin
         if u.path == "/api/analytics":
@@ -250,6 +250,10 @@ class Handler(BaseHTTPRequestHandler):
                 (prin.tenant,))
             out = []
             seen_family = set()
+            # The API returns every accessible suggestion in bank order; the
+            # UI slices to six chips (F1.4). The subset relation the ACL gate
+            # promises — asker.public ⊆ asker.restricted — is provable on the
+            # raw API without the cap dropping earlier-ranked common items.
             for r in rows:
                 uris = [u for u in (r["expected_docs"] or "").split(",") if u]
                 # ACL gate: every supporting document must be accessible
@@ -259,8 +263,6 @@ class Handler(BaseHTTPRequestHandler):
                 out.append({"question": r["question"], "family": fam or "", "docs": len(uris)})
                 if fam:
                     seen_family.add(fam)
-                if len(out) >= 6:
-                    break
             return self._send(200, {"tenant": prin.tenant, "suggestions": out,
                                     "families": sorted(seen_family)})
         if u.path == "/api/corpus":
