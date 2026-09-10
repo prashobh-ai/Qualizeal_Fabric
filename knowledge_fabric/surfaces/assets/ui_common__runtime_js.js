@@ -33,7 +33,7 @@ const KF=(()=>{
   if(!r.ok){const err=new Error(j.error||('HTTP '+r.status));err.status=r.status;err.body=j;throw err}
   return j}
  const FABRIC='qualizeal';   // single in-house fabric (no tenant selector, D5)
- async function login(subject){const j=await api('/login',{method:'POST',body:{tenant:FABRIC,subject}});save(j);renderWho();return j}
+ async function login(subject,password){const j=await api('/login',{method:'POST',body:{tenant:FABRIC,subject,password:password||''}});save(j);renderWho();return j}
  function logout(){save(null);renderWho();nav('/signin')}
  function hasRole(){const roles=(session&&session.roles)||[];for(const r of arguments)if(roles.indexOf(r)>=0)return true;return false}
  let toastTimer=null;
