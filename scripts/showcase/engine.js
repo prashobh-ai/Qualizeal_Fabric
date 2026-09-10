@@ -27,7 +27,16 @@
   };
 
   var realFetch = window.fetch.bind(window);
-  var SNAP = null, STATE = null, TOKEN2SUBJECT = {};
+  var SNAP = null, STATE = null, TOKEN2SUBJECT = {}, SESSION_LOGINS = {};
+
+  // Sign-in policy for the showcase (client-side; the corporate directory
+  // replaces it in the live product). Elevated accounts need their password;
+  // anyone with a QualiZeal address signs in by default (single sign-on).
+  var SSO_DOMAIN = "@qualizeal.com";
+  var SEED = {
+    "admin@qualizeal.com": { pw: "kf@qz2026", roles: ["admin"], scopes: ["public", "restricted"] },
+    "curator@qualizeal.com": { pw: "kf@qz2026", roles: ["curator"], scopes: ["public", "restricted"] }
+  };
   var ready = realFetch(base + "/snapshot.json")
     .then(function (r) { return r.json(); })
     .then(function (s) { SNAP = s; initState(s); })
@@ -36,12 +45,25 @@
   function clone(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
 
   function initState(s) {
+    var baked = clone((s.get && s.get.admin && s.get.admin["/admin/users"]) || { users: [] });
+    baked.users = baked.users || [];
+    // Users an admin added persist per browser (no server on Pages), so a
+    // promoted admin/curator can sign back in after a reload.
+    var stored = loadUsers();
+    if (stored) {
+      stored.forEach(function (u) {
+        if (u && u.subject && !baked.users.some(function (x) { return x.subject === u.subject; })) {
+          baked.users.push(u);
+        }
+      });
+    }
     STATE = {
       get: clone(s.get) || {},
       usage: clone(s.usage) || {},
-      users: clone((s.get && s.get.admin && s.get.admin["/admin/users"]) || { users: [] }),
+      users: baked,
       feedback: loadFeedback()
     };
+    if (STATE.get.admin) STATE.get.admin["/admin/users"] = STATE.users;
     Object.keys(s.login || {}).forEach(function (subj) {
       var l = s.login[subj]; if (l && l.token) TOKEN2SUBJECT[l.token] = subj;
     });
@@ -55,12 +77,51 @@
     try { localStorage.setItem("kf.feedback", JSON.stringify(STATE.feedback.slice(0, 200))); } catch (e) {}
   }
 
+  // ---- admin-managed users (add / promote) — per browser ----------------
+  function loadUsers() {
+    try { return JSON.parse(localStorage.getItem("kf.users") || "null"); } catch (e) { return null; }
+  }
+  function saveUsers(box) {
+    try { localStorage.setItem("kf.users", JSON.stringify((box.users || []).slice(0, 500))); } catch (e) {}
+  }
+
   // ---- helpers ----------------------------------------------------------
   function subjectOf(token) {
     if (!token) return "";
     return TOKEN2SUBJECT[token] || (token.indexOf("demo-") === 0 ? token.slice(5) : "");
   }
-  function loginOf(subject) { return (SNAP.login || {})[subject] || null; }
+  function loginOf(subject) { return SESSION_LOGINS[subject] || (SNAP.login || {})[subject] || null; }
+
+  // Register a signed-in identity so downstream requests resolve its role/scope.
+  function mint(subject, roles, scopes) {
+    var token = "demo-" + subject;
+    var l = { token: token, subject: subject, roles: roles, scopes: scopes };
+    SESSION_LOGINS[subject] = l;
+    TOKEN2SUBJECT[token] = subject;
+    return l;
+  }
+
+  // Sign-in rules, in order: baked demo subjects (showcase quick picker) →
+  // elevated seeded accounts (exact password) → admin-promoted users →
+  // any QualiZeal address (single sign-on, asker) → unknown.
+  function resolveLogin(rawSubject, password) {
+    var subject = (rawSubject || "").trim().toLowerCase();
+    password = password || "";
+    if (!subject) return { code: 400 };
+    if ((SNAP.login || {})[subject]) return { login: (SNAP.login)[subject] };
+    if (SEED[subject]) {
+      var seed = SEED[subject];
+      return password === seed.pw ? { login: mint(subject, seed.roles, seed.scopes) } : { code: 401 };
+    }
+    var promoted = (STATE.users && STATE.users.users || []).filter(function (u) {
+      return (u.subject || "").toLowerCase() === subject;
+    })[0];
+    if (promoted) return { login: mint(subject, promoted.roles || ["asker"], promoted.scopes || ["public"]) };
+    if (subject.slice(-SSO_DOMAIN.length) === SSO_DOMAIN) {
+      return { login: mint(subject, ["asker"], ["public"]) };
+    }
+    return { code: 404 };
+  }
   function bucketOf(subject) {
     var l = loginOf(subject), roles = (l && l.roles) || [];
     return roles.indexOf("admin") >= 0 ? "admin" : roles.indexOf("curator") >= 0 ? "curator" : "asker";
@@ -154,8 +215,10 @@
                          department: body.department || "", team: body.team || "", status: "active" });
       }
     }
-    // keep the admin GET bucket pointing at the mutated list
+    // keep the admin GET bucket pointing at the mutated list, and persist so a
+    // promoted admin/curator can sign back in after a reload (per browser).
     if (STATE.get.admin) STATE.get.admin["/admin/users"] = box;
+    saveUsers(box);
     return box;
   }
   function recordFeedback(subject, body) {
@@ -182,7 +245,13 @@
   function handle(method, path, q, body, token) {
     var subject = subjectOf(token);
     if (method === "POST") {
-      if (path === "/login") { var l = loginOf(body.subject); return l ? respond(l) : respond({ error: "unknown user " + body.subject }, 404); }
+      if (path === "/login") {
+        var r = resolveLogin(body.subject, body.password);
+        if (r.login) return respond(r.login);
+        if (r.code === 401) return respond({ error: "wrong password for " + (body.subject || "") }, 401);
+        if (r.code === 400) return respond({ error: "enter your user id" }, 400);
+        return respond({ error: "unknown user " + (body.subject || "") }, 404);
+      }
       if (path === "/ask") return respond(answerFor(subject, body.question || ""));
       if (path === "/curator/decision") { applyDecision(body); return respond({ ok: true, decision: body.decision }); }
       if (path === "/admin/users") return respond(userMutation(body));
