@@ -109,15 +109,17 @@ jobs:
       - name: Corpus policy
         run: uv run pytest -q tests/unit/test_corpus_policy.py
       - name: MCP conformance (inspector CLI)
-        # The MCP server package lands at T20 (knowledge_fabric/mcp/). Until it
-        # exists, prove the inspector CLI is reachable so the job is wired; once
-        # the server ships, tests/integration/test_mcp.py runs the real
-        # tools/list conformance call against it.
+        # The MCP server package lands at T20 (knowledge_fabric/mcp/). Once it
+        # exists, run the integration test and the inspector's headless CLI
+        # tools/list conformance call against it. Until then the server has no
+        # entrypoint to launch (the inspector with no target just hangs), so the
+        # job only confirms Node is present and defers the real check to T20.
         run: |
           if [ -d knowledge_fabric/mcp ]; then
             uv run pytest -q tests/integration/test_mcp.py
             npx --yes @modelcontextprotocol/inspector --cli --method tools/list \
               -- uv run python -m knowledge_fabric.mcp
           else
-            npx --yes @modelcontextprotocol/inspector --version
+            node --version
+            echo "MCP server not built yet; inspector tools/list conformance is wired for T20."
           fi
