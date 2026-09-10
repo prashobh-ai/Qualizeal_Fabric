@@ -45,46 +45,53 @@ from knowledge_fabric.surfaces.curator_ui import CURATOR_HTML  # noqa: E402
 from knowledge_fabric.surfaces.dashboard import DASHBOARD_HTML  # noqa: E402
 from knowledge_fabric.surfaces.signin_ui import SIGNIN_HTML  # noqa: E402
 from knowledge_fabric.tenants import demo  # noqa: E402
-from tests.fixtures import synthetic_corpus  # noqa: E402
 
 BRAND_SRC = os.path.join(ROOT, "knowledge_fabric", "surfaces", "static", "assets", "brand")
 ENGINE_SRC = os.path.join(ROOT, "scripts", "showcase", "engine.js")
 LANDING_SRC = os.path.join(ROOT, "scripts", "showcase", "landing.html")
 TENANT = "qualizeal"
 
-# A realistic run so analytics / usage / cache have something to show.
+# Real knowledge: the curated QualiZeal product/service briefs, vendored from the
+# GitHub source they came from. Ingested through the live 7-step pipeline at build
+# time so the fabric answers real questions from day one (products, services, the
+# company) and the corpus counts, galaxy and citations are genuine.
+CORPUS_DIR = os.path.join(ROOT, "corpus")
+CORPUS_SOURCE = "github"
+CORPUS_REPO = "prashobh-ai/Knowledge-Fabric"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+# A realistic run over the real corpus so analytics / usage / cache have
+# something to show — QualiZeal products, services and company knowledge.
 SCRIPT = [
-    ("asker.public", "what must a release achieve before promotion?"),
-    ("asker.public", "why does a component with an open defect block dependent releases?"),
-    ("asker.public", "which requirement has a traceability gap?"),
-    ("asker.public", "what blocks the release according to the standup?"),
-    ("asker.public", "what must a release achieve before promotion?"),  # cache hit
-    ("curator", "how fast must critical defects be triaged?"),
-    ("curator", "compare acceptance criteria across the strategy and the runbook"),
-    ("asker.public", "how fast must critical defects be triaged?"),
+    ("asker.public", "what is QMentisAI?"),
+    ("asker.public", "what does ValidAIte do?"),
+    ("asker.public", "what is NexaAI?"),
+    ("asker.public", "what is QMentisAI?"),  # cache hit
+    ("curator", "what does QualiZeal offer for performance testing?"),
+    ("curator", "what is QualiZeal's approach to security testing?"),
+    ("asker.public", "what does QualiZeal offer for test automation?"),
     (
         "asker.restricted",
-        (
-            "what must a release achieve before promotion and which requirement has a traceability "
-            "gap?"
-        ),
+        "what is QMentisAI and how does it use generative AI for quality engineering?",
     ),
-    ("asker.public", "quel est le critère d acceptation pour la couverture?"),  # FR
-    ("asker.public", "¿cuál es el criterio de aceptación para la cobertura?"),  # ES
-    ("qa-agent", "what is required before a release is promoted?"),
-    ("asker.public", "what is the capital of France?"),  # gap
-    ("curator", "why does an open defect block its dependent releases?"),
+    ("asker.public", "qu'est-ce que QMentisAI?"),  # FR
+    ("asker.public", "¿qué es ValidAIte?"),  # ES
+    ("qa-agent", "what does QualiZeal offer for AI and ML model testing?"),
+    ("asker.public", "what is the capital of France?"),  # gap (out of corpus)
+    ("curator", "what is QualiCentral?"),
 ]
 
 # Extra questions to bake answers for (so the chatbot / Workspace answer freely).
 EXTRA_Q = [
-    "what must a release achieve before promotion?",
-    "how fast must critical defects be triaged?",
-    "which requirement has a traceability gap?",
-    "why does a component with an open defect block dependent releases?",
-    "compare acceptance criteria across the strategy and the runbook",
-    "what blocks the release according to the standup?",
-    "what must a release achieve before promotion and which requirement has a traceability gap?",
+    "what is QMentisAI?",
+    "what does ValidAIte do?",
+    "what is NexaAI?",
+    "what is QualiCentral?",
+    "what does QualiZeal offer for performance testing?",
+    "what is QualiZeal's approach to security testing?",
+    "what does QualiZeal offer for test automation?",
+    "what does QualiZeal offer for AI and ML model testing?",
+    "what is QMentisAI and how does it use generative AI for quality engineering?",
 ]
 
 ROLES = ["asker.public", "asker.restricted", "curator", "admin", "qa-agent"]
@@ -105,13 +112,63 @@ ADMIN_GETS = [
 ]
 
 
+def _load_corpus(p):
+    """Ingest the vendored QualiZeal .docx corpus through the real 7-step
+    pipeline, tagged as the GitHub source it came from. Provenance is
+    ``github://prashobh-ai/Knowledge-Fabric/docs_source/<file>`` so the Admin
+    console shows GitHub as the origin; the reference converter reads .docx with
+    the standard library (no engine needed).
+    """
+    import glob
+    import re
+
+    from knowledge_fabric.ingestion.intake import IngestWorker, Intake
+
+    intake, worker = Intake(p), IngestWorker(p, None)
+    worker.intake = intake
+    paths = sorted(glob.glob(os.path.join(CORPUS_DIR, "*.docx")))
+    # Tests build against a small slice (the leading product briefs) to stay
+    # fast; the real Pages build ingests the whole corpus.
+    limit = os.environ.get("KF_SHOWCASE_CORPUS_LIMIT")
+    if limit:
+        paths = paths[: int(limit)]
+    for path in paths:
+        name = os.path.basename(path)
+        title = re.sub(r"^\d+_", "", os.path.splitext(name)[0]).replace("_", " ")
+        with open(path, "rb") as fh:
+            data = fh.read()
+        raw = intake.canonical(
+            TENANT,
+            CORPUS_SOURCE,
+            f"github://{CORPUS_REPO}/docs_source/{name}",
+            title,
+            data,
+            mime=DOCX_MIME,
+            acl=["public"],
+        )
+        intake.submit(raw)
+    worker.drain()
+    # Register the GitHub repo as the source in the Admin console (freshness,
+    # item count). Other repos are added by an admin via the allow-list — this
+    # one ships enabled so the fabric is useful on day one.
+    import time as _time
+
+    p.db.execute(
+        "INSERT INTO connector_cursors(tenant,source,cursor,last_sync,items) "
+        "VALUES(?,?,?,?,?) ON CONFLICT(tenant,source) DO UPDATE SET "
+        "cursor=excluded.cursor, last_sync=excluded.last_sync, items=excluded.items",
+        (TENANT, CORPUS_SOURCE, str(len(paths)), int(_time.time() * 1000), len(paths)),
+    )
+    return len(paths)
+
+
 def _seed():
     p = http_api.Platform(
         db_path=":memory:", blob_root=os.path.join(ROOT, "data", "showcase-blobs")
     )
     demo.seed(p, [TENANT])
-    synthetic_corpus.load_into(p, TENANT)  # self-contained demo knowledge
     p.policy.set_budget(TENANT, 20.0)
+    _load_corpus(p)  # real QualiZeal knowledge, ingested through the live pipeline
     qbank.generate(p, TENANT)  # bank from the loaded corpus
     svc = AnswerService(p)
     for subject, q in SCRIPT:
