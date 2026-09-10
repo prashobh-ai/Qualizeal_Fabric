@@ -35,6 +35,8 @@ from ..contracts.types import (
     AnswerKind,
     Candidate,
     Citation,
+    Coordinate,
+    CoordinateKind,
     Principal,
     new_id,
     now_ms,
@@ -44,6 +46,7 @@ from ..stores import versioning
 from . import lang as langmod
 from . import reasoning
 from . import selector as sel
+from .search import discover, is_discovery
 
 _TOKEN = re.compile(r"[a-z0-9]+")
 _URL = re.compile(r"https?://\S+")
@@ -219,6 +222,15 @@ class AnswerService:
                 )
                 if coded is not None:
                     return coded
+
+            # C3. discovery intent (T24): "has anyone made auth code?", "find an
+            # automation script for X" — return a ranked list of reusable assets.
+            if not _nested and is_discovery(question):
+                disc = self._discovery_answer(
+                    principal, question, rq, accessible, trace_id, span, qlang, dsv=0
+                )
+                if disc is not None:
+                    return disc
 
             qvec = p.cache.get_embedding(rq)
             if qvec is None:
@@ -922,6 +934,99 @@ class AnswerService:
         ext = (d.get("uri") or "").rsplit(".", 1)[-1].lower()
         return ext in ("py", "js", "ts", "tsx", "go", "java", "rb", "cs", "sh")
 
+    def _discovery_answer(
+        self, principal, question, rq, accessible, trace_id, span, qlang, dsv, min_top=0.0
+    ):
+        """Asset/capability discovery (T24): return a ranked LIST of real
+        organisation assets a person can reuse — code, tests, policies, learning
+        material — searched across the fabric and (on a real backend) live
+        GitHub. Never a single synthesised answer, and used both on explicit
+        discovery intent (permissive) and as the fallback before a blind gap
+        (``min_top`` guards against listing weak text overlaps). Returns None
+        when nothing strong enough was found, so the caller declines honestly."""
+        d = discover(self.p, principal.tenant, rq, accessible, k=6)
+        hits = [h for h in d.hits if h.score > 0]
+        if not hits or max(h.score for h in hits) < min_top:
+            return None
+        noun = "assets"
+        lead = f"Found {len(hits)} {noun} in the fabric you can reuse — each links to its source:"
+        parts, citations = [lead], []
+        for i, h in enumerate(hits, 1):
+            parts.append(f"• {h.title} ({h.kind}) — {h.snippet} [{i}]")
+            coord = h.coordinate
+            if coord is None or not (getattr(coord, "locator", {}) or {}).get("url"):
+                loc = dict(getattr(coord, "locator", {}) or {})
+                if h.url:
+                    loc["url"] = h.url
+                if h.path:
+                    loc.setdefault("path", h.path)
+                coord = Coordinate(
+                    coord.kind if coord is not None else CoordinateKind.PAGE_PARAGRAPH, loc
+                )
+            citations.append(
+                Citation(
+                    document_id=h.document_id or h.path,
+                    document_title=h.title,
+                    coordinate=coord,
+                    passage_id=h.passage_id or "",
+                    snippet=h.snippet[:200],
+                )
+            )
+        why = {
+            "level_name": "discovery",
+            "explain": "Searched "
+            + (", ".join(d.searched) or "the fabric")
+            + "; listed matching assets.",
+            "reasons": [{"code": "discovery", "detail": "asset search", "signal": True}],
+            "signals": {
+                "retrieval": 1.0,
+                "semantic": 0.7,
+                "coverage": 0.8,
+                "agreement": 0.8,
+                "resolvable": 1.0,
+            },
+            "retrieved": len(hits),
+            "complexity": "simple",
+            "model_name": model_for_tier("none"),
+            "discovery": [
+                {
+                    "title": h.title,
+                    "kind": h.kind,
+                    "url": h.url,
+                    "path": h.path,
+                    "snippet": h.snippet,
+                }
+                for h in hits
+            ],
+        }
+        self._audit(principal, "ask", "answered:discovery", trace_id)
+        span.set(
+            kind="answer",
+            level="discovery",
+            tier="none",
+            citations_count=len(citations),
+            complexity="simple",
+            dataset_version=dsv,
+        )
+        return Answer(
+            AnswerKind.ANSWER,
+            "\n".join(parts),
+            citations,
+            0.85,
+            trace_id,
+            0.0,
+            0,
+            "none",
+            grounding_score=0.85,
+            tenant=principal.tenant,
+            level=1,
+            why=why,
+            lang=qlang,
+            model_name=model_for_tier("none"),
+            complexity="simple",
+            dataset_version=dsv,
+        )
+
     def _code_answer(self, principal, question, rq, accessible, trace_id, span, qlang, dsv):
         """Identifier tier (T25) as an EARLY, decisive path. A code question
         names a symbol, which the semantics-free embedder and text-lexical index
@@ -1191,6 +1296,11 @@ class AnswerService:
         #    name); an unrelated document must actually share a query token.
         pool = []  # (score, sentence, passage, is_subject_doc)
         for c in selected:
+            # Code is answered by the identifier tier and discovery, never
+            # stitched into a prose answer — so a factual question is not
+            # "answered" from a string that merely appears inside a test (T24).
+            if c.passage.coordinate.kind.value == "symbol_line":
+                continue
             is_subj = c.passage.document_id in subj_docs
             for raw in _sentences(c.passage.text):
                 s = self._clean_sentence(raw)

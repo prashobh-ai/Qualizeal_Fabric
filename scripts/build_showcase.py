@@ -68,16 +68,35 @@ DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 CODE_REPO = "prashobh-ai/Qualizeal_Fabric"
 CODE_MIME = "text/x-python;code"
 CODE_FILES = [
+    # platform core
     "knowledge_fabric/answer/service.py",
+    "knowledge_fabric/answer/selector.py",
+    "knowledge_fabric/answer/search.py",
     "knowledge_fabric/adapters/converter.py",
     "knowledge_fabric/adapters/model.py",
     "knowledge_fabric/adapters/lexicalindex.py",
     "knowledge_fabric/ingestion/pipeline.py",
     "knowledge_fabric/ingestion/intake.py",
     "knowledge_fabric/connectors/github.py",
-    "knowledge_fabric/answer/selector.py",
+    # authentication / SSO / policy — the reusable building blocks discovery finds
+    "knowledge_fabric/governance/policy.py",
+    "knowledge_fabric/surfaces/signin_ui.py",
+    "knowledge_fabric/surfaces/ui_common.py",
+    "knowledge_fabric/surfaces/http_api.py",
     "scripts/build_showcase.py",
 ]
+# Automation scripts — a tester asks "is there a script for <feature>?"; these
+# real test suites are the answer, cited to the exact function and lines.
+TEST_FILES = [
+    "tests/test_governance.py",
+    "tests/test_ingestion.py",
+    "tests/test_connectors.py",
+    "tests/test_stage2_refresh.py",
+    "tests/test_t25_code.py",
+]
+# HR / learning / standards — any employee, any role, asks about policy or
+# learning material and must not hit a blind gap.
+ORG_DIR = os.path.join(ROOT, "corpus", "org")
 
 # A realistic run over the real corpus so analytics / usage / cache have
 # something to show — QualiZeal products, services and company knowledge.
@@ -122,6 +141,15 @@ EXTRA_Q = [
     "where is the github connector",
     "how does the model client pick a tier",
     "what does this repository do",
+    # T24 — asset/capability discovery (search across the fabric + live sources)
+    # and cross-domain org questions any employee, any role, may ask.
+    "has anyone made sso and auth code which I can reuse",
+    "can I find an automation script for ingestion",
+    "is there a reusable github connector",
+    "where is the leave policy",
+    "what is our single sign-on and authentication standard",
+    "find learning material for onboarding",
+    "what does the test automation playbook say",
 ]
 
 ROLES = ["asker.public", "asker.restricted", "curator", "admin", "qa-agent"]
@@ -249,7 +277,7 @@ def _load_code(p):
     worker.intake = intake
     n = 0
     limit = os.environ.get("KF_SHOWCASE_CODE_LIMIT")
-    files = CODE_FILES[: int(limit)] if limit else CODE_FILES
+    files = CODE_FILES[: int(limit)] if limit else (CODE_FILES + TEST_FILES)
     for rel in files:
         path = os.path.join(ROOT, rel)
         if not os.path.exists(path):
@@ -289,6 +317,44 @@ def _load_code(p):
     return n + 1
 
 
+def _load_org(p):
+    """Ingest the HR / learning / standards corpus (Markdown) so any employee,
+    any role, can ask about policy or learning material without hitting a gap."""
+    import glob
+    import time as _time
+
+    from knowledge_fabric.ingestion.intake import IngestWorker, Intake
+
+    intake, worker = Intake(p), IngestWorker(p, None)
+    worker.intake = intake
+    paths = sorted(glob.glob(os.path.join(ORG_DIR, "*.md")))
+    for path in paths:
+        name = os.path.basename(path)
+        title = os.path.splitext(name)[0].replace("_", " ").title()
+        with open(path, "rb") as fh:
+            data = fh.read()
+        intake.submit(
+            intake.canonical(
+                TENANT,
+                "internal",
+                f"internal://qualizeal/handbook/{name}",
+                title,
+                data,
+                mime="text/markdown",
+                acl=["public"],
+            )
+        )
+    worker.drain()
+    if paths:
+        p.db.execute(
+            "INSERT INTO connector_cursors(tenant,source,cursor,last_sync,items) "
+            "VALUES(?,?,?,?,?) ON CONFLICT(tenant,source) DO UPDATE SET "
+            "cursor=excluded.cursor, last_sync=excluded.last_sync, items=excluded.items",
+            (TENANT, "internal", str(len(paths)), int(_time.time() * 1000), len(paths)),
+        )
+    return len(paths)
+
+
 def _seed():
     p = http_api.Platform(
         db_path=":memory:", blob_root=os.path.join(ROOT, "data", "showcase-blobs")
@@ -297,6 +363,7 @@ def _seed():
     p.policy.set_budget(TENANT, 20.0)
     _load_corpus(p)  # real QualiZeal knowledge, ingested through the live pipeline
     _load_code(p)  # this repository's own source, so code questions cite real functions
+    _load_org(p)  # HR / learning / standards, so any-role questions never blind-gap
     qbank.generate(p, TENANT)  # bank from the loaded corpus
     svc = AnswerService(p)
     for subject, q in SCRIPT:
@@ -330,7 +397,64 @@ class _Client:
                 return e.code, {}
 
 
-def _bake(client) -> dict:
+def _export_index(p) -> dict:
+    """Export a compact retrieval index into the snapshot so the browser engine
+    runs REAL BM25 retrieval over the whole corpus (T24), not just a lookup of
+    baked answers. One entry per passage with the tokens' source string, plus
+    document-frequency, N and average length for BM25. Code passages index their
+    symbol and path so an identifier query finds them in the browser too."""
+    import re as _re
+
+    from knowledge_fabric.answer.search import _kind_of
+
+    def toks(s):
+        return _re.findall(r"[a-z0-9]+", (s or "").lower())
+
+    docs, passages, df, total_len = {}, [], {}, 0
+    for pas in p.passages.for_tenant(TENANT):
+        d = p.documents.get(TENANT, pas.document_id) or {}
+        loc = getattr(pas.coordinate, "locator", {}) or {}
+        is_code = pas.coordinate.kind.value == "symbol_line"
+        kind = _kind_of(d, pas.coordinate)
+        # what the answer shows: a code summary line, else the passage prose
+        shown = (loc.get("summary_line") or pas.text) if is_code else pas.text
+        # what BM25 scores over: prose (capped) plus code symbol/path identifiers
+        idx = pas.text[:600]
+        if is_code:
+            idx += " " + loc.get("symbol", "") + " " + loc.get("path", "")
+        tk = toks(idx)
+        if not tk:
+            continue
+        for t in set(tk):
+            df[t] = df.get(t, 0) + 1
+        total_len += len(tk)
+        did = pas.document_id
+        docs.setdefault(
+            did, {"id": did, "title": d.get("title", ""), "kind": kind, "url": loc.get("url", "")}
+        )
+        passages.append(
+            {
+                "doc": did,
+                "text": shown[:600],
+                "kind": kind,
+                "url": loc.get("url", ""),
+                "path": loc.get("path", ""),
+                "symbol": loc.get("symbol", ""),
+                "coord": pas.coordinate.render(),
+                "idx": idx[:800],
+            }
+        )
+    n = len(passages)
+    return {
+        "docs": list(docs.values()),
+        "passages": passages,
+        "df": df,
+        "N": n,
+        "avgdl": (total_len / n) if n else 0.0,
+    }
+
+
+def _bake(client, p=None) -> dict:
     snap: dict = {
         "login": {},
         "get": {"asker": {}, "curator": {}, "admin": {}},
@@ -399,6 +523,12 @@ def _bake(client) -> dict:
                 subjects.setdefault(tok.lower(), tok)
     snap["subjects"] = subjects
     snap["related"] = {key: [q for q in snap["bank"] if key in q.lower()][:6] for key in subjects}
+
+    # T24 — the browser retrieval index (BM25 over the whole corpus). Baked
+    # answers stay as a Level-0 cache; anything not baked is retrieved live in
+    # the browser from this index instead of falling to a blind gap.
+    if p is not None:
+        snap["index"] = _export_index(p)
 
     # per-subject usage
     for subject in ROLES:
@@ -492,7 +622,7 @@ def build(out_dir: str) -> None:
     th = threading.Thread(target=srv.serve_forever, daemon=True)
     th.start()
     try:
-        snap = _bake(_Client(base))
+        snap = _bake(_Client(base), p)
     finally:
         srv.shutdown()
         srv.server_close()
