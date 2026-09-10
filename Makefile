@@ -8,7 +8,7 @@ export PYTHONPATH := .
 
 UV ?= uv
 
-.PHONY: help install up down health test lint fmt notices corpus showcase demo seed ask serve mcp demo-reset licences quality parity ci compose-up compose-down
+.PHONY: help install up down health test lint fmt notices corpus showcase demo demo-answering seed ask serve mcp demo-reset licences quality parity load ci compose-up compose-down
 
 PROFILE ?= lite
 export KF_PROFILE := $(PROFILE)
@@ -46,8 +46,11 @@ corpus: ## Ingest the QualiZeal corpus into the product fabric (see load-corpus 
 showcase: ## Build the self-contained static showcase snapshot for GitHub Pages
 	@$(UV) run python scripts/build_showcase.py
 
-demo: ## Run the narrated end-to-end execution demo
+demo: ## Run the narrated end-to-end execution demo (platform fundamentals)
 	@$(PY) scripts/demo.py
+
+demo-answering: ## Run the answering-intelligence demo (T24–T33 capstone; model-free)
+	@$(PY) scripts/demo_answering.py
 
 seed: ## Seed synthetic demo tenants (identifier-safety validated)
 	@$(PY) -m knowledge_fabric.cli seed
