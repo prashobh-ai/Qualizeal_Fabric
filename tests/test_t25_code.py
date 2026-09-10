@@ -93,9 +93,17 @@ class TestCodeAnswer(unittest.TestCase):
         self.p = seeded(["cf"])
         intake, worker = Intake(self.p), IngestWorker(self.p, None)
         worker.intake = intake
-        intake.submit(intake.canonical("cf", "github", "github://acme/widgets/pkg/widget.py",
-                                       "widget.py", _SRC.encode(), mime="text/x-python;code",
-                                       acl=["public"]))
+        intake.submit(
+            intake.canonical(
+                "cf",
+                "github",
+                "github://acme/widgets/pkg/widget.py",
+                "widget.py",
+                _SRC.encode(),
+                mime="text/x-python;code",
+                acl=["public"],
+            )
+        )
         worker.drain()
         self.svc = AnswerService(self.p)
         self.asker = demo.principal_for(self.p, "cf", "asker.public")
