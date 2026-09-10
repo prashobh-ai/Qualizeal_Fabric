@@ -141,8 +141,8 @@ class HostedModelClient:
 #
 # Env:
 #   ANTHROPIC_API_KEY           — required to enable this client
-#   KF_MODEL_SMALL              — default ``claude-haiku-4-5`` (L2 tier)
-#   KF_MODEL_LARGE              — default ``claude-opus-5``    (L3 tier)
+#   KF_MODEL_SMALL              — default ``claude-sonnet-4-6`` (L1/L2 tier)
+#   KF_MODEL_LARGE              — default ``claude-sonnet-4-6`` (L3 tier)
 #   ANTHROPIC_BASE_URL          — override endpoint (proxy / test); optional
 #   ANTHROPIC_API_VERSION       — default ``2023-06-01``
 # ---------------------------------------------------------------------------
@@ -166,10 +166,12 @@ def _accepts_sampling(model: str) -> bool:
 
 def _anthropic_model_for_tier(tier: str) -> str:
     """Anthropic model id for a router tier. ``fast/deep`` map to the small
-    model; ``escalation`` maps to the large model. Names come from env with
-    defaults picked from the Anthropic current-model set."""
-    small = os.environ.get("KF_MODEL_SMALL", "claude-haiku-4-5")
-    large = os.environ.get("KF_MODEL_LARGE", "claude-opus-5")
+    model; ``escalation`` maps to the large model. Default to Claude Sonnet 4.6
+    (both tiers) so the client works on keys scoped to Sonnet 4.6 and earlier;
+    override per tier with KF_MODEL_SMALL / KF_MODEL_LARGE where a key allows a
+    newer model."""
+    small = os.environ.get("KF_MODEL_SMALL", "claude-sonnet-4-6")
+    large = os.environ.get("KF_MODEL_LARGE", "claude-sonnet-4-6")
     if tier in ("", "none", None):
         return "none (extractive core)"
     if tier == "escalation":
