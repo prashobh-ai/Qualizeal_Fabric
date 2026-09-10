@@ -88,6 +88,9 @@ quality: ## Answer-quality gate (T28): golden suite over the model-free path
 parity: ## Static parity (T32): the shipped engine.js answers like the server (needs node)
 	@$(PY) scripts/parity_check.py
 
+load: ## Load test (T33): the answer path under concurrent load, gated on SLOs
+	@$(PY) scripts/load_test.py
+
 ci: test licences quality ## What CI runs
 	@$(PY) -c "from knowledge_fabric.tenants import demo; assert demo.validate_identifiers()==[]; print('identifier-safety: PASS')"
 
