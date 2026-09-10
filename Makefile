@@ -8,7 +8,7 @@ export PYTHONPATH := .
 
 UV ?= uv
 
-.PHONY: help install up down health test lint fmt notices corpus showcase demo seed ask serve mcp demo-reset licences ci compose-up compose-down
+.PHONY: help install up down health test lint fmt notices corpus showcase demo seed ask serve mcp demo-reset licences quality ci compose-up compose-down
 
 PROFILE ?= lite
 export KF_PROFILE := $(PROFILE)
@@ -82,7 +82,10 @@ demo-reset: down seed ## One-command reset to a clean, seeded, known-good state
 licences: ## Licence gate (I14): fails on any non-permissive runtime dependency
 	@$(PY) scripts/licence_gate.py
 
-ci: test licences ## What CI runs
+quality: ## Answer-quality gate (T28): golden suite over the model-free path
+	@$(PY) scripts/quality_gate.py
+
+ci: test licences quality ## What CI runs
 	@$(PY) -c "from knowledge_fabric.tenants import demo; assert demo.validate_identifiers()==[]; print('identifier-safety: PASS')"
 
 compose-up: ## Bring the stack up under a profile: make compose-up PROFILE=lite|full
