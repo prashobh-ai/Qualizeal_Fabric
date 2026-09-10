@@ -138,12 +138,12 @@
   function toks(q) { return norm(q).split(" ").filter(Boolean); }
 
   // ---- answer selection (exact, then nearest bank question) -------------
-  function answerFor(subject, question) {
+  // Exact key, else nearest baked question by token overlap (Jaccard). Returns
+  // a cloned answer or null — no side effects, so coreference can retry it.
+  function lookup(question) {
     var answers = SNAP.answers || {};
-    var key = norm(question);
-    var a = answers[key];
+    var a = answers[norm(question)];
     if (!a) {
-      // nearest by token overlap (Jaccard) across the baked bank
       var qt = toks(question), best = null, bestScore = 0;
       Object.keys(answers).forEach(function (k) {
         var kt = k.split(" "), setk = {}; kt.forEach(function (t) { setk[t] = 1; });
@@ -153,7 +153,60 @@
       });
       if (best && bestScore >= 0.34) a = answers[best];
     }
-    a = a ? clone(a) : gapAnswer(question);
+    return a ? clone(a) : null;
+  }
+
+  // ---- follow-up coreference ("it/that" -> the topic in view) -----------
+  // "When was it made?" after "What is QMentisAI?" must not fall straight to a
+  // gap. Resolve the pronoun to the conversation's sticky subject, retry, and
+  // if there's still no baked answer, ASK BACK (clarify) instead of declining.
+  var PRONOUN = /\b(it'?s?|its|this|that|these|those|they|them|their|theirs|one|the (?:product|tool|platform|service|solution|offering))\b/i;
+  function subjectInText(text) {
+    var subs = SNAP.subjects || {}, low = String(text || "").toLowerCase(), found = "", at = -1;
+    Object.keys(subs).forEach(function (k) { var i = low.indexOf(k); if (i >= 0 && i > at) { at = i; found = k; } });
+    return found;
+  }
+  function stickySubject(history) {
+    for (var i = (history || []).length - 1; i >= 0; i--) {
+      var s = subjectInText(history[i]); if (s) return s;
+    }
+    return "";
+  }
+  function clarifyAnswer(subKey, question, history) {
+    var disp = (SNAP.subjects || {})[subKey] || subKey;
+    var last = norm((history || [])[(history || []).length - 1] || "");
+    var offer = ((SNAP.related || {})[subKey] || []).filter(function (q) { return norm(q) !== last; }).slice(0, 3);
+    var text = "You're asking about " + disp + ", but the fabric doesn't have that specific detail yet.";
+    text += offer.length
+      ? " I can answer: " + offer.map(function (x) { return "“" + x + "”"; }).join(", ") + "."
+      : " Try asking what it does, who it's for, or how it's tested.";
+    return {
+      kind: "clarify", answer_text: "", clarify_back: text, citations: [], confidence: 0,
+      grounding_score: 0, trajectory_id: "traj_demo_clarify", cost: 0, tokens: 0, tier: "none",
+      level: 0, lang: "en", cache_hit: false, cost_saved: 0, tokens_in: 0, tokens_out: 0,
+      model_name: "demo model", complexity: "simple", authoritative_source: null,
+      dataset_version: 1, reasoning: null, suggestions: offer,
+      why: { level_name: "clarify", explain: "Recognised the topic (" + disp + "); needs a more specific question.",
+             reasons: [], signals: { retrieval: 0, semantic: 0.4, coverage: 0, agreement: 0, resolvable: 1 }, retrieved: 0 }
+    };
+  }
+  function answerFor(subject, question, context) {
+    var history = (context && context.history) || [];
+    var a = lookup(question);
+    if (!a) {
+      // topic in the current question, else the one carried by the thread
+      var here = subjectInText(question), followup = !here && PRONOUN.test(question);
+      var sub = here || (followup ? stickySubject(history) : "");
+      if (sub) {
+        if (followup) {
+          var rewritten = question.replace(PRONOUN, (SNAP.subjects || {})[sub] || sub);
+          a = lookup(rewritten);
+        }
+        // topic known but the specific ask isn't baked -> ask back, don't decline
+        if (!a) a = clarifyAnswer(sub, question, history);
+      }
+    }
+    if (!a) a = gapAnswer(question);
     bumpUsage(subject, a);
     return a;
   }
@@ -252,7 +305,7 @@
         if (r.code === 400) return respond({ error: "enter your user id" }, 400);
         return respond({ error: "unknown user " + (body.subject || "") }, 404);
       }
-      if (path === "/ask") return respond(answerFor(subject, body.question || ""));
+      if (path === "/ask") return respond(answerFor(subject, body.question || "", body.context));
       if (path === "/curator/decision") { applyDecision(body); return respond({ ok: true, decision: body.decision }); }
       if (path === "/admin/users") return respond(userMutation(body));
       if (path === "/feedback") { recordFeedback(subject, body); return respond({ ok: true }); }
