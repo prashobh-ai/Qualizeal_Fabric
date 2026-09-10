@@ -145,7 +145,9 @@ class AnswerService:
                 clarify.role_view = self._persona_view(principal, clarify)
                 return clarify
             question, understood = res.question, res.understood_as
-        answer = self._answer(principal, question, k, allow_model, _nested)
+        answer = self._answer(
+            principal, question, k, allow_model, _nested, context_resolved=bool(understood)
+        )
         if understood:
             answer.understood_as = understood
         # T27 — stamp the designation/persona lens on the finished answer. The
@@ -337,6 +339,7 @@ class AnswerService:
         k: int = 6,
         allow_model: bool = True,
         _nested: bool = False,
+        context_resolved: bool = False,
     ) -> Answer:
         p = self.p
         tenant = principal.tenant
@@ -361,6 +364,15 @@ class AnswerService:
                 "subject": principal.subject,
                 "roles": principal.roles,
                 "lang": qlang,
+                # T30 — first-class telemetry for the answering features shipped
+                # since the spine was last extended: the reader's persona and
+                # designation (T27), the access scope, and whether a follow-up was
+                # resolved from context (T26). Set on the parent answer span, so
+                # every answer path inherits them into telemetry.events().
+                "persona": personas.persona_for(principal.designation),
+                "designation": principal.designation or "",
+                "scope": "restricted" if "restricted" in (principal.scopes or []) else "public",
+                "context_resolved": 1 if context_resolved else 0,
             },
         ) as span:
             # A. policy + rate limit (the parent request already did this for steps)

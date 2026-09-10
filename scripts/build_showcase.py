@@ -152,6 +152,16 @@ EXTRA_Q = [
     "what does the test automation playbook say",
 ]
 
+# T30 — two-turn follow-ups (subject, first question, follow-up) whose pronoun
+# resolves against a distinctive product subject, so the baked telemetry carries
+# context-resolved answers (T26) for the Explorer's Context dimension.
+FOLLOWUPS = [
+    ("developer", "what is QMentisAI?", "what about its pricing"),
+    ("tester", "what does ValidAIte do?", "and for testers?"),
+    ("cto", "what is QMentisAI?", "what about its pricing"),
+    ("curator", "what is NexaAI?", "what about its pricing"),
+]
+
 # Access tiers plus the designation demo accounts (T27), so the telemetry spread
 # and the baked directory cover every persona the showcase can sign in as.
 ROLES = [
@@ -393,6 +403,14 @@ def _seed():
                     svc.ask(demo.principal_for(p, TENANT, subject), q)
                 except Exception:
                     pass
+        # T30 — drive a few two-turn follow-ups so the Explorer's context
+        # dimension (T26) carries `resolved` rows beside the `direct` majority.
+        for subject, first, follow in FOLLOWUPS:
+            try:
+                ctx = {"turns": [{"question": first}]}
+                svc.ask(demo.principal_for(p, TENANT, subject), follow, context=ctx)
+            except Exception:
+                pass
     return p
 
 
