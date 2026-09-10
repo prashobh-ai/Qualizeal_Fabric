@@ -18,6 +18,7 @@ const DECLINE="There isn't enough evidence in the fabric to answer that.";
 
 // ===================== threads (per-session) =========================
 let THREADS=[], CUR=null;
+let LAST_A=null, SPEAKING=false, SPEECH_SECS=0; // voice: last answer shown + read-aloud state
 function loadThreads(){try{THREADS=JSON.parse(sessionStorage.getItem('kf.threads')||'[]')}catch(e){THREADS=[]}}
 function saveThreads(){try{sessionStorage.setItem('kf.threads',JSON.stringify(THREADS.slice(0,40)))}catch(e){}}
 function newThread(){const t={id:'t'+Date.now(),title:'New chat',turns:[],at:Date.now()};THREADS.unshift(t);CUR=t.id;saveThreads();renderThreads();renderMessages();$('#question').focus()}
@@ -38,7 +39,10 @@ function renderMessages(){const box=$('#messages');const t=curThread();
  box.innerHTML=t.turns.map((tn,i)=>'<div class="turn" data-i="'+i+'">'+
    '<div class="msg user">'+esc(tn.q)+'</div>'+aiBlock(tn.a,i)+'</div>').join('');
  $$('#messages .msg.ai').forEach(el=>el.onclick=()=>selectAnswer(t.turns[+el.dataset.i]));
- wireCites();wireFeedback();box.scrollTop=box.scrollHeight}
+ wireCites();wireFeedback();wireClarify();box.scrollTop=box.scrollHeight}
+// a reader clicks one of the clarify's offered questions -> ask it straight away.
+function wireClarify(){$$('#messages .clarify-chips .chip').forEach(c=>c.onclick=e=>{e.stopPropagation();
+ $('#question').value=c.dataset.cq;autosize();$('#question').focus();ask()})}
 function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
  const badges='<span class="pill '+(KIND_CLS[a.kind]||'')+'">'+esc(a.kind)+'</span>'+
   (a.kind==='answer'?'<span class="pill '+lw.cls+'">'+esc(lw.word)+'</span>':'')+
@@ -48,8 +52,10 @@ function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
  if(a.kind==='answer'){const quote=lw.cls==='lv-quote';
   body='<div class="answer-text'+(quote?' quote':'')+'">'+withChips(a)+'</div>';}
  else{const reason=(a.why||{}).explain||(a.clarify_back||'');
+  const sugg=(a.kind==='clarify'&&(a.suggestions||[]).length)?
+   '<div class="clarify-chips">'+a.suggestions.map(s=>'<span class="chip" data-cq="'+esc(s)+'">'+esc(s)+'</span>').join('')+'</div>':'';
   body='<div class="decline">'+esc(a.kind==='clarify'?(a.clarify_back||DECLINE):DECLINE)+
-   (reason&&a.kind!=='clarify'?'<div class="why">'+esc(reason)+'</div>':'')+'</div>';}
+   (reason&&a.kind!=='clarify'?'<div class="why">'+esc(reason)+'</div>':'')+sugg+'</div>';}
  const fb='<div class="fbbar" data-i="'+i+'"><span class="muted small">Was this helpful?</span>'+
   '<button class="fbbtn up" title="Helpful">&#128077;</button>'+
   '<button class="fbbtn down" title="Not helpful — flag for the curators">&#128078;</button>'+
@@ -147,7 +153,7 @@ function openExplain(a,gx){const d=$('#explain-drawer');const w=a.why||{};const 
  d.classList.remove('hidden');$('#ex-close').onclick=()=>d.classList.add('hidden')}
 
 // ===================== galaxy (L2.4) ================================
-function selectAnswer(turn){const a=turn.a;
+function selectAnswer(turn){const a=turn.a;LAST_A=a; // read-aloud speaks the answer in view
  $$('#messages .msg.ai').forEach(el=>el.classList.remove('sel'));
  const el=$('#messages .msg.ai[data-i="'+turn._i+'"]');if(el)el.classList.add('sel');
  card(a);loadGalaxy(a.trajectory_id,a);loadUsage()}
@@ -213,7 +219,7 @@ function renderUsage(){const box=$('#usage-body');if(!USAGE){return}
  if(b&&isFinite(b.cap)){const used=b.cap?Math.min(1,b.spent/b.cap):0;
   html+='<div class="kv" style="margin-top:10px"><span>Fabric budget</span><b>'+money(b.spent)+' / '+money(b.cap)+'</b></div>'+
    '<div class="trk"><i style="width:'+(used*100).toFixed(1)+'%"></i></div>';}
- html+='<div class="kv"><span>Speech seconds</span><b>— <span class="muted small">(with voice)</span></b></div>';
+ html+='<div class="kv"><span>Speech seconds</span><b><span id="speech-secs">'+(SPEECH_SECS?SPEECH_SECS+'s':'—')+'</span> <span class="muted small">(with voice)</span></b></div>';
  box.innerHTML=html;
  $$('#usage-body .win button').forEach(bt=>bt.onclick=()=>{USE_WIN=bt.dataset.w;renderUsage()})}
 
@@ -226,8 +232,11 @@ async function samples(){if(!$('#samples'))return;let qs=[];
 async function ask(){const q=$('#question').value.trim();if(!q)return;
  if(!KF.session){gate({status:401,message:''},'asker');return}
  if(!curThread())newThread();
+ // conversation context so follow-ups ("when was it made?") resolve the pronoun
+ // to the topic in view instead of dropping to "outside the knowledge base".
+ const th=curThread();const ctx={history:(th?th.turns:[]).map(tn=>tn.q).slice(-8)};
  const btn=$('#ask-btn');btn.disabled=true;$('#ask-status').textContent='thinking…';const t0=performance.now();
- try{const a=await api('/ask',{method:'POST',body:{question:q}});gate(null);
+ try{const a=await api('/ask',{method:'POST',body:{question:q,context:ctx}});gate(null);
   a._ms=performance.now()-t0;
   const t=curThread();const turn={q,a};t.turns.push(turn);turn._i=t.turns.length-1;
   if(t.turns.length===1)t.title=q.slice(0,48);
@@ -251,10 +260,51 @@ $('#question').addEventListener('input',autosize);
 $('#question').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}});
 $('#new-chat').onclick=newThread;
 
+// ===================== voice: read answers aloud + dictate questions =
+// Browser-native Web Speech API — no server and no key, so it works on the
+// static showcase and the live product alike. Buttons stay disabled on
+// browsers that lack the API, with a title that says why.
+const LANG_BCP={en:'en-US',fr:'fr-FR',es:'es-ES',ja:'ja-JP'};
+function spokenText(a){if(!a)return '';
+ if(a.kind==='answer')return String(a.answer_text||'').replace(/\[\d+\]/g,'');   // drop [1] markers
+ if(a.kind==='clarify')return a.clarify_back||DECLINE;return DECLINE}
+function voiceLang(a){const sel=($('#answer-lang')||{}).value;
+ if(sel&&sel!=='auto')return LANG_BCP[sel]||'en-US';
+ return LANG_BCP[(a&&a.lang)||'en']||navigator.language||'en-US'}
+function paintSpeech(){const el=$('#speech-secs');if(el)el.textContent=SPEECH_SECS?SPEECH_SECS+'s':'—'}
+
+function setupReadAloud(){const btn=$('#read-aloud');if(!btn)return;
+ if(!('speechSynthesis'in window)){btn.title='Read-aloud needs a browser with speech synthesis (e.g. Chrome).';return}
+ btn.disabled=false;btn.title='Read the answer aloud';
+ btn.onclick=()=>{
+  if(SPEAKING){window.speechSynthesis.cancel();SPEAKING=false;btn.classList.remove('on');return}
+  const txt=spokenText(LAST_A);if(!txt){toast('Ask something first — then I can read it aloud.','warn');return}
+  const u=new SpeechSynthesisUtterance(txt);u.lang=voiceLang(LAST_A);u.rate=1.02;const t0=performance.now();
+  u.onend=u.onerror=()=>{SPEAKING=false;btn.classList.remove('on');
+   SPEECH_SECS+=Math.max(1,Math.round((performance.now()-t0)/1000));paintSpeech()};
+  window.speechSynthesis.cancel();window.speechSynthesis.speak(u);SPEAKING=true;btn.classList.add('on')}}
+
+function setupMic(){const btn=$('#mic-btn');if(!btn)return;
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!SR){btn.title='Voice input needs a browser with speech recognition (e.g. Chrome).';return}
+ btn.disabled=false;btn.title='Dictate your question';let rec=null,listening=false;
+ btn.onclick=()=>{
+  if(listening&&rec){rec.stop();return}
+  rec=new SR();rec.lang=voiceLang(LAST_A);rec.interimResults=true;rec.maxAlternatives=1;let final='';
+  rec.onstart=()=>{listening=true;btn.classList.add('on');$('#ask-status').textContent='listening…'};
+  rec.onresult=e=>{let interim='';for(let i=e.resultIndex;i<e.results.length;i++){
+    const r=e.results[i];if(r.isFinal)final+=r[0].transcript;else interim+=r[0].transcript}
+   $('#question').value=(final+interim).trim();autosize()};
+  rec.onerror=e=>{listening=false;btn.classList.remove('on');
+   $('#ask-status').textContent=e.error==='not-allowed'?'microphone blocked':'voice error'};
+  rec.onend=()=>{listening=false;btn.classList.remove('on');
+   const q=$('#question').value.trim();$('#ask-status').textContent='ready';if(q)ask()};
+  try{rec.start()}catch(e){/* a start already in flight */}}}
+
 // ===================== session lifecycle ============================
 function boot(){loadThreads();if(!THREADS.length){CUR=null}else{CUR=THREADS[0].id}
  renderThreads();renderMessages();
  if(KF.session){corpusStrip();loadUsage()}else{gate({status:401,message:''},'asker')}}
 window.KF_ON_SESSION=s=>{gate(null);if(s){corpusStrip();loadUsage();samples();$('#ask-status').textContent='ready for '+s.subject}
  else{$('#usage-body').innerHTML='<div class="placeholder">Sign in to see your usage.</div>'}};
-KF.initBar({preferRole:'asker'});boot();
+KF.initBar({preferRole:'asker'});boot();setupReadAloud();setupMic();

@@ -43,6 +43,7 @@ main{max-width:none;padding:0;display:flex;flex-direction:column}
 .chipcite:hover{border-color:var(--qz-blue)}
 .decline{border-left:3px solid var(--qz-amber);background:#FCF7EC;border-radius:0 8px 8px 0;padding:10px 12px;font-size:14px;color:var(--qz-ink)}
 .decline .why{color:var(--mut);font-size:13px;margin-top:6px}
+.clarify-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
 .fbbar{display:flex;align-items:center;gap:6px;margin-top:10px}
 .fbbtn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:2px 8px;cursor:pointer;font-size:13px}
 .fbbtn:hover{border-color:var(--qz-blue)}.fbbtn:disabled{opacity:.45;cursor:default}

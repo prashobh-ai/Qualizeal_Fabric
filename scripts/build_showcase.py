@@ -255,6 +255,25 @@ def _bake(client) -> dict:
                 _, g = client.call("GET", "/api/galaxy?trace_id=" + tid, token=asker)
                 snap["galaxy"][tid] = g
 
+    # ---- follow-up vocabulary (coreference "it/that" -> the topic) ----------
+    # Data-driven: whatever the corpus actually answers about becomes a subject
+    # the chatbot can resolve a pronoun to. A "subject" is a proper-noun token
+    # from the baked questions with an internal capital (QMentisAI, ValidAIte,
+    # NexaAI, QualiCentral, QualiZeal) — product/brand names, never plain words
+    # like "France". `related` lists the baked questions per subject so a
+    # follow-up we can't answer becomes a clarify with real, clickable offers.
+    import re as _re
+
+    subjects: dict[str, str] = {}
+    for q in snap["bank"]:
+        for tok in _re.findall(r"[A-Za-z][A-Za-z0-9]{3,}", q):
+            if _re.search(r"[a-z][A-Z]", tok):
+                subjects.setdefault(tok.lower(), tok)
+    snap["subjects"] = subjects
+    snap["related"] = {
+        key: [q for q in snap["bank"] if key in q.lower()][:6] for key in subjects
+    }
+
     # per-subject usage
     for subject in ROLES:
         tok = tokens.get(subject)
