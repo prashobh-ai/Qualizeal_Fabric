@@ -199,6 +199,125 @@
              reasons: [], signals: { retrieval: 0, semantic: 0.4, coverage: 0, agreement: 0, resolvable: 1 }, retrieved: 0 }
     };
   }
+  // ---- T24: real BM25 retrieval in the browser --------------------------
+  // Baked answers are a Level-0 cache; anything not baked is retrieved live
+  // from the exported index (BM25 + a code identifier tier) and either composed
+  // extractively or, for a discovery question, returned as a ranked asset list —
+  // so an unbaked question never falls straight to a blind gap.
+  var STOP = { the:1,a:1,an:1,of:1,to:1,in:1,on:1,for:1,and:1,or:1,is:1,are:1,what:1,which:1,
+    how:1,who:1,when:1,where:1,does:1,do:1,did:1,was:1,were:1,be:1,with:1,that:1,this:1,it:1,
+    as:1,by:1,at:1,from:1,our:1,we:1,you:1,i:1,can:1,will:1,should:1,must:1,may:1,me:1,my:1 };
+  var DISCOVERY = /\b(has|have)\s+(anyone|we|someone)\b|\b(is|are)\s+there\b|\bdo\s+we\s+have\b|\bcan\s+i\s+(find|reuse|use|get)\b|\bwhere\s+(can|do)\s+i\s+find\b|\bfind\s+(me\s+)?(a|an|the|some|any)\b|\blook(ing)?\s+for\b|\bsearch\s+for\b|\breus(e|able)\b|\bexamples?\s+of\b|\bexisting\b|\bany\s+(code|script|module|library|example)\b/i;
+  function tokenize(s) { return (String(s || "").toLowerCase().match(/[a-z0-9]+/g) || []); }
+  var RIDX = null;
+  function ridx() {
+    if (RIDX) return RIDX;
+    var ix = SNAP.index || {}, ps = (ix.passages || []).map(function (p) {
+      var tk = tokenize(p.idx || p.text), tf = {};
+      tk.forEach(function (t) { tf[t] = (tf[t] || 0) + 1; });
+      return { p: p, tf: tf, dl: tk.length };
+    });
+    RIDX = { ps: ps, df: ix.df || {}, N: ix.N || ps.length || 1, avgdl: ix.avgdl || 1,
+             docs: {} };
+    (ix.docs || []).forEach(function (d) { RIDX.docs[d.id] = d; });
+    return RIDX;
+  }
+  function bm25(qt) {
+    var R = ridx(), k1 = 1.5, b = 0.75, out = [];
+    for (var i = 0; i < R.ps.length; i++) {
+      var e = R.ps[i], sc = 0;
+      for (var j = 0; j < qt.length; j++) {
+        var f = e.tf[qt[j]]; if (!f) continue;
+        var dft = R.df[qt[j]] || 1, idf = Math.log(1 + (R.N - dft + 0.5) / (dft + 0.5));
+        sc += idf * (f * (k1 + 1)) / (f + k1 * (1 - b + b * e.dl / (R.avgdl || 1)));
+      }
+      if (e.p.kind === "code" || e.p.kind === "test") {
+        var hay = (e.p.symbol + " " + e.p.path).toLowerCase();
+        for (var m = 0; m < qt.length; m++) if (qt[m].length >= 3 && hay.indexOf(qt[m]) >= 0) sc += 3;
+      }
+      if (sc > 0) out.push({ p: e.p, score: sc });
+    }
+    out.sort(function (a, b) { return b.score - a.score; });
+    return out;
+  }
+  function docTitle(id) { var d = ridx().docs[id]; return d ? d.title : ""; }
+  function citeFor(p) {
+    var loc = { path: p.path, symbol: p.symbol, coord: p.coord };
+    if (p.url) loc.url = p.url;
+    return {
+      document_id: p.doc, document_title: docTitle(p.doc) || p.path || "document",
+      coordinate: { kind: p.url ? "symbol_line" : "page_paragraph", locator: loc },
+      coordinate_render: p.coord || "", passage_id: "", snippet: (p.text || "").slice(0, 200)
+    };
+  }
+  function bestSentence(text, qt) {
+    var sents = String(text || "").split(/(?<=[.!?])\s+/).filter(function (s) { return s.trim().length > 24; });
+    if (!sents.length) return String(text || "").slice(0, 200);
+    var set = {}; qt.forEach(function (t) { set[t] = 1; });
+    var best = sents[0], bs = -1;
+    sents.forEach(function (s) {
+      var ov = 0; tokenize(s).forEach(function (t) { if (set[t]) ov++; });
+      if (ov > bs) { bs = ov; best = s; }
+    });
+    return best.trim();
+  }
+  function mkAnswer(level_name, level, text, citations, conf) {
+    return {
+      kind: "answer", answer_text: text, citations: citations || [], confidence: conf,
+      grounding_score: conf, trajectory_id: "traj_ret_" + Math.random().toString(36).slice(2, 8),
+      cost: 0, tokens: 0, tier: "none", level: level, lang: "en", cache_hit: false, cost_saved: 0,
+      tokens_in: 0, tokens_out: 0, model_name: "demo model", complexity: "simple",
+      authoritative_source: null, dataset_version: 1, reasoning: null,
+      why: { level_name: level_name, explain: level_name === "discovery"
+               ? "Searched the fabric; listed matching assets."
+               : "Retrieved and composed from the index.",
+             reasons: [], retrieved: (citations || []).length,
+             signals: { retrieval: 1, semantic: 0.7, coverage: 0.8, agreement: 0.8, resolvable: 1 } }
+    };
+  }
+  function discoveryAnswer(scored) {
+    var best = {};
+    scored.forEach(function (x) { var d = x.p.doc; if (!best[d] || x.score > best[d].score) best[d] = x; });
+    var hits = Object.keys(best).map(function (d) { return best[d]; })
+      .sort(function (a, b) { return b.score - a.score; }).slice(0, 6);
+    if (!hits.length) return null;
+    var parts = ["Found " + hits.length + " assets in the fabric you can reuse — each links to its source:"];
+    var cites = [];
+    hits.forEach(function (x, i) {
+      var p = x.p;
+      parts.push("• " + (docTitle(p.doc) || p.path || p.symbol) + " (" + p.kind + ") — " +
+        (p.text || "").slice(0, 120) + " [" + (i + 1) + "]");
+      cites.push(citeFor(p));
+    });
+    return mkAnswer("discovery", 1, parts.join("\n"), cites, 0.85);
+  }
+  function composeAnswer(question, scored) {
+    var qt = tokenize(question).filter(function (t) { return !STOP[t]; });
+    var top = scored.slice(0, 8);
+    var code = top.filter(function (x) {
+      if (x.p.kind !== "code" && x.p.kind !== "test") return false;
+      var hay = (x.p.symbol + " " + x.p.path).toLowerCase();
+      return qt.some(function (t) { return t.length >= 3 && hay.indexOf(t) >= 0; });
+    });
+    if (code.length) {
+      var p = code[0].p;
+      return mkAnswer("lookup", 1, (p.text || p.symbol) + " [1]", [citeFor(p)], 0.85);
+    }
+    var docs = top.filter(function (x) { return x.p.kind !== "code" && x.p.kind !== "test"; });
+    if (!docs.length || docs[0].score < 1.0) return null;  // too weak — honest gap
+    var lead = docs.slice(0, 2), parts = [], cites = [];
+    lead.forEach(function (x, i) { parts.push(bestSentence(x.p.text, qt) + " [" + (i + 1) + "]"); cites.push(citeFor(x.p)); });
+    return mkAnswer("fast", 2, parts.join(" "), cites, 0.7);
+  }
+  function retrieve(question) {
+    if (!(SNAP.index && SNAP.index.passages && SNAP.index.passages.length)) return null;
+    var qt = tokenize(question).filter(function (t) { return !STOP[t]; });
+    if (!qt.length) return null;
+    var scored = bm25(qt);
+    if (!scored.length) return null;
+    return DISCOVERY.test(question) ? discoveryAnswer(scored) : composeAnswer(question, scored);
+  }
+
   function answerFor(subject, question, context) {
     var history = (context && context.history) || [];
     var a = lookup(question);
@@ -206,14 +325,15 @@
       // topic in the current question, else the one carried by the thread
       var here = subjectInText(question), followup = !here && PRONOUN.test(question);
       var sub = here || (followup ? stickySubject(history) : "");
-      if (sub) {
-        if (followup) {
-          var rewritten = question.replace(PRONOUN, (SNAP.subjects || {})[sub] || sub);
-          a = lookup(rewritten);
-        }
-        // topic known but the specific ask isn't baked -> ask back, don't decline
-        if (!a) a = clarifyAnswer(sub, question, history);
+      if (followup && sub) {
+        var rewritten = question.replace(PRONOUN, (SNAP.subjects || {})[sub] || sub);
+        a = lookup(rewritten) || retrieve(rewritten) || clarifyAnswer(sub, question, history);
       }
+    }
+    if (!a) a = retrieve(question);  // real BM25 retrieval over the exported index
+    if (!a) {
+      var s2 = subjectInText(question);
+      if (s2) a = clarifyAnswer(s2, question, history);
     }
     if (!a) a = gapAnswer(question);
     bumpUsage(subject, a);
