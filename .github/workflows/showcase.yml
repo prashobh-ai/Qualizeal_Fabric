@@ -38,7 +38,13 @@ jobs:
 
       - name: Build the interactive showcase (seed + bake + emit surfaces)
         env:
-          KF_MODEL_MODE: mock
+          # Answers are baked at build time. Add an ANTHROPIC_API_KEY repo secret
+          # to bake fluent, grounded, cited answers with the real model — the
+          # static site then serves them at zero runtime cost. Without the secret
+          # the model client falls back to the deterministic extractive path, so
+          # the build stays green either way.
+          KF_MODEL_MODE: anthropic
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python scripts/build_showcase.py --out dist/showcase
 
       - name: Verify no external URLs and required data files present

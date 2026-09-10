@@ -54,6 +54,7 @@ class DoclingLite:
 
     def _docx(self, data: bytes, lang: str) -> ConvertedDocument:
         """Extract paragraphs from a .docx (Office Open XML) with stdlib only."""
+        import html as _html
         import io as _io
         import zipfile
 
@@ -65,9 +66,19 @@ class DoclingLite:
             return self._text(data.decode("utf-8", "replace"), lang)
         for pm in re.findall(r"<w:p[ >].*?</w:p>", xml, re.S):
             runs = re.findall(r"<w:t[^>]*>(.*?)</w:t>", pm, re.S)
-            para = re.sub(r"<[^>]+>", "", "".join(runs)).strip()
+            # XML entities (&amp; &apos; &quot;) become their characters, so the
+            # passage text is clean prose, not markup.
+            para = _html.unescape(re.sub(r"<[^>]+>", "", "".join(runs))).strip()
             if para:
                 paras.append(para)
+        # Drop label/heading noise (a brief's "Category", "Official URL",
+        # TOC entries…): they are short high-density fragments that outscore the
+        # real body on a keyword match and make an extractive answer read as a
+        # list of headings. Keep substantive paragraphs; fall back to all if that
+        # would leave too little.
+        body = [p for p in paras if len(p) >= 25]
+        if len(body) >= 2:
+            paras = body
         regions = []
         for i, p in enumerate(paras):
             regions.append(

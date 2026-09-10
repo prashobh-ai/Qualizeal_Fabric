@@ -266,6 +266,9 @@ def _bake(client) -> dict:
     # role-bucketed GETs
     for path in ASKER_GETS:
         _, snap["get"]["asker"][path.split("?")[0]] = client.call("GET", path, token=asker)
+    # The corpus strip (documents/passages/entities/relationships/domains) reads
+    # the top-level "corpus" key from the engine; publish the real counts there.
+    snap["corpus"] = snap["get"]["asker"].get("/api/corpus", {})
     for path in CURATOR_GETS:
         code, j = client.call("GET", path, token=tokens.get("curator"))
         if code == 200:
