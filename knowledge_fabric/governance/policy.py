@@ -5,6 +5,7 @@ uses an ATOMIC conditional UPDATE (Runbook 6.2): 100 concurrent requests
 cannot each read "remaining > 0" and collectively blow the cap — the row is
 decremented under a lock and refused when it would exceed.
 """
+
 from __future__ import annotations
 
 import time
@@ -29,12 +30,16 @@ class PolicyEngine:
     def set_budget(self, tenant: str, cap: float) -> None:
         self.db.execute(
             "INSERT INTO budgets(tenant,cap,spent) VALUES(?,?,0) "
-            "ON CONFLICT(tenant) DO UPDATE SET cap=excluded.cap", (tenant, cap))
+            "ON CONFLICT(tenant) DO UPDATE SET cap=excluded.cap",
+            (tenant, cap),
+        )
 
     def set_agent_budget(self, tenant: str, agent: str, cap: float) -> None:
         self.db.execute(
             "INSERT INTO agent_budgets(tenant,agent,cap,spent) VALUES(?,?,?,0) "
-            "ON CONFLICT(tenant,agent) DO UPDATE SET cap=excluded.cap", (tenant, agent, cap))
+            "ON CONFLICT(tenant,agent) DO UPDATE SET cap=excluded.cap",
+            (tenant, agent, cap),
+        )
 
     def budget_remaining(self, tenant: str) -> float:
         r = self.db.one("SELECT cap,spent FROM budgets WHERE tenant=?", (tenant,))
@@ -49,8 +54,10 @@ class PolicyEngine:
             if r is not None and r["spent"] + amount > r["cap"] + 1e-12:
                 return False
             if agent is not None:
-                ar = self.db.one("SELECT cap,spent FROM agent_budgets WHERE tenant=? AND agent=?",
-                                 (tenant, agent))
+                ar = self.db.one(
+                    "SELECT cap,spent FROM agent_budgets WHERE tenant=? AND agent=?",
+                    (tenant, agent),
+                )
                 if ar is not None and ar["spent"] + amount > ar["cap"] + 1e-12:
                     return False
             if r is not None:
@@ -58,7 +65,8 @@ class PolicyEngine:
             if agent is not None:
                 self.db.execute(
                     "UPDATE agent_budgets SET spent=spent+? WHERE tenant=? AND agent=?",
-                    (amount, tenant, agent))
+                    (amount, tenant, agent),
+                )
             return True
 
     def spent(self, tenant: str) -> float:
@@ -66,21 +74,28 @@ class PolicyEngine:
         return r["spent"] if r else 0.0
 
     # ---- rate limiting (per user) -------------------------------------
-    def rate_check(self, tenant: str, subject: str, limit: int = 60, window_s: float = 60.0) -> bool:
+    def rate_check(
+        self, tenant: str, subject: str, limit: int = 60, window_s: float = 60.0
+    ) -> bool:
         with self.db._lock:
             now = time.time()
-            r = self.db.one("SELECT window_start,count FROM rate_limit WHERE tenant=? AND subject=?",
-                            (tenant, subject))
+            r = self.db.one(
+                "SELECT window_start,count FROM rate_limit WHERE tenant=? AND subject=?",
+                (tenant, subject),
+            )
             if not r or now - r["window_start"] > window_s:
                 self.db.execute(
                     "INSERT INTO rate_limit(tenant,subject,window_start,count) VALUES(?,?,?,1) "
                     "ON CONFLICT(tenant,subject) DO UPDATE SET window_start=?, count=1",
-                    (tenant, subject, now, now))
+                    (tenant, subject, now, now),
+                )
                 return True
             if r["count"] >= limit:
                 return False
-            self.db.execute("UPDATE rate_limit SET count=count+1 WHERE tenant=? AND subject=?",
-                            (tenant, subject))
+            self.db.execute(
+                "UPDATE rate_limit SET count=count+1 WHERE tenant=? AND subject=?",
+                (tenant, subject),
+            )
             return True
 
     # ---- access -------------------------------------------------------

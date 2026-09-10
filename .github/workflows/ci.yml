@@ -4,36 +4,122 @@ on:
     branches: ["**"]
   pull_request:
 
+# Section 18: lint -> lite (SQLite) -> full (postgres) -> mcp (inspector CLI).
+# Every job runs the licence gate and the corpus policy so a licence or corpus
+# regression fails the earliest job that reaches it.
+
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Test suite (Section 20 checklist)
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
-      - name: Licence gate (I14, approved open-source stack only)
-        run: python scripts/licence_gate.py
-      - name: Identifier-safety gate (Section 19)
-        run: python -c "from knowledge_fabric.tenants import demo; assert demo.validate_identifiers()==[], demo.validate_identifiers()"
-      - name: Promotion gate proves it blocks a corrupt index (Section 15)
-        run: |
-          python - <<'PY'
-          from knowledge_fabric.app import Platform
-          from knowledge_fabric.tenants import demo
-          from knowledge_fabric.evaluation import gate
-          from tests.fixtures import synthetic_corpus
-          # The product fabric ships no documents (L0.2); the gate proof loads
-          # the synthetic corpus into a test fabric.
-          t = "gate-fabric"
-          p = Platform(); demo.seed(p); synthetic_corpus.load_into(p, t)
-          assert gate.evaluate(p, t, 1)["passed"], "clean index must pass"
-          gate.corrupt_citation_coordinates(p, t)
-          v = gate.promote_if_passes(p, t, 2)
-          assert not v["passed"] and v["promoted"] is None, "corrupt index must be blocked"
-          print("promotion gate proven")
-          PY
+      - name: Install dev tooling
+        run: uv sync --extra dev
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Third-party notices are current
+        run: uv run python scripts/notices.py --check
+      - name: Licence gate (I14)
+        run: uv run python scripts/licence_gate.py
+      - name: Corpus policy
+        run: uv run pytest -q tests/unit/test_corpus_policy.py
+
+  lite:
+    needs: lint
+    runs-on: ubuntu-latest
+    env:
+      KF_PROFILE: lite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dev tooling (SQLite only, no engines)
+        run: uv sync --extra dev
+      - name: Licence gate (I14)
+        run: uv run python scripts/licence_gate.py
+      - name: Corpus policy
+        run: uv run pytest -q tests/unit/test_corpus_policy.py
+      - name: Test suite
+        run: uv run pytest -q
+      - name: Identifier-safety gate
+        run: uv run python -c "from knowledge_fabric.tenants import demo; assert demo.validate_identifiers()==[], demo.validate_identifiers()"
       - name: End-to-end execution demo
-        run: python scripts/demo.py
+        run: uv run python scripts/demo.py
+
+  full:
+    needs: lite
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: kf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      KF_PROFILE: full
+      # Present so postgres-backed tests can bind; SQLite remains the default
+      # store until the Postgres repository adapter ships.
+      KF_TEST_PG_URL: postgresql://postgres:postgres@localhost:5432/kf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install with db extra
+        run: uv sync --extra dev --extra db
+      - name: Licence gate (I14)
+        run: uv run python scripts/licence_gate.py
+      - name: Corpus policy
+        run: uv run pytest -q tests/unit/test_corpus_policy.py
+      - name: Test suite
+        run: uv run pytest -q
+
+  mcp:
+    needs: full
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install with mcp extra
+        run: uv sync --extra dev --extra mcp
+      - name: Licence gate (I14)
+        run: uv run python scripts/licence_gate.py
+      - name: Corpus policy
+        run: uv run pytest -q tests/unit/test_corpus_policy.py
+      - name: MCP conformance (inspector CLI)
+        # The MCP server package lands at T20 (knowledge_fabric/mcp/). Once it
+        # exists, run the integration test and the inspector's headless CLI
+        # tools/list conformance call against it. Until then the server has no
+        # entrypoint to launch (the inspector with no target just hangs), so the
+        # job only confirms Node is present and defers the real check to T20.
+        run: |
+          if [ -d knowledge_fabric/mcp ]; then
+            uv run pytest -q tests/integration/test_mcp.py
+            npx --yes @modelcontextprotocol/inspector --cli --method tools/list \
+              -- uv run python -m knowledge_fabric.mcp
+          else
+            node --version
+            echo "MCP server not built yet; inspector tools/list conformance is wired for T20."
+          fi

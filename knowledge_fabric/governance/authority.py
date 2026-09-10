@@ -18,24 +18,38 @@ document wins, and where two sources of differing authority both spoke).
 Every store query is tenant-filtered (invariant I5) and every mutation is
 audited via ``platform.audit.write``.
 """
-from __future__ import annotations
 
-from typing import Any, Optional
+from __future__ import annotations
 
 from ..contracts.types import new_id, now_ms
 from ..stores.repositories import _guard
 
 __all__ = [
-    "DEFAULT_RANKS", "UNKNOWN_RANK", "AUTHORITATIVE_BOOST", "set_source_rank",
-    "rank_for", "weight_for", "mark_authoritative", "is_authoritative", "boost",
-    "authoritative_source", "conflicts", "list_ranks",
+    "DEFAULT_RANKS",
+    "UNKNOWN_RANK",
+    "AUTHORITATIVE_BOOST",
+    "set_source_rank",
+    "rank_for",
+    "weight_for",
+    "mark_authoritative",
+    "is_authoritative",
+    "boost",
+    "authoritative_source",
+    "conflicts",
+    "list_ranks",
 ]
 
 #: rank 1 = most authoritative. Curated files/uploads first, wikis next,
 #: code repositories after, ticket trackers last.
 DEFAULT_RANKS: dict[str, int] = {
-    "files": 1, "confluence": 2, "sharepoint": 2, "github": 3, "jira": 4,
-    "drive": 3, "upload": 2, "cli": 2,
+    "files": 1,
+    "confluence": 2,
+    "sharepoint": 2,
+    "github": 3,
+    "jira": 4,
+    "drive": 3,
+    "upload": 2,
+    "cli": 2,
 }
 #: rank used for a source that is neither configured nor in ``DEFAULT_RANKS``.
 UNKNOWN_RANK = 5
@@ -60,13 +74,14 @@ def set_source_rank(platform, tenant: str, source: str, rank: int) -> None:
     try:
         rank = int(rank)
     except (TypeError, ValueError):
-        raise ValueError("rank must be an integer >= 1")
+        raise ValueError("rank must be an integer >= 1") from None
     if rank < 1:
         raise ValueError("rank must be an integer >= 1")
     platform.db.execute(
         """INSERT INTO source_authority(tenant,source,rank,weight) VALUES(?,?,?,?)
            ON CONFLICT(tenant,source) DO UPDATE SET rank=excluded.rank, weight=excluded.weight""",
-        (tenant, source, rank, _weight(rank)))
+        (tenant, source, rank, _weight(rank)),
+    )
     cache = getattr(platform, "cache", None)
     if cache is not None and hasattr(cache, "invalidate"):
         cache.invalidate(tenant)
@@ -75,8 +90,9 @@ def set_source_rank(platform, tenant: str, source: str, rank: int) -> None:
 def rank_for(platform, tenant: str, source: str) -> int:
     """Effective rank of a source: tenant override, else default, else UNKNOWN_RANK."""
     _guard(tenant)
-    r = platform.db.one("SELECT rank FROM source_authority WHERE tenant=? AND source=?",
-                        (tenant, source or ""))
+    r = platform.db.one(
+        "SELECT rank FROM source_authority WHERE tenant=? AND source=?", (tenant, source or "")
+    )
     if r and r["rank"]:
         return int(r["rank"])
     return DEFAULT_RANKS.get(source or "", UNKNOWN_RANK)
@@ -95,18 +111,29 @@ def list_ranks(platform, tenant: str) -> list[dict]:
     """
     _guard(tenant)
     sources = set(DEFAULT_RANKS)
-    sources |= {r["source"] for r in platform.db.query(
-        "SELECT source FROM source_authority WHERE tenant=?", (tenant,))}
-    sources |= {r["source"] for r in platform.db.query(
-        "SELECT DISTINCT source FROM documents WHERE tenant=? AND status='active'", (tenant,))
-        if r["source"]}
-    overrides = {r["source"]: int(r["rank"]) for r in platform.db.query(
-        "SELECT source, rank FROM source_authority WHERE tenant=?", (tenant,))}
+    sources |= {
+        r["source"]
+        for r in platform.db.query("SELECT source FROM source_authority WHERE tenant=?", (tenant,))
+    }
+    sources |= {
+        r["source"]
+        for r in platform.db.query(
+            "SELECT DISTINCT source FROM documents WHERE tenant=? AND status='active'", (tenant,)
+        )
+        if r["source"]
+    }
+    overrides = {
+        r["source"]: int(r["rank"])
+        for r in platform.db.query(
+            "SELECT source, rank FROM source_authority WHERE tenant=?", (tenant,)
+        )
+    }
     out = []
     for s in sources:
         rank = overrides.get(s, DEFAULT_RANKS.get(s, UNKNOWN_RANK))
-        out.append({"source": s, "rank": rank, "weight": _weight(rank),
-                    "overridden": s in overrides})
+        out.append(
+            {"source": s, "rank": rank, "weight": _weight(rank), "overridden": s in overrides}
+        )
     out.sort(key=lambda x: (x["rank"], x["source"]))
     return out
 
@@ -114,27 +141,39 @@ def list_ranks(platform, tenant: str) -> list[dict]:
 # --------------------------------------------------------------------------
 # authoritative documents
 # --------------------------------------------------------------------------
-def mark_authoritative(platform, tenant: str, document_id: str, flag: bool, by_subject: str) -> None:
+def mark_authoritative(
+    platform, tenant: str, document_id: str, flag: bool, by_subject: str
+) -> None:
     """Set/clear the authoritative flag on a document and audit the decision."""
     _guard(tenant)
     if not by_subject:
         raise ValueError("by_subject is required for an audited authority change")
-    cur = platform.db.execute("UPDATE documents SET authoritative=? WHERE tenant=? AND id=?",
-                              (1 if flag else 0, tenant, document_id))
+    cur = platform.db.execute(
+        "UPDATE documents SET authoritative=? WHERE tenant=? AND id=?",
+        (1 if flag else 0, tenant, document_id),
+    )
     if cur.rowcount == 0:
         raise KeyError(f"document {document_id} not found in tenant {tenant}")
     cache = getattr(platform, "cache", None)
     if cache is not None and hasattr(cache, "invalidate"):
         cache.invalidate(tenant)
-    platform.audit.write(tenant, by_subject, False,
-                         "authority.mark" if flag else "authority.unmark",
-                         f"document:{document_id}", "allow", new_id("authority_"), now_ms())
+    platform.audit.write(
+        tenant,
+        by_subject,
+        False,
+        "authority.mark" if flag else "authority.unmark",
+        f"document:{document_id}",
+        "allow",
+        new_id("authority_"),
+        now_ms(),
+    )
 
 
 def is_authoritative(platform, tenant: str, document_id: str) -> bool:
     _guard(tenant)
-    r = platform.db.one("SELECT authoritative FROM documents WHERE tenant=? AND id=?",
-                        (tenant, document_id))
+    r = platform.db.one(
+        "SELECT authoritative FROM documents WHERE tenant=? AND id=?", (tenant, document_id)
+    )
     return bool(r and r["authoritative"])
 
 
@@ -178,22 +217,28 @@ def _cited_docs(platform, tenant: str, citations) -> list[dict]:
     seen: list[dict] = []
     ids = set()
     for c in citations or []:
-        doc_id = getattr(c, "document_id", None) or (c.get("document_id") if isinstance(c, dict) else None)
+        doc_id = getattr(c, "document_id", None) or (
+            c.get("document_id") if isinstance(c, dict) else None
+        )
         if not doc_id or doc_id in ids:
             continue
         doc = platform.documents.get(tenant, doc_id)
         if not doc:
-            continue          # not in this tenant (or deleted): never explained
+            continue  # not in this tenant (or deleted): never explained
         ids.add(doc_id)
-        title = getattr(c, "document_title", None) or (c.get("document_title") if isinstance(c, dict) else None)
-        seen.append({
-            "document_id": doc_id,
-            "document_title": title or doc.get("title"),
-            "source": doc.get("source") or "",
-            "rank": rank_for(platform, tenant, doc.get("source") or ""),
-            "authoritative": bool(doc.get("authoritative")),
-            "order": len(seen),
-        })
+        title = getattr(c, "document_title", None) or (
+            c.get("document_title") if isinstance(c, dict) else None
+        )
+        seen.append(
+            {
+                "document_id": doc_id,
+                "document_title": title or doc.get("title"),
+                "source": doc.get("source") or "",
+                "rank": rank_for(platform, tenant, doc.get("source") or ""),
+                "authoritative": bool(doc.get("authoritative")),
+                "order": len(seen),
+            }
+        )
     return seen
 
 
@@ -202,7 +247,7 @@ def _authority_key(d: dict) -> tuple:
     return (0 if d["authoritative"] else 1, d["rank"], d["order"])
 
 
-def authoritative_source(platform, tenant: str, citations) -> Optional[dict]:
+def authoritative_source(platform, tenant: str, citations) -> dict | None:
     """The document a reader should trust most among the citations, with a reason.
 
     Returns {"document_id", "document_title", "source", "reason"} or None
@@ -216,21 +261,31 @@ def authoritative_source(platform, tenant: str, citations) -> Optional[dict]:
     best = min(docs, key=_authority_key)
     n = len(docs)
     if best["authoritative"]:
-        reason = (f"marked authoritative by a curator (source '{best['source']}', rank {best['rank']})"
-                  + (f"; preferred over {n - 1} other cited document(s)" if n > 1 else ""))
+        reason = (
+            f"marked authoritative by a curator (source '{best['source']}', rank {best['rank']})"
+            + (f"; preferred over {n - 1} other cited document(s)" if n > 1 else "")
+        )
     elif n == 1:
         reason = f"only cited document; source '{best['source']}' has rank {best['rank']}"
     else:
         others = sorted({d["source"] for d in docs if d["document_id"] != best["document_id"]})
         same = [d for d in docs if d["rank"] == best["rank"]]
         if len(same) > 1:
-            reason = (f"source '{best['source']}' shares the best rank {best['rank']} with "
-                      f"{len(same) - 1} other cited document(s); cited first")
+            reason = (
+                f"source '{best['source']}' shares the best rank {best['rank']} with "
+                f"{len(same) - 1} other cited document(s); cited first"
+            )
         else:
-            reason = (f"source '{best['source']}' has the best rank ({best['rank']}) among cited "
-                      f"sources {', '.join(repr(s) for s in others)}")
-    return {"document_id": best["document_id"], "document_title": best["document_title"],
-            "source": best["source"], "reason": reason}
+            reason = (
+                f"source '{best['source']}' has the best rank ({best['rank']}) among cited "
+                f"sources {', '.join(repr(s) for s in others)}"
+            )
+    return {
+        "document_id": best["document_id"],
+        "document_title": best["document_title"],
+        "source": best["source"],
+        "reason": reason,
+    }
 
 
 def conflicts(platform, tenant: str, citations) -> list[dict]:
@@ -253,11 +308,21 @@ def conflicts(platform, tenant: str, citations) -> list[dict]:
             pref = min((a, b), key=_authority_key)
             other = b if pref is a else a
             if pref["authoritative"] and not other["authoritative"]:
-                why = (f"'{pref['document_title']}' is marked authoritative; "
-                       f"'{other['document_title']}' ({other['source']}, rank {other['rank']}) is not")
+                why = (
+                    f"'{pref['document_title']}' is marked authoritative; "
+                    f"'{other['document_title']}' ({other['source']}, rank {other['rank']}) is not"
+                )
             else:
-                why = (f"source '{pref['source']}' (rank {pref['rank']}) outranks "
-                       f"'{other['source']}' (rank {other['rank']})")
-            out.append({"a": a["document_id"], "b": b["document_id"],
-                        "preferred": pref["document_id"], "reason": why})
+                why = (
+                    f"source '{pref['source']}' (rank {pref['rank']}) outranks "
+                    f"'{other['source']}' (rank {other['rank']})"
+                )
+            out.append(
+                {
+                    "a": a["document_id"],
+                    "b": b["document_id"],
+                    "preferred": pref["document_id"],
+                    "reason": why,
+                }
+            )
     return out

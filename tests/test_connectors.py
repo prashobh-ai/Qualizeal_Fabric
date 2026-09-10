@@ -1,8 +1,9 @@
 """Connector contract: read-only, scoped, change-detecting, tombstoning."""
+
 import unittest
 
-from knowledge_fabric.connectors.github import GitHubConnector
 from knowledge_fabric.connectors.files import FilesConnector
+from knowledge_fabric.connectors.github import GitHubConnector
 
 
 class TestConnectors(unittest.TestCase):
@@ -14,14 +15,16 @@ class TestConnectors(unittest.TestCase):
             c.write_back()
 
     def test_github_backfill_then_incremental(self):
-        recs = [{"repo": "org/allowed", "path": "a.md", "updated_at": 10, "content": "hello"},
-                {"repo": "org/allowed", "path": "b.md", "updated_at": 20, "content": "world"}]
+        recs = [
+            {"repo": "org/allowed", "path": "a.md", "updated_at": 10, "content": "hello"},
+            {"repo": "org/allowed", "path": "b.md", "updated_at": 20, "content": "world"},
+        ]
         c = GitHubConnector("t1", {"repos": ["org/allowed"]}, records=recs)
         items, cursor = c.pull(None)
-        self.assertEqual(len(items), 2)              # backfill
+        self.assertEqual(len(items), 2)  # backfill
         recs.append({"repo": "org/allowed", "path": "c.md", "updated_at": 30, "content": "new"})
         items2, cursor2 = c.pull(cursor)
-        self.assertEqual(len(items2), 1)             # only the delta
+        self.assertEqual(len(items2), 1)  # only the delta
         self.assertEqual(items2[0].title, "c.md")
 
     def test_github_allow_list_excludes_other_repos(self):
@@ -31,8 +34,16 @@ class TestConnectors(unittest.TestCase):
         self.assertEqual(items, [])
 
     def test_github_tombstone_on_delete(self):
-        recs = [{"repo": "org/allowed", "path": "a.md", "updated_at": 10, "content": "hi"},
-                {"repo": "org/allowed", "path": "a.md", "updated_at": 20, "content": "", "deleted": True}]
+        recs = [
+            {"repo": "org/allowed", "path": "a.md", "updated_at": 10, "content": "hi"},
+            {
+                "repo": "org/allowed",
+                "path": "a.md",
+                "updated_at": 20,
+                "content": "",
+                "deleted": True,
+            },
+        ]
         c = GitHubConnector("t1", {"repos": ["org/allowed"]}, records=recs)
         items, _ = c.pull(None)
         # the delete produces a tombstone instruction, not a new document

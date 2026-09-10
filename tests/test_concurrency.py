@@ -1,5 +1,6 @@
 """Concurrency correctness (Runbook Section 5): no cross-tenant leakage,
 no request-context bleed, unique traces — the footgun tests."""
+
 import threading
 import unittest
 
@@ -15,10 +16,16 @@ class TestConcurrency(unittest.TestCase):
 
     def test_mixed_tenant_no_leakage_and_unique_traces(self):
         principals = [
-            (demo.principal_for(self.p, "test-fabric", "asker.public"),
-             "what must a release achieve before promotion?", "test-fabric"),
-            (demo.principal_for(self.p, "isolation-check", "asker.public"),
-             "what is required before boarding begins?", "isolation-check"),
+            (
+                demo.principal_for(self.p, "test-fabric", "asker.public"),
+                "what must a release achieve before promotion?",
+                "test-fabric",
+            ),
+            (
+                demo.principal_for(self.p, "isolation-check", "asker.public"),
+                "what is required before boarding begins?",
+                "isolation-check",
+            ),
         ]
         results = []
         lock = threading.Lock()
@@ -29,7 +36,7 @@ class TestConcurrency(unittest.TestCase):
             leaked = False
             for c in a.citations:
                 d = self.p.documents.get(tenant, c.document_id)
-                if d is None:      # citation not resolvable within this tenant => leak
+                if d is None:  # citation not resolvable within this tenant => leak
                     leaked = True
             with lock:
                 results.append((tenant, a.trajectory_id, leaked, a.kind.value))
@@ -46,8 +53,7 @@ class TestConcurrency(unittest.TestCase):
         self.assertEqual(len(set(traj_ids)), len(traj_ids), "trace ids must be unique per request")
 
     def test_audit_subject_matches_requester_under_load(self):
-        prins = [demo.principal_for(self.p, "test-fabric", u)
-                 for u in ("asker.public", "curator")]
+        prins = [demo.principal_for(self.p, "test-fabric", u) for u in ("asker.public", "curator")]
         out = []
 
         def fire(i):

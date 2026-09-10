@@ -4,6 +4,7 @@ Layout: <root>/<tenant>/<hash prefix>/<hash>. Writing the same hash twice is
 a no-op (idempotent). The cloud adapter (S3-class) implements the identical
 four methods.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,7 +22,7 @@ class FileObjectStore:
 
     def put(self, tenant: str, content_hash: str, data: bytes, meta: dict) -> str:
         p = self._path(tenant, content_hash)
-        if not p.exists():                    # immutable: never overwrite
+        if not p.exists():  # immutable: never overwrite
             p.write_bytes(data)
         return str(p)
 

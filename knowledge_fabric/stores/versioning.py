@@ -25,18 +25,26 @@ live (``superseded_by IS NULL``) for the document, the document's
 ``current_version`` is a fresh max+1, a ``document_versions`` row records the
 restore, and the action is audited.
 """
+
 from __future__ import annotations
 
 import json
 from collections import Counter
-from typing import Any, Optional
+from typing import Any
 
 from ..contracts.types import new_id, now_ms
 from .repositories import _guard
 
 __all__ = [
-    "record_version", "history", "diff", "rollback", "bump_dataset",
-    "current_dataset", "lineage", "backfill", "list_dataset_versions",
+    "record_version",
+    "history",
+    "diff",
+    "rollback",
+    "bump_dataset",
+    "current_dataset",
+    "lineage",
+    "backfill",
+    "list_dataset_versions",
 ]
 
 
@@ -57,29 +65,40 @@ def _passage_versions(platform, tenant: str, document_id: str) -> dict[int, dict
     rows = platform.db.query(
         """SELECT id, version, prov_hash, prov_version FROM passages
            WHERE tenant=? AND document_id=? ORDER BY version, rowid""",
-        (tenant, document_id))
+        (tenant, document_id),
+    )
     out: dict[int, dict[str, Any]] = {}
     for r in rows:
         v = int(r["version"] or 1)
-        slot = out.setdefault(v, {"passage_ids": [], "content_hash": r["prov_hash"],
-                                  "source_version": r["prov_version"]})
+        slot = out.setdefault(
+            v,
+            {
+                "passage_ids": [],
+                "content_hash": r["prov_hash"],
+                "source_version": r["prov_version"],
+            },
+        )
         slot["passage_ids"].append(r["id"])
     return out
 
 
-def _version_row(platform, tenant: str, document_id: str, version: int) -> Optional[dict]:
+def _version_row(platform, tenant: str, document_id: str, version: int) -> dict | None:
     r = platform.db.one(
         "SELECT * FROM document_versions WHERE tenant=? AND document_id=? AND version=?",
-        (tenant, document_id, int(version)))
+        (tenant, document_id, int(version)),
+    )
     return dict(r) if r else None
 
 
-def _version_passage_ids(platform, tenant: str, document_id: str, version: int) -> Optional[dict]:
+def _version_passage_ids(platform, tenant: str, document_id: str, version: int) -> dict | None:
     """Passage ids + hash + source_version for a version: ledger first, passages fallback."""
     row = _version_row(platform, tenant, document_id, version)
     if row:
-        return {"passage_ids": json.loads(row["passage_ids"] or "[]"),
-                "content_hash": row["content_hash"], "source_version": row["source_version"]}
+        return {
+            "passage_ids": json.loads(row["passage_ids"] or "[]"),
+            "content_hash": row["content_hash"],
+            "source_version": row["source_version"],
+        }
     return _passage_versions(platform, tenant, document_id).get(int(version))
 
 
@@ -90,11 +109,11 @@ def _texts_for(platform, tenant: str, passage_ids: list[str]) -> list[str]:
     texts: dict[str, str] = {}
     # chunk the IN list to stay well under SQLite's variable limit
     for i in range(0, len(passage_ids), 500):
-        chunk = passage_ids[i:i + 500]
+        chunk = passage_ids[i : i + 500]
         marks = ",".join("?" for _ in chunk)
         for r in platform.db.query(
-                f"SELECT id, text FROM passages WHERE tenant=? AND id IN ({marks})",
-                (tenant, *chunk)):
+            f"SELECT id, text FROM passages WHERE tenant=? AND id IN ({marks})", (tenant, *chunk)
+        ):
             texts[r["id"]] = r["text"]
     return [texts[pid] for pid in passage_ids if pid in texts]
 
@@ -102,8 +121,15 @@ def _texts_for(platform, tenant: str, passage_ids: list[str]) -> list[str]:
 # --------------------------------------------------------------------------
 # document versions
 # --------------------------------------------------------------------------
-def record_version(platform, tenant: str, document_id: str, version: int, content_hash: str,
-                   passage_ids: list[str], source_version: str) -> None:
+def record_version(
+    platform,
+    tenant: str,
+    document_id: str,
+    version: int,
+    content_hash: str,
+    passage_ids: list[str],
+    source_version: str,
+) -> None:
     """Write (or refresh) the ledger row for one document version.
 
     Idempotent per (document, version): the row id is deterministic and an
@@ -120,8 +146,17 @@ def record_version(platform, tenant: str, document_id: str, version: int, conten
            passage_ids,source_version) VALUES(?,?,?,?,?,?,?,?)
            ON CONFLICT(id) DO UPDATE SET content_hash=excluded.content_hash,
            passage_ids=excluded.passage_ids, source_version=excluded.source_version""",
-        (_version_row_id(document_id, version), tenant, document_id, version, content_hash,
-         now_ms(), json.dumps(list(passage_ids)), str(source_version) if source_version is not None else None))
+        (
+            _version_row_id(document_id, version),
+            tenant,
+            document_id,
+            version,
+            content_hash,
+            now_ms(),
+            json.dumps(list(passage_ids)),
+            str(source_version) if source_version is not None else None,
+        ),
+    )
 
 
 def backfill(platform, tenant: str, document_id: str) -> int:
@@ -135,8 +170,15 @@ def backfill(platform, tenant: str, document_id: str) -> int:
     created = 0
     for v, info in sorted(_passage_versions(platform, tenant, document_id).items()):
         if _version_row(platform, tenant, document_id, v) is None:
-            record_version(platform, tenant, document_id, v, info["content_hash"],
-                           info["passage_ids"], info["source_version"])
+            record_version(
+                platform,
+                tenant,
+                document_id,
+                v,
+                info["content_hash"],
+                info["passage_ids"],
+                info["source_version"],
+            )
             created += 1
     return created
 
@@ -151,19 +193,28 @@ def history(platform, tenant: str, document_id: str) -> list[dict]:
     _guard(tenant)
     out: dict[int, dict] = {}
     for r in platform.db.query(
-            """SELECT version, content_hash, created_at, passage_ids, source_version
+        """SELECT version, content_hash, created_at, passage_ids, source_version
                FROM document_versions WHERE tenant=? AND document_id=? ORDER BY version""",
-            (tenant, document_id)):
+        (tenant, document_id),
+    ):
         out[int(r["version"])] = {
-            "version": int(r["version"]), "content_hash": r["content_hash"],
-            "created_at": r["created_at"], "passages": len(json.loads(r["passage_ids"] or "[]")),
-            "source_version": r["source_version"], "recorded": True,
+            "version": int(r["version"]),
+            "content_hash": r["content_hash"],
+            "created_at": r["created_at"],
+            "passages": len(json.loads(r["passage_ids"] or "[]")),
+            "source_version": r["source_version"],
+            "recorded": True,
         }
     for v, info in _passage_versions(platform, tenant, document_id).items():
         if v not in out:
-            out[v] = {"version": v, "content_hash": info["content_hash"], "created_at": None,
-                      "passages": len(info["passage_ids"]),
-                      "source_version": info["source_version"], "recorded": False}
+            out[v] = {
+                "version": v,
+                "content_hash": info["content_hash"],
+                "created_at": None,
+                "passages": len(info["passage_ids"]),
+                "source_version": info["source_version"],
+                "recorded": False,
+            }
     return [out[v] for v in sorted(out)]
 
 
@@ -187,8 +238,13 @@ def diff(platform, tenant: str, document_id: str, v_from: int, v_to: int) -> dic
     common = from_count & to_count
     removed = _leftover(from_texts, from_count - to_count)
     added = _leftover(to_texts, to_count - from_count)
-    return {"added": added, "removed": removed, "unchanged": sum(common.values()),
-            "from_version": int(v_from), "to_version": int(v_to)}
+    return {
+        "added": added,
+        "removed": removed,
+        "unchanged": sum(common.values()),
+        "from_version": int(v_from),
+        "to_version": int(v_to),
+    }
 
 
 def _leftover(ordered: list[str], surplus: Counter) -> list[str]:
@@ -237,29 +293,40 @@ def rollback(platform, tenant: str, document_id: str, to_version: int, by_subjec
     ids = list(target["passage_ids"])
     present = 0
     for i in range(0, len(ids), 500):
-        chunk = ids[i:i + 500]
+        chunk = ids[i : i + 500]
         marks = ",".join("?" for _ in chunk)
         present += platform.db.one(
             f"SELECT COUNT(*) c FROM passages WHERE tenant=? AND document_id=? AND id IN ({marks})",
-            (tenant, document_id, *chunk))["c"]
+            (tenant, document_id, *chunk),
+        )["c"]
     if present != len(ids):
-        raise KeyError(f"version {to_version} of {document_id} is incomplete "
-                       f"({present}/{len(ids)} passages present); rollback aborted")
+        raise KeyError(
+            f"version {to_version} of {document_id} is incomplete "
+            f"({present}/{len(ids)} passages present); rollback aborted"
+        )
 
     # 3. supersede whatever is live now
-    live_before = [r["id"] for r in platform.db.query(
-        "SELECT id FROM passages WHERE tenant=? AND document_id=? AND superseded_by IS NULL",
-        (tenant, document_id))]
+    live_before = [
+        r["id"]
+        for r in platform.db.query(
+            "SELECT id FROM passages WHERE tenant=? AND document_id=? AND superseded_by IS NULL",
+            (tenant, document_id),
+        )
+    ]
     platform.passages.supersede_document(tenant, document_id, new_version)
 
     # 4. re-activate the target version's passages
     reactivated = 0
     for i in range(0, len(ids), 500):
-        chunk = ids[i:i + 500]
+        chunk = ids[i : i + 500]
         marks = ",".join("?" for _ in chunk)
         cur = platform.db.execute(
-            f"UPDATE passages SET superseded_by=NULL WHERE tenant=? AND document_id=? AND id IN ({marks})",
-            (tenant, document_id, *chunk))
+            (
+                f"UPDATE passages SET superseded_by=NULL WHERE tenant=? AND document_id=? "
+                f"AND id IN ({marks})"
+            ),
+            (tenant, document_id, *chunk),
+        )
         reactivated += max(cur.rowcount, 0)
     _ensure_embeddings(platform, tenant, ids)
 
@@ -267,21 +334,40 @@ def rollback(platform, tenant: str, document_id: str, to_version: int, by_subjec
     platform.db.execute(
         """UPDATE documents SET current_version=?, content_hash=?, source_version=?
            WHERE tenant=? AND id=?""",
-        (new_version, target["content_hash"], target["source_version"], tenant, document_id))
+        (new_version, target["content_hash"], target["source_version"], tenant, document_id),
+    )
 
     # 6. ledger row for the restore
-    record_version(platform, tenant, document_id, new_version, target["content_hash"], ids,
-                   target["source_version"])
+    record_version(
+        platform,
+        tenant,
+        document_id,
+        new_version,
+        target["content_hash"],
+        ids,
+        target["source_version"],
+    )
 
     # 7. caches + audit
     cache = getattr(platform, "cache", None)
     if cache is not None and hasattr(cache, "invalidate"):
         cache.invalidate(tenant)
-    platform.audit.write(tenant, by_subject, False, "version.rollback",
-                         f"document:{document_id}:v{int(to_version)}->v{new_version}", "allow",
-                         new_id("rollback_"), now_ms())
-    return {"new_version": new_version, "reactivated": reactivated,
-            "superseded": len(live_before), "restored_version": int(to_version)}
+    platform.audit.write(
+        tenant,
+        by_subject,
+        False,
+        "version.rollback",
+        f"document:{document_id}:v{int(to_version)}->v{new_version}",
+        "allow",
+        new_id("rollback_"),
+        now_ms(),
+    )
+    return {
+        "new_version": new_version,
+        "reactivated": reactivated,
+        "superseded": len(live_before),
+        "restored_version": int(to_version),
+    }
 
 
 def _ensure_embeddings(platform, tenant: str, passage_ids: list[str]) -> int:
@@ -290,17 +376,23 @@ def _ensure_embeddings(platform, tenant: str, passage_ids: list[str]) -> int:
     missing = []
     for pid in passage_ids:
         if model_id is None:
-            r = platform.db.one("SELECT 1 FROM embeddings WHERE tenant=? AND passage_id=?", (tenant, pid))
+            r = platform.db.one(
+                "SELECT 1 FROM embeddings WHERE tenant=? AND passage_id=?", (tenant, pid)
+            )
         else:
-            r = platform.db.one("SELECT 1 FROM embeddings WHERE tenant=? AND passage_id=? AND model_id=?",
-                                (tenant, pid, model_id))
+            r = platform.db.one(
+                "SELECT 1 FROM embeddings WHERE tenant=? AND passage_id=? AND model_id=?",
+                (tenant, pid, model_id),
+            )
         if not r:
             missing.append(pid)
     if not missing:
         return 0
     texts = _texts_for(platform, tenant, missing)
     vecs = platform.embedder.embed(texts)
-    platform.vindex.upsert(tenant, [{"passage_id": pid, "vec": v} for pid, v in zip(missing, vecs)])
+    platform.vindex.upsert(
+        tenant, [{"passage_id": pid, "vec": v} for pid, v in zip(missing, vecs, strict=False)]
+    )
     return len(missing)
 
 
@@ -323,22 +415,28 @@ def bump_dataset(platform, tenant: str, reason: str) -> int:
     platform.db.execute(
         """INSERT INTO dataset_versions(tenant,version,created_at,reason,doc_count,passage_count)
            VALUES(?,?,?,?,?,?)""",
-        (tenant, nxt, now_ms(), reason or "", docs, passages))
+        (tenant, nxt, now_ms(), reason or "", docs, passages),
+    )
     return nxt
 
 
 def list_dataset_versions(platform, tenant: str, limit: int = 50) -> list[dict]:
     """Newest-first dataset versions: [{version, created_at, reason, doc_count, passage_count}]."""
     _guard(tenant)
-    return [dict(r) for r in platform.db.query(
-        """SELECT version, created_at, reason, doc_count, passage_count FROM dataset_versions
-           WHERE tenant=? ORDER BY version DESC LIMIT ?""", (tenant, int(limit)))]
+    return [
+        dict(r)
+        for r in platform.db.query(
+            """SELECT version, created_at, reason, doc_count, passage_count FROM dataset_versions
+           WHERE tenant=? ORDER BY version DESC LIMIT ?""",
+            (tenant, int(limit)),
+        )
+    ]
 
 
 # --------------------------------------------------------------------------
 # lineage (I8: every derived artefact links back to its origin)
 # --------------------------------------------------------------------------
-def lineage(platform, tenant: str, passage_id: str) -> Optional[dict]:
+def lineage(platform, tenant: str, passage_id: str) -> dict | None:
     """Origin of one passage, or None if it is not in this tenant.
 
     {"passage_id", "document_id", "document_title", "content_hash", "version",
@@ -361,6 +459,9 @@ def lineage(platform, tenant: str, passage_id: str) -> Optional[dict]:
         "source": pas.provenance.source,
         "source_version": pas.provenance.source_version,
         "uri": doc.get("uri"),
-        "coordinate": {"kind": pas.coordinate.kind.value, "locator": pas.coordinate.locator,
-                       "render": pas.coordinate.render()},
+        "coordinate": {
+            "kind": pas.coordinate.kind.value,
+            "locator": pas.coordinate.locator,
+            "render": pas.coordinate.render(),
+        },
     }

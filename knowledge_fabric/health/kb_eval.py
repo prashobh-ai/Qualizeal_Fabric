@@ -28,11 +28,11 @@ Authoritative documents are never ``delete`` (at most ``review``).
 Every store access is tenant-filtered (invariant I5); the module is
 deterministic (stable ordering, no randomness, no model calls).
 """
+
 from __future__ import annotations
 
 import json
 import re
-from typing import Optional
 
 from ..adapters.embedder import cosine
 from ..contracts.types import now_ms as _now_ms
@@ -43,20 +43,60 @@ from . import metrics
 # --------------------------------------------------------------------------
 # tunables (kept as module constants so the rules are inspectable)
 # --------------------------------------------------------------------------
-DUPLICATE_THRESHOLD = 0.92        # cosine at/above which two passages are duplicates
-DUPLICATE_DELETE_SHARE = 0.50     # share of a doc's passages that must be duplicates
-STALE_DAYS = 365                  # uncited + older than this => delete candidate
-READABILITY_REVIEW = 0.35         # below this a document is flagged for review
+DUPLICATE_THRESHOLD = 0.92  # cosine at/above which two passages are duplicates
+DUPLICATE_DELETE_SHARE = 0.50  # share of a doc's passages that must be duplicates
+STALE_DAYS = 365  # uncited + older than this => delete candidate
+READABILITY_REVIEW = 0.35  # below this a document is flagged for review
 _MS_PER_DAY = 86_400_000
 
 _SUGGESTION_RANK = {"delete": 0, "review": 1, "keep": 2}
 _WORD = re.compile(r"[A-Za-z0-9_']+")
 _TOKEN = re.compile(r"[a-z0-9]+")
 _SENTENCE_END = re.compile(r"[.!?]+(?:\s+|$)|\n+")
-_STOP = {"the", "a", "an", "of", "to", "in", "on", "for", "and", "or", "is", "are",
-         "what", "which", "how", "who", "when", "where", "does", "do", "did", "was",
-         "were", "be", "with", "that", "this", "it", "as", "by", "at", "from", "our",
-         "we", "you", "i", "can", "will", "should", "must", "may", "according"}
+_STOP = {
+    "the",
+    "a",
+    "an",
+    "of",
+    "to",
+    "in",
+    "on",
+    "for",
+    "and",
+    "or",
+    "is",
+    "are",
+    "what",
+    "which",
+    "how",
+    "who",
+    "when",
+    "where",
+    "does",
+    "do",
+    "did",
+    "was",
+    "were",
+    "be",
+    "with",
+    "that",
+    "this",
+    "it",
+    "as",
+    "by",
+    "at",
+    "from",
+    "our",
+    "we",
+    "you",
+    "i",
+    "can",
+    "will",
+    "should",
+    "must",
+    "may",
+    "according",
+}
 
 
 # ==========================================================================
@@ -75,8 +115,9 @@ def _docs_by_title(platform, tenant: str) -> dict[str, list[str]]:
     trace that cited a since-tombstoned document still resolves."""
     _guard(tenant)
     out: dict[str, list[str]] = {}
-    for r in platform.db.query("SELECT id, title FROM documents WHERE tenant=? ORDER BY ingested_at, id",
-                               (tenant,)):
+    for r in platform.db.query(
+        "SELECT id, title FROM documents WHERE tenant=? ORDER BY ingested_at, id", (tenant,)
+    ):
         out.setdefault(r["title"] or "", []).append(r["id"])
     return out
 
@@ -104,8 +145,12 @@ def citation_usage(platform, tenant: str) -> dict[str, int]:
     by_title = _docs_by_title(platform, tenant)
     usage: dict[str, int] = {}
     rows = platform.db.query(
-        "SELECT sources, attrs, citations_count FROM spans WHERE tenant=? AND name='answer' ORDER BY id",
-        (tenant,))
+        (
+            "SELECT sources, attrs, citations_count FROM spans WHERE tenant=? AND name='answer' "
+            "ORDER BY id"
+        ),
+        (tenant,),
+    )
     for r in rows:
         if int(r["citations_count"] or 0) <= 0:
             continue
@@ -136,7 +181,8 @@ def _live_vectors(platform, tenant: str) -> list[tuple[str, str, list[float]]]:
            FROM embeddings e JOIN passages p ON p.id=e.passage_id AND p.tenant=e.tenant
            WHERE e.tenant=? AND e.model_id=? AND p.superseded_by IS NULL
            ORDER BY e.passage_id""",
-        (tenant, model_id))
+        (tenant, model_id),
+    )
     out = []
     for r in rows:
         vec = _loads(r["vec"], None)
@@ -147,9 +193,14 @@ def _live_vectors(platform, tenant: str) -> list[tuple[str, str, list[float]]]:
 
 def _doc_meta(platform, tenant: str) -> dict[str, dict]:
     _guard(tenant)
-    return {r["id"]: dict(r) for r in platform.db.query(
-        "SELECT id, ingested_at, authoritative, content_hash, title, source, uri, status "
-        "FROM documents WHERE tenant=?", (tenant,))}
+    return {
+        r["id"]: dict(r)
+        for r in platform.db.query(
+            "SELECT id, ingested_at, authoritative, content_hash, title, source, uri, status "
+            "FROM documents WHERE tenant=?",
+            (tenant,),
+        )
+    }
 
 
 def _keeps_original(a: dict, b: dict) -> bool:
@@ -173,7 +224,8 @@ def duplicates(platform, tenant: str, threshold: float = DUPLICATE_THRESHOLD) ->
     Compares every live passage embedding with every live passage of a *different*
     document (same-document repetition is not a duplicate). Each unordered pair at
     or above ``threshold`` is reported once with ``passage_id`` on the newer copy
-    and ``dup_of`` on the older original (ties on id — see ``_keeps_original``). O(n^2) in live passages; fine for the
+    and ``dup_of`` on the older original (ties on id — see ``_keeps_original``).
+    O(n^2) in live passages; fine for the
     tens of thousands a tenant holds locally, and the cloud adapter can replace it
     with a pgvector self-join behind the same signature.
     """
@@ -195,8 +247,15 @@ def duplicates(platform, tenant: str, threshold: float = DUPLICATE_THRESHOLD) ->
                 copy, orig = (pid_b, doc_b), (pid_a, doc_a)
             else:
                 copy, orig = (pid_a, doc_a), (pid_b, doc_b)
-            out.append({"passage_id": copy[0], "dup_of": orig[0], "document_id": copy[1],
-                        "dup_document_id": orig[1], "cosine": round(min(1.0, sim), 6)})
+            out.append(
+                {
+                    "passage_id": copy[0],
+                    "dup_of": orig[0],
+                    "document_id": copy[1],
+                    "dup_document_id": orig[1],
+                    "cosine": round(min(1.0, sim), 6),
+                }
+            )
     out.sort(key=lambda d: (-d["cosine"], d["passage_id"], d["dup_of"]))
     return out
 
@@ -234,6 +293,7 @@ def _pack_for(platform, tenant: str):
     """Ontology pack of the tenant: demo tenant config when known, else the default pack."""
     try:
         from ..tenants.demo import DEMO_TENANTS
+
         for cfg in DEMO_TENANTS:
             if cfg.tenant == tenant:
                 return get_pack(cfg.ontology)
@@ -246,8 +306,10 @@ def _live_passages_by_doc(platform, tenant: str) -> dict[str, list[dict]]:
     _guard(tenant)
     out: dict[str, list[dict]] = {}
     for r in platform.db.query(
-            "SELECT id, document_id, text, coord_locator FROM passages "
-            "WHERE tenant=? AND superseded_by IS NULL ORDER BY id", (tenant,)):
+        "SELECT id, document_id, text, coord_locator FROM passages "
+        "WHERE tenant=? AND superseded_by IS NULL ORDER BY id",
+        (tenant,),
+    ):
         out.setdefault(r["document_id"], []).append(dict(r))
     return out
 
@@ -257,7 +319,8 @@ def _contradictions_by_hash(platform, tenant: str) -> dict[str, int]:
     _guard(tenant)
     out: dict[str, int] = {}
     for r in platform.db.query(
-            "SELECT provenance FROM graph_edges WHERE tenant=? AND conflict_flag=1", (tenant,)):
+        "SELECT provenance FROM graph_edges WHERE tenant=? AND conflict_flag=1", (tenant,)
+    ):
         for prov in _loads(r["provenance"], []) or []:
             h = (prov or {}).get("content_hash")
             if h:
@@ -267,7 +330,7 @@ def _contradictions_by_hash(platform, tenant: str) -> dict[str, int]:
 
 def _node_provenance(platform, tenant: str) -> tuple[set[str], set[tuple[str, str]]]:
     """(content hashes referenced by any graph node,
-        (content_hash, locator-repr) pairs referenced by passage-level provenance)."""
+    (content_hash, locator-repr) pairs referenced by passage-level provenance)."""
     _guard(tenant)
     hashes: set[str] = set()
     located: set[tuple[str, str]] = set()
@@ -284,8 +347,9 @@ def _node_provenance(platform, tenant: str) -> tuple[set[str], set[tuple[str, st
     return hashes, located
 
 
-def _orphan_ratio(doc: dict, passages: list[dict], hashes: set[str],
-                  located: set[tuple[str, str]]) -> float:
+def _orphan_ratio(
+    doc: dict, passages: list[dict], hashes: set[str], located: set[tuple[str, str]]
+) -> float:
     """Share of live passages that no graph node was extracted from."""
     if not passages:
         return 1.0
@@ -332,16 +396,23 @@ def _score(signals: dict, authoritative: bool, n_pass: int) -> float:
     fresh = 1.0 - min(1.0, signals["age_days"] / STALE_DAYS)
     uniq = 1.0 - (signals["duplicate_passages"] / n_pass if n_pass else 1.0)
     consistent = 1.0 if signals["contradiction_flags"] == 0 else 0.0
-    score = (0.25 * cit + 0.15 * fresh + 0.20 * uniq + 0.10 * consistent
-             + 0.10 * signals["readability"] + 0.10 * signals["coverage_contribution"]
-             + 0.10 * (1.0 - signals["orphan_ratio"]))
+    score = (
+        0.25 * cit
+        + 0.15 * fresh
+        + 0.20 * uniq
+        + 0.10 * consistent
+        + 0.10 * signals["readability"]
+        + 0.10 * signals["coverage_contribution"]
+        + 0.10 * (1.0 - signals["orphan_ratio"])
+    )
     if authoritative:
         score += 0.10
     return round(min(1.0, max(0.0, score)), 4)
 
 
-def _suggest(signals: dict, authoritative: bool, n_pass: int,
-             duplicated_by: int = 0) -> tuple[str, list[str]]:
+def _suggest(
+    signals: dict, authoritative: bool, n_pass: int, duplicated_by: int = 0
+) -> tuple[str, list[str]]:
     """Apply the suggestion rules; every fired rule becomes a reason string.
 
     ``duplicated_by`` is informational: how many of this document's passages a
@@ -353,12 +424,16 @@ def _suggest(signals: dict, authoritative: bool, n_pass: int,
     wants_delete = False
 
     if n_pass and dup_share >= DUPLICATE_DELETE_SHARE:
-        reasons.append(f"duplicate: {signals['duplicate_passages']}/{n_pass} passages "
-                       f"({dup_share:.0%}) duplicate another document's content")
+        reasons.append(
+            f"duplicate: {signals['duplicate_passages']}/{n_pass} passages "
+            f"({dup_share:.0%}) duplicate another document's content"
+        )
         wants_delete = True
     if signals["age_days"] > STALE_DAYS and signals["citation_uses"] == 0:
-        reasons.append(f"stale and unused: ingested {signals['age_days']:.0f} days ago "
-                       f"(> {STALE_DAYS}) and never cited")
+        reasons.append(
+            f"stale and unused: ingested {signals['age_days']:.0f} days ago "
+            f"(> {STALE_DAYS}) and never cited"
+        )
         wants_delete = True
 
     if signals["citation_uses"] == 0:
@@ -366,22 +441,33 @@ def _suggest(signals: dict, authoritative: bool, n_pass: int,
     if signals["readability"] < READABILITY_REVIEW:
         reasons.append(f"low readability {signals['readability']:.2f} (< {READABILITY_REVIEW})")
     if signals["contradiction_flags"] > 0:
-        reasons.append(f"{signals['contradiction_flags']} contradiction flag(s) in the knowledge graph")
+        reasons.append(
+            f"{signals['contradiction_flags']} contradiction flag(s) in the knowledge graph"
+        )
     if 0 < signals["duplicate_passages"] and not wants_delete:
-        reasons.append(f"{signals['duplicate_passages']}/{n_pass} passages duplicate another document")
+        reasons.append(
+            f"{signals['duplicate_passages']}/{n_pass} passages duplicate another document"
+        )
     if duplicated_by:
-        reasons.append(f"{duplicated_by}/{n_pass} passages are duplicated by a newer document; "
-                       f"this one is the original{' (authoritative)' if authoritative else ''}")
+        reasons.append(
+            f"{duplicated_by}/{n_pass} passages are duplicated by a newer document; "
+            f"this one is the original{' (authoritative)' if authoritative else ''}"
+        )
     if signals["gap_hits"]:
-        reasons.append(f"near {signals['gap_hits']} unanswered question(s) — expand rather than remove")
+        reasons.append(
+            f"near {signals['gap_hits']} unanswered question(s) — expand rather than remove"
+        )
 
     if wants_delete and authoritative:
         reasons.append("authoritative document: never suggested for deletion, review instead")
         return "review", reasons
     if wants_delete:
         return "delete", reasons
-    review_triggers = (signals["citation_uses"] == 0 or signals["readability"] < READABILITY_REVIEW
-                       or signals["contradiction_flags"] > 0)
+    review_triggers = (
+        signals["citation_uses"] == 0
+        or signals["readability"] < READABILITY_REVIEW
+        or signals["contradiction_flags"] > 0
+    )
     if review_triggers:
         return "review", reasons
     if not reasons:
@@ -389,7 +475,7 @@ def _suggest(signals: dict, authoritative: bool, n_pass: int,
     return "keep", reasons
 
 
-def document_quality(platform, tenant: str, now_ms: Optional[int] = None) -> list[dict]:
+def document_quality(platform, tenant: str, now_ms: int | None = None) -> list[dict]:
     """Per-document signals, score, suggestion and reasons for every active document.
 
     Sorted worst-first: ``delete`` before ``review`` before ``keep``, then ascending
@@ -401,8 +487,8 @@ def document_quality(platform, tenant: str, now_ms: Optional[int] = None) -> lis
     docs = platform.documents.list(tenant)
     usage = citation_usage(platform, tenant)
     dups = duplicates(platform, tenant)
-    dup_passages: dict[str, set[str]] = {}      # copy side: passages that duplicate another doc
-    dup_targets: dict[str, set[str]] = {}       # original side: passages copied by a newer doc
+    dup_passages: dict[str, set[str]] = {}  # copy side: passages that duplicate another doc
+    dup_targets: dict[str, set[str]] = {}  # original side: passages copied by a newer doc
     for d in dups:
         dup_passages.setdefault(d["document_id"], set()).add(d["passage_id"])
         dup_targets.setdefault(d["dup_document_id"], set()).add(d["dup_of"])
@@ -419,27 +505,41 @@ def document_quality(platform, tenant: str, now_ms: Optional[int] = None) -> lis
         text = "\n".join(p["text"] or "" for p in passages)
         tokens = _salient_tokens(text)
         authoritative = bool(int(doc.get("authoritative") or 0))
-        read = (round(sum(readability(p["text"] or "") for p in passages) / n_pass, 4)
-                if n_pass else 0.0)
+        read = (
+            round(sum(readability(p["text"] or "") for p in passages) / n_pass, 4)
+            if n_pass
+            else 0.0
+        )
         signals = {
             "citation_uses": int(usage.get(doc["id"], 0)),
             "age_days": round(max(0, now - int(doc.get("ingested_at") or now)) / _MS_PER_DAY, 2),
             "duplicate_passages": len(dup_passages.get(doc["id"], ())),
             "contradiction_flags": int(contradictions.get(doc.get("content_hash") or "", 0)),
             "readability": read,
-            "coverage_contribution": round(sum(1 for t in vocab if t in tokens) / max(1, len(vocab)), 4),
+            "coverage_contribution": round(
+                sum(1 for t in vocab if t in tokens) / max(1, len(vocab)), 4
+            ),
             "orphan_ratio": _orphan_ratio(doc, passages, hashes, located),
             "gap_hits": _gap_hits(gaps, doc.get("title") or "", tokens),
         }
-        suggestion, reasons = _suggest(signals, authoritative, n_pass,
-                                       duplicated_by=len(dup_targets.get(doc['id'], ())))
-        out.append({
-            "document_id": doc["id"], "title": doc.get("title"), "source": doc.get("source"),
-            "uri": doc.get("uri"), "ingested_at": doc.get("ingested_at"), "passages": n_pass,
-            "authoritative": authoritative, "signals": signals,
-            "score": _score(signals, authoritative, n_pass),
-            "suggestion": suggestion, "reasons": reasons,
-        })
+        suggestion, reasons = _suggest(
+            signals, authoritative, n_pass, duplicated_by=len(dup_targets.get(doc["id"], ()))
+        )
+        out.append(
+            {
+                "document_id": doc["id"],
+                "title": doc.get("title"),
+                "source": doc.get("source"),
+                "uri": doc.get("uri"),
+                "ingested_at": doc.get("ingested_at"),
+                "passages": n_pass,
+                "authoritative": authoritative,
+                "signals": signals,
+                "score": _score(signals, authoritative, n_pass),
+                "suggestion": suggestion,
+                "reasons": reasons,
+            }
+        )
     out.sort(key=lambda d: (_SUGGESTION_RANK[d["suggestion"]], d["score"], d["document_id"]))
     return out
 
@@ -467,20 +567,32 @@ def data_quality(platform, tenant: str) -> dict:
     counts = {"keep": 0, "review": 0, "delete": 0}
     for d in quality:
         counts[d["suggestion"]] += 1
-    readability_avg = (round(sum(d["signals"]["readability"] for d in quality) / n_docs, 4)
-                       if n_docs else 0.0)
+    readability_avg = (
+        round(sum(d["signals"]["readability"] for d in quality) / n_docs, 4) if n_docs else 0.0
+    )
     duplicate_rate = round(dup_pass / n_pass, 4) if n_pass else 0.0
     citation_coverage = round(cited / n_docs, 4) if n_docs else 0.0
 
     if duplicate_rate > 0:
-        risks.append({"risk": "duplicate content", "value": duplicate_rate,
-                      "severity": "high" if duplicate_rate >= 0.25 else "medium"})
+        risks.append(
+            {
+                "risk": "duplicate content",
+                "value": duplicate_rate,
+                "severity": "high" if duplicate_rate >= 0.25 else "medium",
+            }
+        )
     if counts["delete"]:
-        risks.append({"risk": "documents suggested for deletion", "value": counts["delete"],
-                      "severity": "medium"})
+        risks.append(
+            {
+                "risk": "documents suggested for deletion",
+                "value": counts["delete"],
+                "severity": "medium",
+            }
+        )
     if n_docs and citation_coverage < 0.5:
-        risks.append({"risk": "most documents never cited", "value": citation_coverage,
-                      "severity": "medium"})
+        risks.append(
+            {"risk": "most documents never cited", "value": citation_coverage, "severity": "medium"}
+        )
     if n_docs and readability_avg < READABILITY_REVIEW:
         risks.append({"risk": "low readability", "value": readability_avg, "severity": "low"})
 

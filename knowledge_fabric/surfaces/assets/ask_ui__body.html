@@ -1,0 +1,59 @@
+
+<div class="ws" id="ws">
+  <aside class="threads" id="threads" aria-label="Conversations">
+    <button class="btn primary new" id="new-chat">+ New chat</button>
+    <div id="thread-list"></div>
+  </aside>
+
+  <section class="conv" id="conv">
+    <div class="strip" id="corpus-strip" aria-label="Corpus at a glance">
+      <div class="s" data-key="documents"><div class="n" id="tile-documents">0</div><div class="l">Documents</div></div>
+      <div class="s" data-key="passages"><div class="n" id="tile-passages">0</div><div class="l">Passages</div></div>
+      <div class="s" data-key="entities"><div class="n" id="tile-entities">0</div><div class="l">Entities</div></div>
+      <div class="s" data-key="relationships"><div class="n" id="tile-relationships">0</div><div class="l">Relationships</div></div>
+      <div class="s" data-key="domains"><div class="n" id="tile-domains">0</div><div class="l">Domains</div></div>
+    </div>
+
+    <div class="messages" id="messages"></div>
+
+    <div class="composer">
+      <div class="box">
+        <button class="iconbtn" id="mic-btn" type="button" disabled title="Voice arrives with read-aloud (a later step)">&#127908;</button>
+        <textarea id="question" rows="1" placeholder="Ask the knowledge fabric… try 'and' for multistep, 'if … then …' for conditional, 'compare A and B'."></textarea>
+        <button class="btn primary" id="ask-btn" type="button">Send</button>
+      </div>
+      <div class="tools">
+        <span class="langpill" title="Answers match the question's language automatically (EN · FR · ES · JA).">
+          <label class="hint" for="answer-lang">Answer language</label>
+          <select id="answer-lang">
+            <option value="auto">Auto-detect</option>
+            <option value="en">English</option><option value="fr">French</option>
+            <option value="es">Spanish</option><option value="ja">Japanese</option>
+          </select>
+        </span>
+        <button class="iconbtn" id="read-aloud" type="button" disabled title="Read-aloud arrives with voice (a later step)">&#128266;</button>
+        <span class="grow"></span>
+        <span class="hint" id="ask-status"></span>
+      </div>
+    </div>
+  </section>
+
+  <aside class="rail" id="rail" aria-label="Answer detail">
+    <section id="galaxy-section">
+      <h4>Answer galaxy <button class="btn sm" id="explain-btn" disabled>Why did the AI say this?</button></h4>
+      <div class="gx galaxy" id="galaxy"><div class="gx-empty" id="galaxy-empty">Ask a question to light up the graph.</div></div>
+      <div class="gx-stats" id="galaxy-stats"></div>
+    </section>
+    <section id="card-section">
+      <h4>The card</h4>
+      <div class="card-rows" id="answer-card"><div class="placeholder">The answer's reasoning, model, trust and cost appear here.</div></div>
+    </section>
+    <section id="usage-section" class="usage">
+      <h4>My usage <span class="trace-id" id="usage-subject"></span></h4>
+      <div id="usage-body"><div class="placeholder">Sign in to see your questions, tokens and cost.</div></div>
+    </section>
+  </aside>
+</div>
+
+<div class="drawer hidden" id="page-drawer"></div>
+<div class="drawer hidden" id="explain-drawer"></div>

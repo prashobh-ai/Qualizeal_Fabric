@@ -6,13 +6,14 @@ answer, surfaces, governance) can depend on them without depending on any
 concrete adapter. Every type that touches stored data carries ``tenant``
 so tenant isolation (invariant I5) is expressible everywhere.
 """
+
 from __future__ import annotations
 
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
-from enum import Enum
-from typing import Any, Optional
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any
 
 
 def new_id(prefix: str = "") -> str:
@@ -26,17 +27,18 @@ def now_ms() -> int:
 # --------------------------------------------------------------------------
 # Provenance & coordinates (invariant I2: every citation resolves to a place)
 # --------------------------------------------------------------------------
-class CoordinateKind(str, Enum):
-    PAGE_PARAGRAPH = "page_paragraph"   # text documents
-    BBOX = "bbox"                       # scans / images
-    TIMESTAMP = "timestamp"             # audio / video
-    CELL = "cell"                       # tables
-    SYMBOL_LINE = "symbol_line"         # code
+class CoordinateKind(StrEnum):
+    PAGE_PARAGRAPH = "page_paragraph"  # text documents
+    BBOX = "bbox"  # scans / images
+    TIMESTAMP = "timestamp"  # audio / video
+    CELL = "cell"  # tables
+    SYMBOL_LINE = "symbol_line"  # code
 
 
 @dataclass
 class Coordinate:
     """A precise, resolvable location inside a source document."""
+
     kind: CoordinateKind
     # A free-form locator payload interpreted by surfaces to open the exact place.
     # e.g. {"page": 3, "paragraph": 2} or {"start_s": 12.4, "end_s": 18.0}
@@ -59,10 +61,11 @@ class Coordinate:
 @dataclass
 class Provenance:
     """Immutable link from a derived artefact back to its origin (I8)."""
+
     content_hash: str
     source: str
     source_version: str
-    coordinate: Optional[Coordinate] = None
+    coordinate: Coordinate | None = None
 
 
 # --------------------------------------------------------------------------
@@ -71,6 +74,7 @@ class Provenance:
 @dataclass
 class RawItem:
     """A canonical record emitted by any connector or intake door."""
+
     tenant: str
     source: str
     source_version: str
@@ -85,9 +89,10 @@ class RawItem:
 @dataclass
 class Region:
     """A converted, addressable region of a document."""
+
     text: str
     coordinate: Coordinate
-    media_ref: Optional[str] = None
+    media_ref: str | None = None
 
 
 @dataclass
@@ -106,14 +111,14 @@ class Passage:
     tenant: str
     document_id: str
     text: str
-    abstract: str            # one sentence (tiered retrieval)
-    overview: str            # one paragraph
+    abstract: str  # one sentence (tiered retrieval)
+    overview: str  # one paragraph
     coordinate: Coordinate
     provenance: Provenance
     version: int = 1
-    superseded_by: Optional[str] = None
-    embedding_ref: Optional[str] = None
-    lexical_ref: Optional[str] = None
+    superseded_by: str | None = None
+    embedding_ref: str | None = None
+    lexical_ref: str | None = None
 
 
 @dataclass
@@ -154,7 +159,7 @@ class GraphEdge:
     src: str
     dst: str
     relation: str
-    typed_fact: Optional[dict[str, Any]] = None
+    typed_fact: dict[str, Any] | None = None
     weight: float = 1.0
     contextual_weight: float = 0.0
     provenance: list[Provenance] = field(default_factory=list)
@@ -170,7 +175,7 @@ class Candidate:
     lexical_score: float = 0.0
     vector_score: float = 0.0
     fused_score: float = 0.0
-    graph_hops: int = 0     # 0 = came from direct retrieval
+    graph_hops: int = 0  # 0 = came from direct retrieval
     source_of: str = "hybrid"  # hybrid | graph
 
 
@@ -186,7 +191,7 @@ class Citation:
         return f"{self.document_title} ({self.coordinate.render()})"
 
 
-class AnswerKind(str, Enum):
+class AnswerKind(StrEnum):
     ANSWER = "answer"
     CLARIFY = "clarify"
     GAP = "gap"
@@ -195,6 +200,7 @@ class AnswerKind(str, Enum):
 @dataclass
 class Answer:
     """The single output contract of the answer service (Section 10)."""
+
     kind: AnswerKind
     answer_text: str
     citations: list[Citation]
@@ -204,20 +210,20 @@ class Answer:
     tokens: int
     tier: str
     grounding_score: float = 0.0
-    clarify_back: Optional[str] = None
+    clarify_back: str | None = None
     tenant: str = ""
-    level: int = 0                       # model-selector level (1..4)
-    why: Optional[dict] = None           # the why-card (selector decision)
+    level: int = 0  # model-selector level (1..4)
+    why: dict | None = None  # the why-card (selector decision)
     lang: str = "en"
     cache_hit: bool = False
     cost_saved: float = 0.0
     tokens_in: int = 0
     tokens_out: int = 0
-    model_name: str = ""                 # which model ran (multi-model gateway)
-    complexity: str = ""                 # simple | medium | complex
-    authoritative_source: Optional[dict] = None
+    model_name: str = ""  # which model ran (multi-model gateway)
+    complexity: str = ""  # simple | medium | complex
+    authoritative_source: dict | None = None
     dataset_version: int = 0
-    reasoning: Optional[dict] = None     # multistep/conditional trace (Section A)
+    reasoning: dict | None = None  # multistep/conditional trace (Section A)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -239,7 +245,10 @@ class Answer:
                 {
                     "document_id": c.document_id,
                     "document_title": c.document_title,
-                    "coordinate": {"kind": c.coordinate.kind.value, "locator": c.coordinate.locator},
+                    "coordinate": {
+                        "kind": c.coordinate.kind.value,
+                        "locator": c.coordinate.locator,
+                    },
                     "coordinate_render": c.coordinate.render(),
                     "passage_id": c.passage_id,
                     "snippet": c.snippet,
@@ -264,7 +273,7 @@ class Principal:
     subject: str
     tenant: str
     roles: list[str] = field(default_factory=list)
-    scopes: list[str] = field(default_factory=list)   # accessible ACL labels
+    scopes: list[str] = field(default_factory=list)  # accessible ACL labels
     agent: bool = False
 
     def accessible_acls(self) -> list[str]:
@@ -272,7 +281,7 @@ class Principal:
         return sorted(acls)
 
 
-class Decision(str, Enum):
+class Decision(StrEnum):
     ALLOW = "allow"
     DENY = "deny"
     CLARIFY = "clarify"
@@ -295,5 +304,5 @@ class Job:
     payload: dict[str, Any]
     state: str = "pending"
     attempts: int = 0
-    lease: Optional[float] = None
-    dead_letter_reason: Optional[str] = None
+    lease: float | None = None
+    dead_letter_reason: str | None = None

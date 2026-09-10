@@ -1,4 +1,5 @@
 """GraphStore adapter over the SQLite graph tables (managed graph DB in cloud)."""
+
 from __future__ import annotations
 
 from ..contracts.types import GraphEdge, GraphNode

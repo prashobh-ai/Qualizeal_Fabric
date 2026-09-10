@@ -1,11 +1,11 @@
 """Ingestion & connectors checklist (Section 20) + Runbook 8 resilience."""
+
 import time
 import unittest
 
 from knowledge_fabric.app import Platform
-from knowledge_fabric.contracts.types import Job, CoordinateKind, new_id
-from knowledge_fabric.ingestion.intake import Intake, IngestWorker
-from tests.util import seeded
+from knowledge_fabric.contracts.types import CoordinateKind, Job, new_id
+from knowledge_fabric.ingestion.intake import IngestWorker, Intake
 
 
 class TestIngestion(unittest.TestCase):
@@ -19,7 +19,9 @@ class TestIngestion(unittest.TestCase):
         return self.intake.submit(raw)
 
     def test_seven_step_pipeline_produces_passages(self):
-        self._submit("# Title\n\nA requirement is verified by a test case.\n\nCoverage is 95 percent.")
+        self._submit(
+            "# Title\n\nA requirement is verified by a test case.\n\nCoverage is 95 percent."
+        )
         self.worker.drain()
         self.assertGreater(self.p.passages.count("t1"), 0)
 
@@ -27,7 +29,7 @@ class TestIngestion(unittest.TestCase):
         self._submit("same content here about coverage")
         self.worker.drain()
         n1 = self.p.passages.count("t1")
-        self._submit("same content here about coverage")   # identical -> no-op
+        self._submit("same content here about coverage")  # identical -> no-op
         res = self.worker.drain()
         self.assertEqual(res[0]["status"], "noop")
         self.assertEqual(self.p.passages.count("t1"), n1)
@@ -42,7 +44,9 @@ class TestIngestion(unittest.TestCase):
 
     def test_all_modalities_have_resolvable_coordinates(self):
         self._submit("a,b\n1,2\n", uri="file://t.csv", mime="text/csv")
-        self._submit("[00:05] hello world timestamped", uri="file://t.transcript", mime="audio/transcript")
+        self._submit(
+            "[00:05] hello world timestamped", uri="file://t.transcript", mime="audio/transcript"
+        )
         self._submit("def foo():\n    return 1\n", uri="file://c.py", mime="text/x-python")
         self._submit("Scanned paragraph one.\n\nScanned paragraph two.", uri="file://s.ocr.txt")
         self.worker.drain()
@@ -86,10 +90,10 @@ class TestIngestion(unittest.TestCase):
     def test_worker_kill_lease_expiry_reclaims_job(self):
         job = Job(id=new_id("job_"), tenant="t1", kind="ingest", payload={})
         self.p.queue.enqueue("t1", job)
-        leased = self.p.queue.lease("w1", ttl_s=0.05)     # worker dies without ack
+        leased = self.p.queue.lease("w1", ttl_s=0.05)  # worker dies without ack
         self.assertIsNotNone(leased)
         time.sleep(0.08)
-        reclaimed = self.p.queue.lease("w2", ttl_s=5)      # another worker picks it up
+        reclaimed = self.p.queue.lease("w2", ttl_s=5)  # another worker picks it up
         self.assertEqual(reclaimed.id, job.id)
 
     def test_duplicate_storm_processes_once(self):

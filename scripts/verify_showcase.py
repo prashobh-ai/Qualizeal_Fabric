@@ -8,13 +8,13 @@ Fails the CI job if:
 F8.1 will extend this to check every `data/*.json` file the StaticAdapter
 reads is present.
 """
+
 from __future__ import annotations
 
 import argparse
 import os
 import re
 import sys
-
 
 _EXTERNAL = re.compile(r'\b(?:src|href)\s*=\s*["\'](https?://[^"\']+)', re.I)
 
@@ -38,6 +38,7 @@ def verify(directory: str) -> list[str]:
     snap_path = os.path.join(d, "snapshot.json")
     if os.path.isfile(snap_path):
         import json
+
         try:
             snap = json.load(open(snap_path, encoding="utf-8"))
             if not snap.get("login"):

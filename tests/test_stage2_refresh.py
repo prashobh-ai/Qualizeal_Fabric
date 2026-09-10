@@ -1,4 +1,5 @@
 """Stage-2 Section C: pipeline runs, connector admin, continuous refresh scheduler."""
+
 import time
 import unittest
 
@@ -14,15 +15,26 @@ NOW = 4_000_000_000.0
 
 # the seed already synced REL-42/43 (cursor 1730); these are newer → a real delta
 NEW_JIRA = [
-    {"project": "REL", "key": "REL-44", "summary": "Contract tests for refresh scheduler",
-     "status": "Open", "updated": 1800, "acl": ["public"],
-     "description": "The refresh scheduler must ingest Jira issues on an interval and "
-                    "report freshness for the release readiness review."},
+    {
+        "project": "REL",
+        "key": "REL-44",
+        "summary": "Contract tests for refresh scheduler",
+        "status": "Open",
+        "updated": 1800,
+        "acl": ["public"],
+        "description": "The refresh scheduler must ingest Jira issues on an interval and "
+        "report freshness for the release readiness review.",
+    },
 ]
 NEW_GITHUB = [
-    {"repo": "qualizeal/kf-platform", "path": "docs/refresh.md", "updated_at": 1800,
-     "commit": "0f0f0f", "mime": "text/markdown",
-     "content": "# Refresh\n\nConnectors are refreshed on a schedule; a failing sync backs off."},
+    {
+        "repo": "qualizeal/kf-platform",
+        "path": "docs/refresh.md",
+        "updated_at": 1800,
+        "commit": "0f0f0f",
+        "mime": "text/markdown",
+        "content": "# Refresh\n\nConnectors are refreshed on a schedule; a failing sync backs off.",
+    },
 ]
 
 
@@ -62,7 +74,7 @@ class TestRuns(Base):
         self.assertEqual([s["name"] for s in run["stages"]], ["detect", "embed"])
         self.assertEqual(stages["detect"]["count"], 2)
         self.assertEqual(stages["detect"]["ms"], 2.0)
-        self.assertEqual(stages["detect"]["status"], "ok")      # ok beats skipped
+        self.assertEqual(stages["detect"]["status"], "ok")  # ok beats skipped
         self.assertEqual(stages["detect"]["entries"], 2)
         self.assertEqual(runs.active_runs(self.p, T), [])
         self.assertEqual(runs.get_run(self.p, T, rid)["items"], 2)
@@ -79,13 +91,13 @@ class TestRuns(Base):
         with self.assertRaises(ValueError):
             runs.finish(self.p, rid, "running", 0)
         runs.finish(self.p, rid, "error", 0)
-        with self.assertRaises(KeyError):          # registry entry released on finish
+        with self.assertRaises(KeyError):  # registry entry released on finish
             runs.step(self.p, rid, "detect", "ok")
-        with self.assertRaises(ValueError):        # addressed explicitly: already finished
+        with self.assertRaises(ValueError):  # addressed explicitly: already finished
             runs.step(self.p, rid, "detect", "ok", tenant=T)
         with self.assertRaises(ValueError):
             runs.finish(self.p, rid, "ok", 0, tenant=T)
-        with self.assertRaises(KeyError):          # wrong tenant cannot touch the run
+        with self.assertRaises(KeyError):  # wrong tenant cannot touch the run
             runs.finish(self.p, rid, "ok", 0, tenant=OTHER)
         with self.assertRaises(PermissionError):
             runs.start_run(self.p, "", "jira")
@@ -109,8 +121,9 @@ class TestRuns(Base):
         runs.finish(self.p, rid, "ok", 1)
         run = runs.get_run(self.p, T, rid)
         names = [(s["name"], s["status"]) for s in run["steps"]]
-        self.assertEqual(names, [("detect", "ok"), ("convert", "ok"), ("detect", "skipped"),
-                                 ("embed", "error")])
+        self.assertEqual(
+            names, [("detect", "ok"), ("convert", "ok"), ("detect", "skipped"), ("embed", "error")]
+        )
         stages = {s["name"]: s["status"] for s in run["stages"]}
         self.assertEqual(stages, {"detect": "ok", "convert": "ok", "embed": "error"})
         # the hook may be handed the telemetry adapter (has .db) instead of the platform
@@ -128,7 +141,7 @@ class TestRuns(Base):
             ids.append(rid)
         other = runs.start_run(self.p, OTHER, "files")
         listed = runs.list_runs(self.p, T)
-        self.assertEqual([r["id"] for r in listed], list(reversed(ids)))   # newest first
+        self.assertEqual([r["id"] for r in listed], list(reversed(ids)))  # newest first
         self.assertEqual(len(runs.list_runs(self.p, T, limit=2)), 2)
         self.assertEqual([r["id"] for r in runs.list_runs(self.p, OTHER)], [other])
         self.assertEqual([r["id"] for r in runs.active_runs(self.p, OTHER)], [other])
@@ -144,7 +157,7 @@ class TestConnectorAdmin(Base):
     def test_defaults_when_unconfigured(self):
         self.assertIsNone(admin.get(self.p, T, "jira"))
         self.assertTrue(admin.is_enabled(self.p, T, "jira"))
-        self.assertTrue(admin.is_enabled(self.p, T, "confluence"))     # unknown → enabled
+        self.assertTrue(admin.is_enabled(self.p, T, "confluence"))  # unknown → enabled
         listed = admin.list_all(self.p, T)
         self.assertEqual([c["source"] for c in listed], registry.available())
         jira = next(c for c in listed if c["source"] == "jira")
@@ -155,17 +168,25 @@ class TestConnectorAdmin(Base):
         self.assertEqual(jira["scopes"], ["jira:read"])
         self.assertEqual(jira["declared_scopes"], ["jira:read"])
         self.assertIsNone(jira["updated_at"])
-        self.assertEqual(admin.effective_config(self.p, T, "jira", {"projects": ["REL"]}),
-                         {"projects": ["REL"]})
+        self.assertEqual(
+            admin.effective_config(self.p, T, "jira", {"projects": ["REL"]}), {"projects": ["REL"]}
+        )
         self.assertTrue(admin.check_scopes(self.p, T, "jira")["ok"])
 
     def test_upsert_disable_partial_update_and_audit(self):
-        rec = admin.upsert(self.p, T, "jira", enabled=False, allow=["REL", "REL"],
-                           config={"base_url": "https://jira.example.com"}, by_subject="admin")
+        rec = admin.upsert(
+            self.p,
+            T,
+            "jira",
+            enabled=False,
+            allow=["REL", "REL"],
+            config={"base_url": "https://jira.example.com"},
+            by_subject="admin",
+        )
         self.assertFalse(rec["enabled"])
-        self.assertEqual(rec["allow"], ["REL"])                 # de-duplicated, order kept
+        self.assertEqual(rec["allow"], ["REL"])  # de-duplicated, order kept
         self.assertEqual(rec["config"], {"base_url": "https://jira.example.com"})
-        self.assertEqual(rec["scopes"], ["jira:read"])           # declared scopes by default
+        self.assertEqual(rec["scopes"], ["jira:read"])  # declared scopes by default
         self.assertIsNotNone(rec["updated_at"])
         self.assertTrue(rec["registered"])
         self.assertFalse(admin.is_enabled(self.p, T, "jira"))
@@ -177,9 +198,15 @@ class TestConnectorAdmin(Base):
         self.assertEqual(admin.disable(self.p, T, "jira")["enabled"], False)
         self.assertEqual(admin.enable(self.p, T, "jira")["enabled"], True)
         stored = admin.get(self.p, T, "jira")
-        self.assertEqual({k: stored[k] for k in ("enabled", "allow", "config", "scopes")},
-                         {"enabled": True, "allow": ["REL"],
-                          "config": {"base_url": "https://jira.example.com"}, "scopes": ["jira:read"]})
+        self.assertEqual(
+            {k: stored[k] for k in ("enabled", "allow", "config", "scopes")},
+            {
+                "enabled": True,
+                "allow": ["REL"],
+                "config": {"base_url": "https://jira.example.com"},
+                "scopes": ["jira:read"],
+            },
+        )
         audit = [a for a in self.p.audit.for_tenant(T) if a["action"] == "connector.upsert"]
         self.assertEqual(len(audit), 4)
         self.assertEqual(audit[-1]["subject"], "admin")
@@ -188,7 +215,9 @@ class TestConnectorAdmin(Base):
         self.assertEqual(audit[0]["decision"], "enabled")
 
     def test_list_all_merges_registry_and_configured(self):
-        admin.upsert(self.p, T, "confluence", enabled=True, allow=["QA"], scopes=["confluence:read"])
+        admin.upsert(
+            self.p, T, "confluence", enabled=True, allow=["QA"], scopes=["confluence:read"]
+        )
         admin.upsert(self.p, T, "github", allow=["qualizeal/kf-platform"])
         listed = {c["source"]: c for c in admin.list_all(self.p, T)}
         self.assertEqual(sorted(listed), sorted(set(registry.available()) | {"confluence"}))
@@ -197,20 +226,30 @@ class TestConnectorAdmin(Base):
         self.assertEqual(listed["confluence"]["scopes"], ["confluence:read"])
         self.assertTrue(listed["github"]["registered"])
         self.assertEqual(listed["github"]["allow"], ["qualizeal/kf-platform"])
-        self.assertTrue(listed["files"]["enabled"])           # untouched registry entry
+        self.assertTrue(listed["files"]["enabled"])  # untouched registry entry
 
     def test_effective_config_applies_admin_allow_list_last(self):
-        admin.upsert(self.p, T, "github", config={"token_ref": "secret://gh"},
-                     allow=["qualizeal/kf-platform"])
-        cfg = admin.effective_config(self.p, T, "github", {"repos": ["qualizeal/other-repo"], "depth": 2})
-        self.assertEqual(cfg, {"token_ref": "secret://gh", "depth": 2,
-                               "repos": ["qualizeal/kf-platform"]})
+        admin.upsert(
+            self.p,
+            T,
+            "github",
+            config={"token_ref": "secret://gh"},
+            allow=["qualizeal/kf-platform"],
+        )
+        cfg = admin.effective_config(
+            self.p, T, "github", {"repos": ["qualizeal/other-repo"], "depth": 2}
+        )
+        self.assertEqual(
+            cfg, {"token_ref": "secret://gh", "depth": 2, "repos": ["qualizeal/kf-platform"]}
+        )
         self.assertEqual(admin.allow_key("jira"), "projects")
         self.assertEqual(admin.allow_key("confluence"), "allow")
         # an empty admin allow-list imposes no restriction
         admin.upsert(self.p, T, "github", allow=[])
-        self.assertEqual(admin.effective_config(self.p, T, "github", {"repos": ["qualizeal/other-repo"]}),
-                         {"token_ref": "secret://gh", "repos": ["qualizeal/other-repo"]})
+        self.assertEqual(
+            admin.effective_config(self.p, T, "github", {"repos": ["qualizeal/other-repo"]}),
+            {"token_ref": "secret://gh", "repos": ["qualizeal/other-repo"]},
+        )
 
     def test_check_scopes_reports_missing(self):
         admin.upsert(self.p, T, "jira", scopes=[])
@@ -249,14 +288,25 @@ class TestConnectorAdmin(Base):
 # ==========================================================================
 class TestScheduler(Base):
     def _schedule_jira(self, now=NOW, interval=INTERVAL, enabled=True):
-        return scheduler.set_schedule(self.p, T, "jira", interval, {"projects": ["REL"]},
-                                      enabled=enabled, now=now)
+        return scheduler.set_schedule(
+            self.p, T, "jira", interval, {"projects": ["REL"]}, enabled=enabled, now=now
+        )
 
     def test_set_schedule_and_due(self):
         s = self._schedule_jira()
-        self.assertEqual(s, {"source": "jira", "interval_s": INTERVAL, "next_run": NOW,
-                             "last_run": None, "last_status": None, "error_count": 0,
-                             "enabled": True, "config": {"projects": ["REL"]}})
+        self.assertEqual(
+            s,
+            {
+                "source": "jira",
+                "interval_s": INTERVAL,
+                "next_run": NOW,
+                "last_run": None,
+                "last_status": None,
+                "error_count": 0,
+                "enabled": True,
+                "config": {"projects": ["REL"]},
+            },
+        )
         self.assertEqual(scheduler.due(self.p, T, NOW - 1), [])
         self.assertEqual(scheduler.due(self.p, T, NOW), ["jira"])
         listed = scheduler.schedules(self.p, T)
@@ -319,7 +369,7 @@ class TestScheduler(Base):
         # health: fresh, within SLA, cumulative items from the connector cursor
         h = {x["source"]: x for x in scheduler.health(self.p, T, now=NOW + 60)}
         self.assertIn("jira", h)
-        self.assertIn("github", h)                     # synced by the seed → has a cursor
+        self.assertIn("github", h)  # synced by the seed → has a cursor
         j = h["jira"]
         self.assertTrue(j["enabled"])
         self.assertEqual(j["freshness_minutes"], 1.0)
@@ -327,7 +377,7 @@ class TestScheduler(Base):
         self.assertEqual(j["error_count"], 0)
         self.assertEqual(j["next_run"], NOW + INTERVAL)
         self.assertEqual(j["interval_s"], INTERVAL)
-        self.assertEqual(j["items"], 3)                # 2 from the seed + 1 now
+        self.assertEqual(j["items"], 3)  # 2 from the seed + 1 now
         self.assertFalse(j["sla_breach"])
         # an unscheduled-but-synced source has no SLA
         self.assertFalse(h["github"]["enabled"])
@@ -345,10 +395,10 @@ class TestScheduler(Base):
         self.assertEqual(results[0]["status"], "skipped")
         self.assertEqual(results[0]["reason"], "connector disabled")
         self.assertIsNone(results[0]["run_id"])
-        self.assertEqual(runs.list_runs(self.p, T), [])                     # no run opened
+        self.assertEqual(runs.list_runs(self.p, T), [])  # no run opened
         self.assertIsNone(self.p.documents.by_source_uri(T, "jira", "jira://REL/REL-44"))
         s = scheduler.get_schedule(self.p, T, "jira")
-        self.assertEqual(s["next_run"], NOW + INTERVAL)                     # still advances
+        self.assertEqual(s["next_run"], NOW + INTERVAL)  # still advances
         self.assertIsNone(s["last_run"])
         self.assertEqual(s["last_status"], "skipped:connector disabled")
         h = next(x for x in scheduler.health(self.p, T, now=NOW) if x["source"] == "jira")
@@ -364,7 +414,7 @@ class TestScheduler(Base):
     def test_error_path_increments_error_count_and_backs_off(self):
         # 'confluence' is not registered → SyncManager raises inside the run
         scheduler.set_schedule(self.p, T, "confluence", INTERVAL, {}, now=NOW)
-        expected_factor = [2, 3, 4, 4, 4]           # min(4, 1 + error_count)
+        expected_factor = [2, 3, 4, 4, 4]  # min(4, 1 + error_count)
         now = NOW
         for i, factor in enumerate(expected_factor, start=1):
             with self.assertLogs("knowledge_fabric.refresh", level="WARNING") as logged:
@@ -382,7 +432,7 @@ class TestScheduler(Base):
             self.assertTrue(s["last_status"].startswith("error:"))
             self.assertIn("unknown connector", s["last_status"])
             self.assertEqual(s["next_run"], now + INTERVAL * factor)
-            self.assertIsNone(s["last_run"])                       # never succeeded
+            self.assertIsNone(s["last_run"])  # never succeeded
             self.assertEqual(scheduler.due(self.p, T, s["next_run"] - 1), [])
             now = s["next_run"]
         listed = runs.list_runs(self.p, T)
@@ -393,7 +443,7 @@ class TestScheduler(Base):
         h = next(x for x in scheduler.health(self.p, T, now=now) if x["source"] == "confluence")
         self.assertIsNone(h["freshness_minutes"])
         self.assertEqual(h["error_count"], 5)
-        self.assertTrue(h["sla_breach"])              # enabled, never succeeded, failing
+        self.assertTrue(h["sla_breach"])  # enabled, never succeeded, failing
         # editing the schedule re-arms it (clears the back-off) but keeps the error history
         s = scheduler.set_schedule(self.p, T, "confluence", 60, {}, now=now)
         self.assertEqual(s["next_run"], now)
@@ -401,7 +451,7 @@ class TestScheduler(Base):
 
     def test_admin_allow_list_enforced_on_scheduled_sync(self):
         self._schedule_jira()
-        admin.upsert(self.p, T, "jira", allow=["OTHER"])       # REL is not allowed any more
+        admin.upsert(self.p, T, "jira", allow=["OTHER"])  # REL is not allowed any more
         r = scheduler.run_due(self.p, T, NOW, {"jira": NEW_JIRA})[0]
         self.assertEqual((r["status"], r["pulled"], r["ingested"]), ("ok", 0, 0))
         self.assertIsNone(self.p.documents.by_source_uri(T, "jira", "jira://REL/REL-44"))
@@ -409,9 +459,12 @@ class TestScheduler(Base):
     def test_health_sla_breach_after_stale_interval(self):
         self._schedule_jira()
         scheduler.run_due(self.p, T, NOW, {"jira": NEW_JIRA})
-        at = lambda now: next(x for x in scheduler.health(self.p, T, now=now) if x["source"] == "jira")
-        self.assertFalse(at(NOW + INTERVAL)["sla_breach"])              # 10 min < 20 min
-        self.assertFalse(at(NOW + 2 * INTERVAL)["sla_breach"])          # exactly 2× is not a breach
+
+        def at(now):
+            return next(x for x in scheduler.health(self.p, T, now=now) if x["source"] == "jira")
+
+        self.assertFalse(at(NOW + INTERVAL)["sla_breach"])  # 10 min < 20 min
+        self.assertFalse(at(NOW + 2 * INTERVAL)["sla_breach"])  # exactly 2× is not a breach
         stale = at(NOW + 3 * INTERVAL)
         self.assertEqual(stale["freshness_minutes"], 30.0)
         self.assertTrue(stale["sla_breach"])
@@ -422,19 +475,28 @@ class TestScheduler(Base):
         admin.disable(self.p, T, "jira")
         self.assertFalse(at(NOW + 3 * INTERVAL)["sla_breach"])
         # health_for gives a neutral card for a never-seen source
-        self.assertEqual(scheduler.health_for(self.p, T, "sharepoint", now=NOW)["freshness_minutes"], None)
+        self.assertEqual(
+            scheduler.health_for(self.p, T, "sharepoint", now=NOW)["freshness_minutes"], None
+        )
         self.assertFalse(scheduler.health_for(self.p, T, "sharepoint", now=NOW)["sla_breach"])
-        self.assertEqual(scheduler.health_for(self.p, T, "jira", now=NOW + 60)["freshness_minutes"], 1.0)
+        self.assertEqual(
+            scheduler.health_for(self.p, T, "jira", now=NOW + 60)["freshness_minutes"], 1.0
+        )
 
     def test_sync_now_with_and_without_schedule(self):
         # without a schedule: runs, records a run, touches no schedule
-        r = scheduler.sync_now(self.p, T, "github", {"repos": ["qualizeal/kf-platform"]},
-                               records=NEW_GITHUB, now=NOW)
+        r = scheduler.sync_now(
+            self.p, T, "github", {"repos": ["qualizeal/kf-platform"]}, records=NEW_GITHUB, now=NOW
+        )
         self.assertEqual((r["status"], r["ingested"]), ("ok", 1))
         self.assertIsNone(r["next_run"])
         self.assertEqual(runs.get_run(self.p, T, r["run_id"])["source"], "github")
         self.assertIsNone(scheduler.get_schedule(self.p, T, "github"))
-        self.assertIsNotNone(self.p.documents.by_source_uri(T, "github", "github://qualizeal/kf-platform/docs/refresh.md"))
+        self.assertIsNotNone(
+            self.p.documents.by_source_uri(
+                T, "github", "github://qualizeal/kf-platform/docs/refresh.md"
+            )
+        )
         # with a schedule: behaves like a due run (last_run/next_run updated)
         self._schedule_jira()
         r2 = scheduler.sync_now(self.p, T, "jira", records=NEW_JIRA, now=NOW + 5)
@@ -453,7 +515,7 @@ class TestScheduler(Base):
         self.assertEqual(scheduler.schedules(self.p, OTHER), [])
         self.assertEqual(scheduler.due(self.p, OTHER, NOW), [])
         self.assertEqual(scheduler.run_due(self.p, OTHER, NOW, {"jira": NEW_JIRA}), [])
-        self.assertEqual(scheduler.health(self.p, OTHER, now=NOW), [])   # no schedules, no cursors
+        self.assertEqual(scheduler.health(self.p, OTHER, now=NOW), [])  # no schedules, no cursors
         self.assertEqual(runs.list_runs(self.p, OTHER), [])
         self.assertIsNone(self.p.documents.by_source_uri(OTHER, "jira", "jira://REL/REL-44"))
         self.assertEqual(scheduler.get_schedule(self.p, T, "jira")["next_run"], NOW)  # untouched
@@ -467,9 +529,12 @@ class TestScheduler(Base):
         loop = scheduler.RefreshLoop(self.p, T, tick_s=0.02, records_by_source={"jira": NEW_JIRA})
         self.assertFalse(loop.running)
         self.assertTrue(loop.start())
-        self.assertFalse(loop.start())                       # already running
+        self.assertFalse(loop.start())  # already running
         deadline = time.time() + 5
-        while time.time() < deadline and self.p.documents.by_source_uri(T, "jira", "jira://REL/REL-44") is None:
+        while (
+            time.time() < deadline
+            and self.p.documents.by_source_uri(T, "jira", "jira://REL/REL-44") is None
+        ):
             time.sleep(0.01)
         self.assertTrue(loop.stop(timeout=5))
         self.assertFalse(loop.running)

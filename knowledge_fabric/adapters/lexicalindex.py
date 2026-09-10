@@ -5,12 +5,17 @@ filter is applied while building the candidate set (I6); tenant scoping is in
 the SQL (I5). Demo-scale simple; the contract is identical to the cloud
 adapter that pushes this into the database engine.
 """
+
 from __future__ import annotations
 
 import json
 import math
 import re
 from collections import Counter
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..stores.db import Database
 
 _TOKEN = re.compile(r"[a-z0-9]+")
 
@@ -20,7 +25,7 @@ def _tok(s: str) -> list[str]:
 
 
 class SqlLexicalIndex:
-    def __init__(self, db: Database):  # type: ignore[name-defined]
+    def __init__(self, db: Database):
         self.db = db
 
     def index(self, tenant: str, passages) -> None:
@@ -32,20 +37,21 @@ class SqlLexicalIndex:
 
     def search(self, tenant: str, query: str, k: int, acl: list[str]) -> list[tuple[str, float]]:
         rows = self.db.query(
-            "SELECT id, text, acl FROM passages WHERE tenant=? AND superseded_by IS NULL", (tenant,))
+            "SELECT id, text, acl FROM passages WHERE tenant=? AND superseded_by IS NULL", (tenant,)
+        )
         docs = []
         for r in rows:
-            if not (set(json.loads(r["acl"])) & set(acl)):   # pre-rank permission filter
+            if not (set(json.loads(r["acl"])) & set(acl)):  # pre-rank permission filter
                 continue
             docs.append((r["id"], _tok(r["text"])))
         if not docs:
             return []
-        N = len(docs)
+        n = len(docs)
         df = Counter()
         for _, toks in docs:
             for t in set(toks):
                 df[t] += 1
-        avgdl = sum(len(toks) for _, toks in docs) / N
+        avgdl = sum(len(toks) for _, toks in docs) / n
         q = _tok(query)
         k1, b = 1.5, 0.75
         scored = []
@@ -56,7 +62,7 @@ class SqlLexicalIndex:
             for term in q:
                 if term not in tf:
                     continue
-                idf = math.log(1 + (N - df[term] + 0.5) / (df[term] + 0.5))
+                idf = math.log(1 + (n - df[term] + 0.5) / (df[term] + 0.5))
                 denom = tf[term] + k1 * (1 - b + b * dl / avgdl)
                 score += idf * (tf[term] * (k1 + 1)) / denom
             if score > 0:

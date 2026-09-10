@@ -1,4 +1,5 @@
 """WS2 · UNDERSTAND & DECIDE — model selector "why", escalation, cache, i18n."""
+
 import unittest
 
 from knowledge_fabric.answer import lang, selector
@@ -10,8 +11,11 @@ from tests.util import seeded
 
 class _P:  # minimal candidate stand-in for selector unit tests
     class _Pas:
-        def __init__(self, d): self.document_id = d
-    def __init__(self, d): self.passage = self._Pas(d)
+        def __init__(self, d):
+            self.document_id = d
+
+    def __init__(self, d):
+        self.passage = self._Pas(d)
 
 
 class TestDecide(unittest.TestCase):
@@ -24,7 +28,9 @@ class TestDecide(unittest.TestCase):
         lookup = selector.classify("what is the coverage target", [_P("d1")], 0.8, False)
         self.assertEqual(lookup["level_name"], "lookup")
         self.assertTrue(lookup["reasons"] and lookup["explain"])
-        reason = selector.classify("why does an open defect block a release", [_P("d1")], 0.7, False)
+        reason = selector.classify(
+            "why does an open defect block a release", [_P("d1")], 0.7, False
+        )
         self.assertEqual(reason["level_name"], "reason")
         multi = selector.classify("what changed", [_P("a"), _P("b"), _P("c")], 0.7, True)
         self.assertGreaterEqual(multi["level"], 2)
@@ -46,7 +52,7 @@ class TestDecide(unittest.TestCase):
 
     def test_answer_cache_saves_cost(self):
         q = "what is the acceptance criteria for coverage?"
-        a1 = self.svc.ask(self.asker, q)
+        self.svc.ask(self.asker, q)
         a2 = self.svc.ask(self.asker, q)
         self.assertTrue(a2.cache_hit)
         self.assertGreater(a2.cost_saved, 0)

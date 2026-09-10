@@ -14,6 +14,7 @@ Layers:
   5. prompt_memory     — provider prompt-cache discount on the repeated system
                          preamble (the model's own prompt memory)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -32,7 +33,7 @@ def _key(*parts) -> str:
 
 
 class Cache:
-    PROMPT_DISCOUNT = 0.9   # provider prompt-cache: cached input tokens ~90% cheaper
+    PROMPT_DISCOUNT = 0.9  # provider prompt-cache: cached input tokens ~90% cheaper
 
     def __init__(self):
         self.answer: dict = {}
@@ -40,7 +41,7 @@ class Cache:
         self.embedding: dict = {}
         self.graph: dict = {}
         self._prompt_seen: set = set()
-        self._tenant_keys: dict = {}   # tenant -> {(store, key)} for invalidation
+        self._tenant_keys: dict = {}  # tenant -> {(store, key)} for invalidation
         self.stats = {"answer": 0, "retrieval": 0, "embedding": 0, "graph": 0, "prompt_memory": 0}
 
     def _track(self, tenant, store, key):

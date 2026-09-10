@@ -1,0 +1,15 @@
+
+<div class="section-title">Documents <span class="pill" id="doc-count"></span><span class="pill info" id="doc-dataset"></span>
+  <button class="btn sm" id="doc-refresh" style="margin-left:auto">Refresh</button></div>
+<div class="card" id="documents-card">
+  <div class="filterbar">
+    <label class="muted small">Show</label>
+    <select id="doc-filter"><option value="">all suggestions</option><option value="keep">keep</option><option value="review">review</option><option value="delete">delete</option></select>
+    <input id="doc-search" placeholder="filter by title, source or uri">
+    <span class="muted small" id="doc-shown"></span>
+  </div>
+  <div class="tablewrap"><table id="doc-table">
+    <thead><tr><th>Document</th><th>Source</th><th>Passages</th><th>Score</th><th>Suggestion &amp; reasons</th><th>Actions</th></tr></thead>
+    <tbody id="doc-rows"><tr><td colspan="6" class="empty">—</td></tr></tbody>
+  </table></div>
+</div>

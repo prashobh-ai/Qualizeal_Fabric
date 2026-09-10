@@ -1,0 +1,128 @@
+
+const {$,esc,num,toast,gate,api,ms,when,ago}=KF;
+const PIPELINE=['detect','convert','chunk','extract','graph','embed','health'];
+let BATCH=[],POLL=null,FORCE=0,SOURCES=[];
+
+// ---------------------------------------------------------------- connectors
+function healthBadge(h){if(!h||h.last_run==null&&!h.interval_s)return '<span class="pill">never synced</span>';
+ if(h.sla_breach)return '<span class="pill bad">SLA BREACH</span>';
+ if((h.last_status||'').startsWith('error'))return '<span class="pill bad">error</span>';
+ if(h.error_count>0)return '<span class="pill warn">'+h.error_count+' error(s)</span>';
+ return '<span class="pill good">healthy</span>'}
+
+function connCard(c){const h=c.health||{};const sched=h.interval_s||'';
+ return '<div class="conn-card'+(h.sla_breach?' breach':'')+(c.enabled?'':' off')+'" data-source="'+esc(c.source)+'">'+
+  '<h4>'+esc(c.source)+(c.registered?'':' <span class="pill warn" title="configured but no connector module registered">unregistered</span>')+
+   '<span style="margin-left:auto">'+healthBadge(h)+'</span>'+
+   '<label class="switch" title="enable / disable"><input type="checkbox" data-role="enabled" '+(c.enabled?'checked':'')+'><i></i></label></h4>'+
+  '<div class="hl"><span>freshness</span><span class="mono">'+(h.freshness_minutes==null?'—':h.freshness_minutes+' min')+'</span>'+
+   '<span>last status</span><span class="mono">'+esc(h.last_status||'—')+'</span>'+
+   '<span>items</span><span class="mono">'+num(h.items)+'</span><span>errors</span><span class="mono">'+num(h.error_count)+'</span>'+
+   '<span>next run</span><span class="mono">'+(h.next_run?esc(when(h.next_run)):'not scheduled')+'</span>'+
+   '<span>scopes</span><span class="mono">'+esc((c.scopes||[]).join(', ')||'—')+'</span></div>'+
+  '<label>Allow-list (comma separated projects / repos / paths; empty = everything the scopes permit)</label>'+
+  '<input type="text" data-role="allow" value="'+esc((c.allow||[]).join(', '))+'">'+
+  '<div class="row" style="margin-top:8px"><label>Refresh every</label><input type="number" data-role="interval" min="30" step="30" value="'+esc(sched)+'" placeholder="seconds"><span class="muted small">s</span>'+
+   '<button class="btn sm" data-act="save">Save</button><button class="btn sm primary" data-act="sync" '+(c.enabled?'':'disabled')+'>Sync now</button></div>'+
+  '</div>'}
+
+function renderConnectors(list){SOURCES=list.map(c=>c.source);
+ $('#connectors').innerHTML=list.map(connCard).join('')||'<div class="empty">no connectors registered</div>';
+ KF.$$('#connectors .conn-card').forEach(card=>{const source=card.dataset.source;
+  card.querySelector('[data-role=enabled]').onchange=e=>saveConnector(source,{enabled:e.target.checked});
+  card.querySelector('[data-act=save]').onclick=()=>{const allow=card.querySelector('[data-role=allow]').value.split(',').map(s=>s.trim()).filter(Boolean);
+   const iv=card.querySelector('[data-role=interval]').value;const body={allow,enabled:card.querySelector('[data-role=enabled]').checked};if(iv)body.interval_s=+iv;saveConnector(source,body)};
+  card.querySelector('[data-act=sync]').onclick=()=>syncNow(source)});
+ const sel=$('#authority-source');const cur=sel.value;sel.innerHTML='';SOURCES.forEach(s=>{const o=document.createElement('option');o.value=o.text=s;sel.add(o)});if(cur)sel.value=cur}
+
+async function loadConnectors(){try{const d=await api('/admin/connectors');gate(null);renderConnectors(d.connectors||[])}
+ catch(e){gate(e,'admin');if(e.status!==401&&e.status!==403)toast(e.message,'bad');throw e}}
+
+async function saveConnector(source,body){try{const out=await api('/admin/connectors',{method:'POST',body:Object.assign({source},body)});
+ toast(source+' saved · '+(out.connector.enabled?'enabled':'disabled')+(body.interval_s?' · every '+body.interval_s+' s':''),'good');await loadConnectors()}catch(e){toast(e.message,'bad')}}
+
+async function syncNow(source){try{$('#runs-status').textContent='syncing '+source+'…';FORCE=4;schedulePoll();
+ const out=await api('/admin/sync',{method:'POST',body:{source}});
+ toast(source+': pulled '+num(out.pulled)+', ingested '+num(out.ingested)+', tombstoned '+num(out.tombstoned)+' · '+out.status,out.status==='ok'?'good':'warn');
+ await Promise.all([loadConnectors(),loadRuns(),loadAudit()])}catch(e){toast(e.message,'bad');$('#runs-status').textContent=e.message}}
+
+async function runDue(){try{const out=await api('/admin/refresh/run-due',{method:'POST',body:{}});FORCE=3;schedulePoll();
+ toast((out.ran||[]).length+' due source(s) refreshed','good');await Promise.all([loadConnectors(),loadRuns()])}catch(e){toast(e.message,'bad')}}
+
+// ---------------------------------------------------------------- pipeline runs
+function stageChips(run){const byName={};(run.stages||[]).forEach(s=>byName[s.name]=s);
+ const chip=(name,s)=>'<span class="stage '+(s?esc(s.status):'pending')+'" title="'+(s?esc(s.count+' item(s) · '+ms(s.ms)+(s.detail?' · '+s.detail:'')):'not reached')+'">'+esc(name)+(s?' · '+num(s.count):'')+'</span>';
+ const extras=(run.stages||[]).filter(s=>PIPELINE.indexOf(s.name)<0);
+ return '<div class="stages">'+PIPELINE.map(n=>chip(n,byName[n])).join('')+(extras.length?'<span class="muted small" style="margin:0 4px">|</span>'+extras.map(s=>chip(s.name,s)).join(''):'')+'</div>'}
+
+function runRow(r){const st=r.status==='running'?'<span class="pill info">running</span>':r.status==='ok'?'<span class="pill good">ok</span>':'<span class="pill bad">'+esc(r.status)+'</span>';
+ return '<div class="run"><div class="meta">'+st+'<b>'+esc(r.source)+'</b><span class="mono">'+esc(r.id)+'</span><span>'+num(r.items)+' item(s)</span><span>'+(r.duration_ms==null?'…':ms(r.duration_ms))+'</span><span>'+esc(ago(r.started_at))+'</span></div>'+stageChips(r)+'</div>'}
+
+async function loadRuns(){try{const d=await api('/admin/runs?limit=12');const runs=d.runs||[];
+ $('#runs').className=runs.length?'':'empty';$('#runs').innerHTML=runs.map(runRow).join('')||'No pipeline runs yet — press "Sync now" on a connector or upload a batch.';
+ const active=runs.some(r=>r.status==='running');$('#runs-live').className='dot'+(active||FORCE>0?' live':'');
+ if(!active&&FORCE<=0)$('#runs-status').textContent=runs.length?'last run '+ago(runs[0].started_at)+' · idle':'idle';
+ else $('#runs-status').textContent=active?'run in progress — polling every 2 s':'polling…';
+ return active}catch(e){return false}}
+
+function schedulePoll(){if(POLL)return;POLL=setInterval(async()=>{const active=await loadRuns();if(FORCE>0)FORCE--;if(!active&&FORCE<=0){clearInterval(POLL);POLL=null;$('#runs-live').className='dot'}},2000)}
+
+// ---------------------------------------------------------------- bulk upload / delete
+function renderBatch(){$('#upload-batch').innerHTML=BATCH.map((f,i)=>'<li><b>'+esc(f.filename)+'</b> <span class="muted">'+f.text.length+' chars · '+esc(f.acl.join(','))+'</span> <a href="#" data-i="'+i+'">remove</a></li>').join('');
+ KF.$$('#upload-batch a').forEach(a=>a.onclick=e=>{e.preventDefault();BATCH.splice(+a.dataset.i,1);renderBatch()})}
+function addToBatch(){const filename=$('#upload-filename').value.trim(),text=$('#upload-text').value;if(!filename||!text.trim()){toast('filename and text are required','warn');return}
+ BATCH.push({filename,text,acl:[$('#upload-acl').value]});$('#upload-filename').value='';$('#upload-text').value='';renderBatch()}
+async function upload(){let files=BATCH.slice();const raw=$('#upload-json').value.trim();
+ if(raw){try{const arr=JSON.parse(raw);if(!Array.isArray(arr))throw new Error('JSON must be an array');files=files.concat(arr)}catch(e){toast('Invalid JSON: '+e.message,'bad');return}}
+ if(!files.length){toast('Nothing to upload — add files to the batch first','warn');return}
+ $('#upload-btn').disabled=true;$('#upload-status').textContent='uploading '+files.length+' file(s)…';FORCE=4;schedulePoll();
+ try{const out=await api('/admin/upload',{method:'POST',body:{files}});
+  $('#upload-status').textContent='uploaded '+out.uploaded+' · ingested '+out.ingested+(out.noops?' · '+out.noops+' unchanged':'')+' · dataset v'+out.dataset_version+' · run '+out.run_id;
+  toast('Bulk upload done · dataset v'+out.dataset_version,'good');BATCH=[];renderBatch();$('#upload-json').value='';await Promise.all([loadRuns(),loadAudit()])}
+ catch(e){$('#upload-status').textContent=e.message;toast(e.message,'bad')}finally{$('#upload-btn').disabled=false}}
+
+async function bulkDelete(){const ids=$('#delete-ids').value.split(/[\s,]+/).map(s=>s.trim()).filter(Boolean);const source=$('#delete-source').value.trim();const prefix=$('#delete-prefix').value.trim();
+ if(!ids.length&&!source&&!prefix){toast('Give document ids, a source or a uri prefix','warn');return}
+ const what=[ids.length?ids.length+' id(s)':'',source?'every "'+source+'" document':'',prefix?'uri prefix "'+prefix+'"':''].filter(Boolean).join(' + ');
+ if(!confirm('Bulk delete '+what+'?\nThis tombstones the documents, removes their passages from retrieval and bumps the dataset version.'))return;
+ try{const body={};if(ids.length)body.document_ids=ids;if(source)body.source=source;if(prefix)body.uri_prefix=prefix;
+  const out=await api('/admin/bulk-delete',{method:'POST',body});$('#delete-status').textContent='deleted '+out.deleted+' document(s) · dataset v'+out.dataset_version;
+  toast('Deleted '+out.deleted+' document(s)','good');$('#delete-ids').value='';await loadAudit()}catch(e){toast(e.message,'bad')}}
+
+// ---------------------------------------------------------------- budget / users / authority / audit / doctor
+async function setBudget(){try{const out=await api('/admin/budget',{method:'POST',body:{cap:+$('#budget-cap').value}});
+ $('#budget-spent').textContent=KF.money(out.spent);$('#budget-note').textContent='cap $'+Number(out.cap).toFixed(2)+' for '+out.tenant;toast('Budget cap set to $'+out.cap,'good')}catch(e){toast(e.message,'bad')}}
+function renderUsers(users){
+ $('#users-rows').innerHTML=(users||[]).map(u=>'<tr><td><b>'+esc(u.subject)+'</b></td><td>'+(u.roles||[]).map(r=>'<span class="pill '+({admin:'violet',curator:'info',asker:'good',agent:'warn'}[r]||'')+'">'+esc(r)+'</span>').join(' ')+'</td><td class="mono">'+esc((u.scopes||[]).join(', '))+'</td><td>'+(u.subject==='admin'?'':'<button class="btn sm danger del-user" data-s="'+esc(u.subject)+'">Remove</button>')+'</td></tr>').join('')||'<tr><td colspan="4" class="empty">no users</td></tr>';
+ KF.$$('#users-rows .del-user').forEach(b=>b.onclick=()=>delUser(b.dataset.s))}
+async function loadUsers(){try{const d=await api('/admin/users');renderUsers(d.users)}catch(e){}}
+async function addUser(){const subject=$('#nu-subject').value.trim();if(!subject){toast('Enter a user id','warn');return}
+ const role=$('#nu-role').value;const scopes=($('#nu-restricted').checked||role!=='asker')?['public','restricted']:['public'];
+ try{const d=await api('/admin/users',{method:'POST',body:{subject,roles:[role],scopes}});renderUsers(d.users);
+  $('#nu-subject').value='';toast('Added '+subject,'good');loadAudit()}catch(e){toast(e.message,'bad')}}
+async function delUser(subject){if(!confirm('Remove user '+subject+'?'))return;
+ try{const d=await api('/admin/users',{method:'POST',body:{subject,action:'delete'}});renderUsers(d.users);
+  toast('Removed '+subject,'good');loadAudit()}catch(e){toast(e.message,'bad')}}
+async function loadAuthority(){try{const d=await api('/admin/authority');
+ $('#authority-ranks').innerHTML=(d.ranks||[]).map(r=>'<span class="pill '+(r.rank===1?'good':'')+'" title="weight '+esc(r.weight)+'">'+esc(r.source)+' · rank '+esc(r.rank)+(r.overridden?' *':'')+'</span>').join('')}catch(e){}}
+async function setAuthority(){try{await api('/admin/authority',{method:'POST',body:{source:$('#authority-source').value,rank:+$('#authority-rank').value}});toast('Authority rank saved','good');await Promise.all([loadAuthority(),loadAudit()])}catch(e){toast(e.message,'bad')}}
+async function loadAudit(){try{const d=await api('/admin/audit?limit=40');
+ $('#audit-rows').innerHTML=(d.audit||[]).map(a=>'<tr><td class="mono small">'+esc(when(a.at))+'</td><td>'+esc(a.subject)+(a.is_agent?' <span class="pill warn">agent</span>':'')+'</td><td><span class="pill">'+esc(a.action)+'</span></td><td class="mono small">'+esc(a.resource)+'</td><td class="small">'+esc(String(a.decision||'').slice(0,120))+'</td></tr>').join('')||'<tr><td colspan="5" class="empty">no audit entries</td></tr>'}catch(e){}}
+async function doctor(){$('#doctor-btn').disabled=true;$('#doctor-report').textContent='running doctor…';$('#doctor-exit').innerHTML='';
+ try{const d=await api('/admin/doctor?target='+encodeURIComponent($('#doctor-target').value));const sel=(d.selection||{}).selected||{};
+  $('#doctor-selection').innerHTML=Object.keys(sel).map(k=>'<span class="pill">'+esc(k)+' → '+esc(sel[k])+'</span>').join('')+(d.selection&&d.selection.ready!=null?'<span class="pill '+(d.selection.ready?'good':'warn')+'">adapters '+(d.selection.ready?'ready':'not ready')+'</span>':'');
+  $('#doctor-exit').innerHTML=d.exit_code==null?'<span class="pill warn">doctor script missing</span>':d.exit_code===0?'<span class="pill good">READY · exit 0</span>':'<span class="pill bad">BLOCKERS · exit '+esc(d.exit_code)+'</span>';
+  $('#doctor-report').textContent=d.report||d.error||JSON.stringify(d,null,2)}
+ catch(e){$('#doctor-report').textContent=e.message;toast(e.message,'bad')}finally{$('#doctor-btn').disabled=false}}
+
+// ---------------------------------------------------------------- boot
+async function loadAll(){try{await loadConnectors()}catch(e){return}
+ await Promise.all([loadRuns(),loadUsers(),loadAuthority(),loadAudit()]);
+ if(await loadRuns())schedulePoll()}
+window.KF_ON_SESSION=s=>{if(s)loadAll();else{$('#connectors').innerHTML='';gate({status:401,message:''},'admin')}};
+KF.initBar({preferRole:'admin'});
+$('#connectors-refresh').onclick=loadAll;$('#run-due-btn').onclick=runDue;
+$('#upload-add').onclick=addToBatch;$('#upload-btn').onclick=upload;$('#delete-btn').onclick=bulkDelete;
+$('#budget-btn').onclick=setBudget;$('#authority-btn').onclick=setAuthority;$('#audit-refresh').onclick=loadAudit;$('#doctor-btn').onclick=doctor;
+$('#add-user-btn').onclick=addUser;
+if(KF.session)loadAll();else gate({status:401,message:''},'admin');

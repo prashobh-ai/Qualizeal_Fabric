@@ -1,22 +1,23 @@
 """Knowledge Fabric CLI — the third intake door plus operator commands.
 
-    python -m knowledge_fabric.cli seed
-    python -m knowledge_fabric.cli ingest <tenant> <path> [--acl public,restricted]
-    python -m knowledge_fabric.cli ask <tenant> <subject> "<question>"
-    python -m knowledge_fabric.cli metrics <tenant>
-    python -m knowledge_fabric.cli gaps <tenant>
-    python -m knowledge_fabric.cli eval <tenant>
-    python -m knowledge_fabric.cli serve
+python -m knowledge_fabric.cli seed
+python -m knowledge_fabric.cli ingest <tenant> <path> [--acl public,restricted]
+python -m knowledge_fabric.cli ask <tenant> <subject> "<question>"
+python -m knowledge_fabric.cli metrics <tenant>
+python -m knowledge_fabric.cli gaps <tenant>
+python -m knowledge_fabric.cli eval <tenant>
+python -m knowledge_fabric.cli serve
 """
+
 from __future__ import annotations
 
 import json
 import os
 import sys
 
-from .app import Platform
 from .answer.service import AnswerService
-from .ingestion.intake import Intake, IngestWorker
+from .app import Platform
+from .ingestion.intake import IngestWorker, Intake
 from .tenants import demo
 
 
@@ -56,9 +57,11 @@ def main(argv=None):
         print(json.dumps(p.curation.list(rest[0]), indent=2))
     elif cmd == "eval":
         from .evaluation import gate
+
         print(json.dumps(gate.evaluate(p, rest[0]), indent=2, default=str))
     elif cmd == "serve":
         from .surfaces.http_api import serve
+
         serve(port=int(os.environ.get("KF_PORT", "8080")))
     else:
         print(f"unknown command: {cmd}\n{__doc__}")

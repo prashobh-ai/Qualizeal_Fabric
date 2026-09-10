@@ -5,6 +5,7 @@ domain-salient vocabulary used for salience scoring (never raw frequency).
 A new tenant selects or extends a pack; it is never a blank page. Packs ship
 generic and client-agnostic (I: multi-tenancy & genericity).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -16,24 +17,47 @@ class OntologyPack:
     version: int
     entity_types: list[str]
     relation_types: list[str]
-    typed_facts: dict[str, list[str]]         # fact_type -> ordered role names
-    salient_vocab: dict[str, float]           # term -> salience weight
+    typed_facts: dict[str, list[str]]  # fact_type -> ordered role names
+    salient_vocab: dict[str, float]  # term -> salience weight
     entity_lexicon: dict[str, str] = field(default_factory=dict)  # keyword -> entity_type
 
 
 QUALITY_ASSURANCE = OntologyPack(
-    name="quality-assurance", version=1,
-    entity_types=["TestPlan", "TestCase", "Requirement", "Defect", "Release", "Component", "Standard"],
+    name="quality-assurance",
+    version=1,
+    entity_types=[
+        "TestPlan",
+        "TestCase",
+        "Requirement",
+        "Defect",
+        "Release",
+        "Component",
+        "Standard",
+    ],
     relation_types=["verifies", "covers", "depends_on", "blocks", "belongs_to", "complies_with"],
     typed_facts={"coverage": ["TestCase", "Requirement", "Release"]},
     salient_vocab={
-        "requirement": 1.0, "traceability": 1.0, "coverage": 0.9, "defect": 0.9,
-        "regression": 0.8, "release": 0.7, "acceptance": 0.9, "verification": 0.9,
-        "test": 0.6, "plan": 0.5, "risk": 0.8, "compliance": 0.9,
+        "requirement": 1.0,
+        "traceability": 1.0,
+        "coverage": 0.9,
+        "defect": 0.9,
+        "regression": 0.8,
+        "release": 0.7,
+        "acceptance": 0.9,
+        "verification": 0.9,
+        "test": 0.6,
+        "plan": 0.5,
+        "risk": 0.8,
+        "compliance": 0.9,
     },
     entity_lexicon={
-        "requirement": "Requirement", "test case": "TestCase", "test plan": "TestPlan",
-        "defect": "Defect", "release": "Release", "component": "Component", "standard": "Standard",
+        "requirement": "Requirement",
+        "test case": "TestCase",
+        "test plan": "TestPlan",
+        "defect": "Defect",
+        "release": "Release",
+        "component": "Component",
+        "standard": "Standard",
     },
 )
 

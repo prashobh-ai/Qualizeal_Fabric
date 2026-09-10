@@ -6,7 +6,9 @@ PORT ?= 8080
 export KF_DB
 export PYTHONPATH := .
 
-.PHONY: help up down health test demo seed ask serve mcp demo-reset licences ci compose-up compose-down
+UV ?= uv
+
+.PHONY: help install up down health test lint fmt notices corpus showcase demo seed ask serve mcp demo-reset licences ci compose-up compose-down
 
 PROFILE ?= lite
 export KF_PROFILE := $(PROFILE)
@@ -14,6 +16,9 @@ export KF_PROFILE := $(PROFILE)
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 	 awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n",$$1,$$2}'
+
+install: ## Create the uv environment with dev tooling (uv sync --extra dev)
+	@$(UV) sync --extra dev
 
 up: seed serve ## Bring the platform up locally (seed demo data, then serve)
 
@@ -23,8 +28,23 @@ down: ## Stop and clear local state
 health: ## Report platform health
 	@$(PY) -c "from knowledge_fabric.app import Platform; p=Platform(db_path='$(KF_DB)'); print('DB ok; model available:', p.model_available())"
 
-test: ## Run the full test suite (maps to Build Plan Section 20)
-	@$(PY) -m unittest discover -s tests -p 'test_*.py' -v
+test: ## Run the full test suite (uv run pytest -q)
+	@$(UV) run pytest -q
+
+lint: ## Ruff lint + format check (must be clean before commit)
+	@$(UV) run ruff check . && $(UV) run ruff format --check .
+
+fmt: ## Auto-format the repository with Ruff
+	@$(UV) run ruff format .
+
+notices: ## Regenerate THIRD_PARTY_NOTICES.md from the licence manifest
+	@$(UV) run python scripts/notices.py
+
+corpus: ## Ingest the QualiZeal corpus into the product fabric (see load-corpus for a folder)
+	@$(UV) run python scripts/load_qualizeal_corpus.py $(or $(DIR),corpus)
+
+showcase: ## Build the self-contained static showcase snapshot for GitHub Pages
+	@$(UV) run python scripts/build_showcase.py
 
 demo: ## Run the narrated end-to-end execution demo
 	@$(PY) scripts/demo.py

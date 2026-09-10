@@ -10,6 +10,7 @@ but it produces exactly the shapes the graph needs:
 Salience uses the pack's domain-salient vocabulary, never raw frequency
 (Section 11).
 """
+
 from __future__ import annotations
 
 import re

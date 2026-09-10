@@ -14,6 +14,7 @@ reserve for documentation (RFC 2606 domains, RFC 5737 IPs, 555-01xx
 phone numbers), and ``validate_identifiers`` fails the build if a
 shipped identifier could resolve to a real entity.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -38,13 +39,14 @@ DEMO_TENANTS = [
 # the subject is the role. `asker.public` cannot see `restricted`;
 # `asker.restricted` is the elevated asker who can (P1.6 direction).
 _ROLE_USERS = [
-    ("asker.public",     ["asker"],   ["public"]),
-    ("asker.restricted", ["asker"],   ["public", "restricted"]),
-    ("curator",          ["curator"], ["public", "restricted"]),
-    ("admin",            ["admin"],   ["public", "restricted"]),
-    ("qa-agent",         ["agent"],   ["public"]),
+    ("asker.public", ["asker"], ["public"]),
+    ("asker.restricted", ["asker"], ["public", "restricted"]),
+    ("curator", ["curator"], ["public", "restricted"]),
+    ("admin", ["admin"], ["public", "restricted"]),
+    ("qa-agent", ["agent"], ["public"]),
 ]
 DEMO_USERS = {"qualizeal": list(_ROLE_USERS)}
+
 
 def validate_identifiers() -> list[str]:
     """No documents are shipped in the product fabric (L0.2), so there are no
@@ -84,13 +86,23 @@ def principal_for(platform, tenant: str, subject: str) -> Principal:
     """
     for s, roles, scopes in DEMO_USERS.get(tenant, []):
         if s == subject:
-            token = platform.idp.mint(Principal(subject=s, tenant=tenant, roles=roles,
-                                                scopes=scopes, agent="agent" in roles))
+            token = platform.idp.mint(
+                Principal(
+                    subject=s, tenant=tenant, roles=roles, scopes=scopes, agent="agent" in roles
+                )
+            )
             return platform.idp.authenticate({"token": token})
     # test-only isolation path — synthesize from the role template
     for s, roles, scopes in _ROLE_USERS:
         if s == subject:
-            token = platform.idp.mint(Principal(subject=s, tenant=tenant, roles=list(roles),
-                                                scopes=list(scopes), agent="agent" in roles))
+            token = platform.idp.mint(
+                Principal(
+                    subject=s,
+                    tenant=tenant,
+                    roles=list(roles),
+                    scopes=list(scopes),
+                    agent="agent" in roles,
+                )
+            )
             return platform.idp.authenticate({"token": token})
     raise KeyError(f"no demo user {subject} in {tenant}")
