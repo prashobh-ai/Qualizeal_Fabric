@@ -27,19 +27,7 @@ def main(argv: list[str]) -> int:
     as_json = "--json" in argv
     result = quality.run_quality_suite()
     if as_json:
-        print(
-            json.dumps(
-                {
-                    "passed": result.passed,
-                    "score": result.score,
-                    "passing": result.passing,
-                    "total": result.total,
-                    "dimensions": result.dimensions,
-                    "failures": result.failures,
-                },
-                indent=2,
-            )
-        )
+        print(json.dumps(result.to_dict(), indent=2))
     else:
         print(quality.format_report(result))
     return 0 if result.passed else 1
