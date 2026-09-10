@@ -132,6 +132,80 @@ class AnswerService:
         k: int = 6,
         allow_model: bool = True,
         _nested: bool = False,
+        context: dict | None = None,
+    ) -> Answer:
+        """The public entry. T26: resolve a follow-up against the two-turn
+        conversation window before answering, and stamp ``understood_as`` when a
+        rewrite happened; when the reference is ambiguous, ask back with chips."""
+        understood = None
+        if not _nested and context:
+            res = self._resolve_context(principal, question, context)
+            if res.clarify:
+                return self._context_clarify(principal, res.clarify)
+            question, understood = res.question, res.understood_as
+        answer = self._answer(principal, question, k, allow_model, _nested)
+        if understood:
+            answer.understood_as = understood
+        return answer
+
+    def _resolve_context(self, principal, question, context):
+        from . import context as convo
+
+        tenant = principal.tenant
+        _title_of, distinctive = self._title_index(tenant)
+        subjects = {}
+        for tok, did in distinctive.items():
+            title = (self.p.documents.get(tenant, did) or {}).get("title", "")
+            m = re.search(re.escape(tok), title, re.I)
+            display = title[m.start() : m.end()] if m else tok
+            # keep product/brand entities (internal capital: QMentisAI, ValidAIte)
+            # — the same rule the showcase subject vocabulary uses — not every
+            # single-doc title word, so coreference stays clean.
+            if re.search(r"[a-z][A-Z]", display):
+                subjects[tok] = display
+        raw = context.get("turns") or [
+            {"question": q} for q in (context.get("previous_questions") or [])
+        ]
+        turns = [
+            convo.Turn(
+                question=t.get("question", ""),
+                subject=t.get("subject") or convo.subject_in(t.get("question", ""), subjects),
+                answer_docs=t.get("answer_docs") or [],
+                kind=t.get("kind", "answer"),
+                options=t.get("options") or [],
+            )
+            for t in raw[-2:]
+        ]
+        return convo.resolve(question, turns, subjects, list(subjects.values()))
+
+    def _context_clarify(self, principal, clarify):
+        text = clarify.get("reason", "Which one do you mean?")
+        return Answer(
+            AnswerKind.CLARIFY,
+            "",
+            [],
+            0.0,
+            new_id("traj_"),
+            0.0,
+            0,
+            "none",
+            grounding_score=0.0,
+            clarify_back=text,
+            tenant=principal.tenant,
+            level=0,
+            why={"level_name": "clarify", "explain": text},
+            lang="en",
+            model_name=model_for_tier("none"),
+            suggestions=clarify.get("chips", []),
+        )
+
+    def _answer(
+        self,
+        principal: Principal,
+        question: str,
+        k: int = 6,
+        allow_model: bool = True,
+        _nested: bool = False,
     ) -> Answer:
         p = self.p
         tenant = principal.tenant

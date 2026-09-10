@@ -684,7 +684,11 @@ class Handler(BaseHTTPRequestHandler):
                 prin = self._principal()
             except PermissionError as e:
                 return self._send(401, {"error": str(e)})
-            return self._send(200, _svc.ask(prin, self._body().get("question", "")).to_dict())
+            body = self._body()
+            return self._send(
+                200,
+                _svc.ask(prin, body.get("question", ""), context=body.get("context")).to_dict(),
+            )
         if u.path == "/feedback":
             # L3/L6 — a reader flags an answer (👎). Negative feedback lands in
             # the curator review queue as a 'negative-feedback' item; anyone

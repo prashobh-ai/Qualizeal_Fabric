@@ -224,11 +224,15 @@ class Answer:
     authoritative_source: dict | None = None
     dataset_version: int = 0
     reasoning: dict | None = None  # multistep/conditional trace (Section A)
+    understood_as: str | None = None  # T26 — the rewritten question, when context resolved one
+    suggestions: list[str] | None = None  # T26 — clarify-back chips
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "kind": self.kind.value,
             "answer_text": self.answer_text,
+            "understood_as": self.understood_as,
+            "suggestions": self.suggestions or [],
             "level": self.level,
             "why": self.why,
             "lang": self.lang,
