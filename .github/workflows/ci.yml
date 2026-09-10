@@ -128,3 +128,8 @@ jobs:
             node --version
             echo "MCP server not built yet; inspector tools/list conformance is wired for T20."
           fi
+      - name: Static parity (T32)
+        # Node is set up on this job, so run the real engine.js over a
+        # production-shaped snapshot and assert it answers like the Python
+        # server (kind, coreference, persona lens, discovery/code shape).
+        run: uv run python scripts/parity_check.py

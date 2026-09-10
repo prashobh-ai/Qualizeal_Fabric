@@ -8,7 +8,7 @@ export PYTHONPATH := .
 
 UV ?= uv
 
-.PHONY: help install up down health test lint fmt notices corpus showcase demo seed ask serve mcp demo-reset licences quality ci compose-up compose-down
+.PHONY: help install up down health test lint fmt notices corpus showcase demo seed ask serve mcp demo-reset licences quality parity ci compose-up compose-down
 
 PROFILE ?= lite
 export KF_PROFILE := $(PROFILE)
@@ -84,6 +84,9 @@ licences: ## Licence gate (I14): fails on any non-permissive runtime dependency
 
 quality: ## Answer-quality gate (T28): golden suite over the model-free path
 	@$(PY) scripts/quality_gate.py
+
+parity: ## Static parity (T32): the shipped engine.js answers like the server (needs node)
+	@$(PY) scripts/parity_check.py
 
 ci: test licences quality ## What CI runs
 	@$(PY) -c "from knowledge_fabric.tenants import demo; assert demo.validate_identifiers()==[]; print('identifier-safety: PASS')"
