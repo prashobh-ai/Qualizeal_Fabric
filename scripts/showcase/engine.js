@@ -447,6 +447,7 @@
     if (path === "/api/usage") return respond(STATE.usage[subject] || emptyUsage(subject));
     if (path === "/api/galaxy") { var t = q.get("trace_id"); return respond((SNAP.galaxy || {})[t] || { trace_id: t, nodes: [], edges: [], stats: {} }); }
     if (path === "/api/analytics") { var w = q.get("window") || "7d"; return respond((SNAP.analytics || {})[w] || (SNAP.analytics || {})["7d"] || {}); }
+    if (path === "/api/events") return respond({ events: SNAP.events || [] });
     if (path === "/api/trace") return respond({ spans: [] });
     if (path === "/curator/versions") { var d = q.get("document_id"); return respond((SNAP.versions || {})[d] || { versions: [], datasets: [] }); }
     if (path === "/admin/doctor") { var tg = q.get("target") || ""; return respond((SNAP.doctor || {})[tg] || (SNAP.doctor || {})[""] || { checks: [] }); }

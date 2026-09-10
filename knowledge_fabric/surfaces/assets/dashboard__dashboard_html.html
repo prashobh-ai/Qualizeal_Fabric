@@ -38,6 +38,24 @@ th{color:var(--mut);font-weight:600}
 .bar-row{display:flex;align-items:center;gap:8px;margin:5px 0}.bar-row .n{width:150px;color:var(--mut);font-size:12px}
 .bar-row .t{width:44px;text-align:right;font-size:12px}
 .trk{flex:1;height:12px;background:var(--panel);border-radius:6px;overflow:hidden}.trk>i{display:block;height:100%}
+.reading{color:var(--mut);font-size:12px;margin:-4px 0 10px}
+.qbtn{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;
+ border:1px solid var(--line);color:var(--mut);font-size:11px;cursor:pointer;margin-left:6px;background:var(--surface);vertical-align:middle}
+.qbtn:hover{border-color:var(--accent);color:var(--accent)}
+.chead{display:flex;align-items:center;gap:2px;margin:0 0 4px}
+.chead h3{margin:0}
+.defsheet{position:fixed;inset:0;background:rgba(13,21,35,.35);display:flex;align-items:center;justify-content:center;z-index:20}
+.defsheet .box{background:var(--surface);border:1px solid var(--line);border-radius:14px;max-width:420px;padding:18px 20px}
+.defsheet h4{margin:0 0 8px;color:var(--ink)}.defsheet dt{color:var(--accent);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px;margin-top:8px}
+.defsheet dd{margin:2px 0 0;color:var(--fg)}.defsheet .x{float:right;cursor:pointer;color:var(--mut)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 4px}
+.chip{padding:3px 10px;border-radius:20px;border:1px solid var(--line);background:var(--surface);color:var(--mut);
+ font-size:12px;cursor:pointer;user-select:none}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.dim{margin:8px 0}.dim .dl{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
+.xtable th{cursor:pointer;white-space:nowrap}.xtable td.num,.xtable th.num{text-align:right;font-variant-numeric:tabular-nums}
+.xtable tr.tot td{font-weight:700;border-top:2px solid var(--line);background:var(--panel)}
+.gbrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
 .qz-watermark{position:fixed;right:24px;bottom:56px;width:220px;height:220px;pointer-events:none;z-index:0;
  background:url("/static/assets/brand/logo/qualizeal-mark.png") no-repeat center/contain;opacity:.04}
 .qz-footer{height:40px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;
@@ -64,13 +82,46 @@ th{color:var(--mut);font-weight:600}
   <span>v0.3</span>
 </footer>
 <script>
-const TABS=["Overview","Trust","Sources","Models","Usage","Cost & Caching"];
-let TAB="Overview", TOKEN=null, DATA=null, SOURCES=null;
+const TABS=["Overview","Explorer","Trust","Sources","Models","Usage","Cost & Caching"];
+let TAB="Overview", TOKEN=null, DATA=null, SOURCES=null, EVENTS=[];
 const FABRIC="qualizeal";   // single in-house fabric (no tenant selector)
 const $=s=>document.querySelector(s);
 const COL=["#0096FF","#0CA678","#E8A23A","#7048E8","#4DD0E8","#F53E5A"];
 function fmt(n){return (n||0).toLocaleString()}
 function money(n){return "$"+(n||0).toFixed(4)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+
+// ---- T29: every panel explains itself — a plain question, a reading line,
+// and a "?" that opens what it counts / how it is computed / what to do. ----
+const DEFS={
+ answers:{q:"How much is it used",r:"Every question the fabric answered in the window.",
+  counts:"One per answered question.",computed:"Count of answer events.",action:"A drop means fewer people are asking — check adoption."},
+ cost:{q:"What it costs to run",r:"Model spend after cache savings.",
+  counts:"Dollars charged by the model, per answer.",computed:"Sum of per-answer cost.",action:"Rising cost with flat volume means routing drifted up a level."},
+ saved:{q:"What caching avoided",r:"Spend the cache and routing prevented.",
+  counts:"Dollars a higher level would have cost.",computed:"Sum of cost_saved.",action:"Low savings means the cache is cold — warm it with common questions."},
+ trust:{q:"How well grounded",r:"Below 60% needs curator attention.",
+  counts:"The grounding score behind each answer.",computed:"Average grounding across answers.",action:"Low trust means thin evidence — add or refresh documents."},
+ citation:{q:"How often answers cite",r:"An uncited answer is a red flag.",
+  counts:"Answers carrying at least one citation.",computed:"Cited answers / answers.",action:"Below 95% means content is missing exact evidence."},
+ latency:{q:"How fast it answers",r:"p95 covers the slowest twenty in a hundred.",
+  counts:"End-to-end answer time in ms.",computed:"95th percentile of latency.",action:"A spike means retrieval or the model is slow — check the top level's share."},
+ clarify:{q:"How often it asks back",r:"A rising rate means questions outrun content.",
+  counts:"Answers that asked a clarifying question.",computed:"Clarify events / answers.",action:"High clarify means ambiguous topics — add content or sharpen suggestions."},
+ level:{q:"Which level answers most",r:"The lower two levels should carry most traffic.",
+  counts:"Answers routed to each model level.",computed:"Count of answers per level word.",action:"A rising top level costs more — check why routing escalated."},
+ explorer:{q:"Slice every dimension in one place",r:"Filter any dimensions, group by any two — cost, trust and volume update live.",
+  counts:"One row per answered question.",computed:"Client-side filter then group-by aggregation over the telemetry events.",action:"Find the costly or low-trust slice, then fix its content or routing."}};
+function openDef(k){const d=DEFS[k];if(!d)return;
+ const el=document.createElement('div');el.className='defsheet';el.onclick=e=>{if(e.target===el)el.remove()};
+ el.innerHTML=`<div class="box"><span class="x" onclick="this.closest('.defsheet').remove()">&times;</span>`+
+  `<h4>${esc(d.q)}</h4><dl><dt>Counts</dt><dd>${esc(d.counts)}</dd>`+
+  `<dt>Computed</dt><dd>${esc(d.computed)}</dd><dt>What to do</dt><dd>${esc(d.action)}</dd></dl></div>`;
+ document.body.appendChild(el)}
+window.openDef=openDef;
+function chead(title,key){const d=DEFS[key]||{};
+ return `<div class="chead"><h3>${esc(title)}</h3><span class="qbtn" title="What is this?" onclick="openDef('${key}')">?</span></div>`+
+  (d.r?`<div class="reading">${esc(d.r)}</div>`:'')}
 
 async function login(){
  const r=await fetch('/login',{method:'POST',body:JSON.stringify({tenant:FABRIC,subject:'admin'})});
@@ -84,6 +135,7 @@ async function load(){
  const h={'Authorization':'Bearer '+TOKEN};
  DATA=await (await fetch('/api/analytics?'+qs,{headers:h})).json();
  SOURCES=await (await fetch('/admin/sources',{headers:h})).json();
+ try{EVENTS=(await (await fetch('/api/events',{headers:h})).json()).events||[]}catch(e){EVENTS=[]}
  // populate user filter
  const u=$('#user'); const cur=u.value; u.innerHTML='<option value="">All users</option>';
  Object.keys(DATA.per_user||{}).forEach(k=>{let o=document.createElement('option');o.value=o.text=k;u.add(o)});
@@ -92,6 +144,7 @@ async function load(){
  render();
 }
 function tile(l,v,d,cls){return `<div class="card kpi"><div class="l">${l}</div><div class="v">${v}</div>${d?`<div class="d" style="color:${cls||'var(--mut)'}">${d}</div>`:''}</div>`}
+function tileD(l,v,key,d,cls){return `<div class="card kpi"><div class="l">${l}<span class="qbtn" onclick="openDef('${key}')">?</span></div><div class="v">${v}</div>${d?`<div class="d" style="color:${cls||'var(--mut)'}">${d}</div>`:''}</div>`}
 function bars(obj,fmtv){const keys=Object.keys(obj||{});const max=Math.max(1,...keys.map(k=>obj[k]));
  return keys.map((k,i)=>`<div class="bar-row"><span class="n">${k}</span><div class="trk"><i style="width:${100*obj[k]/max}%;background:${COL[i%6]}"></i></div><span class="t">${(fmtv?fmtv(obj[k]):obj[k])}</span></div>`).join('')||'<div class="l" style="color:var(--mut)">no data</div>'}
 function donut(obj){const keys=Object.keys(obj||{});const tot=keys.reduce((a,k)=>a+obj[k],0)||1;let acc=0;
@@ -108,23 +161,69 @@ function line(series,key,color){if(!series||!series.length)return '<div class="l
  const dots=pts.map(p=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="${color}"/>`).join('');
  return `<svg width="100%" viewBox="0 0 ${w} ${h}"><path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>${dots}<text x="${pad}" y="14" fill="var(--mut)" font-size="11">max ${maxy}</text></svg>`}
 
+// ---- Explorer: one table, filter any dimensions, group by any two --------
+const DIMS=[["role","Role"],["level","Level"],["model","Model"],["lang","Language"],["complexity","Complexity"],["kind","Kind"]];
+const METRICS=[["count","Questions",fmt],["answered","Answered",fmt],["declined","Declined",fmt],
+ ["citedpct","Cited %",v=>(v*100).toFixed(0)+'%'],["trust","Trust",v=>(v*100).toFixed(0)+'%'],
+ ["tin","Tokens in",fmt],["tout","Tokens out",fmt],["cost","Cost",money],["saved","Saved",money],
+ ["lat","p95 ms",v=>Math.round(v)]];
+let FILT={}, GB=["role","level"], SORT={c:"count",d:-1};
+function distinct(dim){return [...new Set(EVENTS.map(e=>e[dim]))].filter(x=>x!=null&&x!=='').sort()}
+function passes(e){return DIMS.every(([d])=>{const s=FILT[d];return !s||!s.size||s.has(e[d])})}
+function agg(rows){const m={count:rows.length,answered:0,declined:0,cited:0,tin:0,tout:0,cost:0,saved:0,g:0,lats:[]};
+ rows.forEach(e=>{m.answered+=e.answered;m.declined+=e.declined;m.cited+=e.cited;m.tin+=e.tokens_in;m.tout+=e.tokens_out;
+  m.cost+=e.cost;m.saved+=e.cost_saved;m.g+=e.grounding;m.lats.push(e.latency_ms)});
+ m.lats.sort((a,b)=>a-b);const p95=m.lats.length?m.lats[Math.min(m.lats.length-1,Math.floor(m.lats.length*0.95))]:0;
+ return {count:m.count,answered:m.answered,declined:m.declined,citedpct:m.count?m.cited/m.count:0,
+  trust:m.count?m.g/m.count:0,tin:m.tin,tout:m.tout,cost:m.cost,saved:m.saved,lat:p95}}
+function explorer(){
+ if(!EVENTS.length)return `<div class="card">No telemetry yet — ask a few questions first.</div>`;
+ const gbdims=GB.filter(Boolean);
+ const groups={};EVENTS.filter(passes).forEach(e=>{const key=gbdims.map(d=>e[d]).join(' · ')||'All';
+  (groups[key]=groups[key]||[]).push(e)});
+ let rows=Object.keys(groups).map(k=>({key:k,m:agg(groups[k])}));
+ rows.sort((a,b)=>{const va=SORT.c==='key'?a.key:a.m[SORT.c],vb=SORT.c==='key'?b.key:b.m[SORT.c];return (va<vb?-1:va>vb?1:0)*SORT.d});
+ const tot=agg(EVENTS.filter(passes)), filtered=Object.keys(FILT).some(d=>FILT[d]&&FILT[d].size);
+ const chips=DIMS.map(([d,lbl])=>{const sel=FILT[d]||new Set();
+  const cs=distinct(d).map(v=>`<span class="chip ${sel.has(v)?'on':''}" onclick="XF('${d}','${encodeURIComponent(v)}')">${esc(v)}</span>`).join('');
+  return `<div class="dim"><div class="dl">${lbl}</div><div class="chips">${cs}</div></div>`}).join('');
+ const opts=sel=>`<option value="">—</option>`+DIMS.map(([d,l])=>`<option value="${d}" ${sel===d?'selected':''}>${l}</option>`).join('');
+ const gbrow=`<div class="gbrow"><label>Group by</label>
+  <select onchange="XG(0,this.value)">${opts(GB[0])}</select>
+  <select onchange="XG(1,this.value)">${opts(GB[1])}</select>
+  <span style="color:var(--mut);font-size:12px">${fmt(tot.count)} of ${fmt(EVENTS.length)} questions${filtered?' (filtered)':''}</span>
+  ${filtered?'<span class="chip on" onclick="XCLR()">clear filters</span>':''}</div>`;
+ const th=`<tr><th onclick="XS('key')">${gbdims.map(d=>(DIMS.find(x=>x[0]===d)||[,d])[1]).join(' · ')||'All'}</th>`+
+  METRICS.map(([c,l])=>`<th class="num" onclick="XS('${c}')">${l}${SORT.c===c?(SORT.d<0?' ▼':' ▲'):''}</th>`).join('')+`</tr>`;
+ const body=rows.map(r=>`<tr><td>${esc(r.key)}</td>`+METRICS.map(([c,l,f])=>`<td class="num">${f(r.m[c])}</td>`).join('')+`</tr>`).join('');
+ const totrow=`<tr class="tot"><td>Total</td>`+METRICS.map(([c,l,f])=>`<td class="num">${f(tot[c])}</td>`).join('')+`</tr>`;
+ return `<div class="card">${chead('Explore every question','explorer')}${gbrow}
+  <div style="overflow-x:auto"><table class="xtable"><thead>${th}</thead><tbody>${body}${totrow}</tbody></table></div></div>
+  <div class="card" style="margin-top:14px"><div class="chead"><h3>Filters</h3></div><div class="reading">Click any values to include them; leave a dimension untouched to include all.</div>${chips}</div>`}
+function XF(d,v){v=decodeURIComponent(v);FILT[d]=FILT[d]||new Set();FILT[d].has(v)?FILT[d].delete(v):FILT[d].add(v);render()}
+function XG(i,v){GB[i]=v;render()}
+function XS(c){if(SORT.c===c)SORT.d*=-1;else{SORT.c=c;SORT.d=(c==='key'?1:-1)}render()}
+function XCLR(){FILT={};render()}
+window.XF=XF;window.XG=XG;window.XS=XS;window.XCLR=XCLR;
+
 function render(){
  $('#tabs').innerHTML=TABS.map(t=>`<div class="tab ${t===TAB?'active':''}" onclick="setTab('${t}')">${t}</div>`).join('');
+ if(TAB==="Explorer"){$('#view').innerHTML=explorer();return}
  const d=DATA||{}; let h='';
  if(TAB==="Overview"){
   h+=`<div class="grid kpis">
-   ${tile('Answers',fmt(d.answers))}
+   ${tileD('Answers',fmt(d.answers),'answers')}
    ${tile('Tokens in / out',fmt(d.tokens_in)+' / '+fmt(d.tokens_out))}
-   ${tile('Total cost',money(d.total_cost))}
-   ${tile('Cost saved (cache)',money(d.total_cost_saved),(d.cache_hit_rate*100).toFixed(0)+'% hit rate','var(--good)')}
-   ${tile('Grounding avg',(d.grounding_avg*100||0).toFixed(0)+'%')}
-   ${tile('Citation coverage',(d.citation_coverage*100||0).toFixed(0)+'%')}
-   ${tile('p95 latency',(d.latency_p95_ms||0)+' ms')}
-   ${tile('Clarify-back rate',(d.clarify_back_rate*100||0).toFixed(0)+'%')}
+   ${tileD('Total cost',money(d.total_cost),'cost')}
+   ${tileD('Cost saved (cache)',money(d.total_cost_saved),'saved',(d.cache_hit_rate*100).toFixed(0)+'% hit rate','var(--good)')}
+   ${tileD('Grounding avg',(d.grounding_avg*100||0).toFixed(0)+'%','trust')}
+   ${tileD('Citation coverage',(d.citation_coverage*100||0).toFixed(0)+'%','citation')}
+   ${tileD('p95 latency',(d.latency_p95_ms||0)+' ms','latency')}
+   ${tileD('Clarify-back rate',(d.clarify_back_rate*100||0).toFixed(0)+'%','clarify')}
   </div>
   <div class="grid cards" style="margin-top:14px">
-   <div class="card"><h3>Model routing — by level</h3>${donut(d.routing_by_level)}</div>
-   <div class="card"><h3>Volume over ${d.window}</h3>${line(d.timeseries,'answers','#4f7cff')}</div>
+   <div class="card">${chead('Model routing — by level','level')}${donut(d.routing_by_level)}</div>
+   <div class="card">${chead('Volume over '+d.window,'answers')}${line(d.timeseries,'answers','#4f7cff')}</div>
   </div>`;
  }
  if(TAB==="Trust"){
@@ -167,7 +266,7 @@ function render(){
    ${tile('Net cost',money((d.total_cost)))}
   </div>
   <div class="grid cards" style="margin-top:14px">
-   <div class="card"><h3>Savings by technique (not just a total)</h3>${bars(d.savings_by_technique,money)}</div>
+   <div class="card">${chead('Savings by technique','saved')}${bars(d.savings_by_technique,money)}</div>
    <div class="card"><h3>Cost saved over ${d.window}</h3>${line(d.timeseries,'cost_saved','#3ecf8e')}</div>
   </div>`;
  }

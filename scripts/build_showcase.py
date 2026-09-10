@@ -371,6 +371,15 @@ def _seed():
             svc.ask(demo.principal_for(p, TENANT, subject), q)
         except Exception:
             pass
+    # T29 — drive a broad spread across every role so the telemetry Explorer has
+    # real volume to filter and pivot (role x level x model x language x kind).
+    if not os.environ.get("KF_SHOWCASE_CORPUS_LIMIT"):  # full build only
+        for subject in ROLES:
+            for q in EXTRA_Q:
+                try:
+                    svc.ask(demo.principal_for(p, TENANT, subject), q)
+                except Exception:
+                    pass
     return p
 
 
@@ -529,6 +538,9 @@ def _bake(client, p=None) -> dict:
     # the browser from this index instead of falling to a blind gap.
     if p is not None:
         snap["index"] = _export_index(p)
+        # T29 — flat telemetry rows for the self-serve Explorer (filter/pivot any
+        # dimension in one table).
+        snap["events"] = p.telemetry.events(TENANT)
 
     # per-subject usage
     for subject in ROLES:
