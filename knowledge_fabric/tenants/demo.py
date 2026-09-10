@@ -38,14 +38,36 @@ DEMO_TENANTS = [
 # Role-based user ids (F0.1 keeps P0.3's role slugs). No people's names —
 # the subject is the role. `asker.public` cannot see `restricted`;
 # `asker.restricted` is the elevated asker who can (P1.6 direction).
+#
+# Each row is (subject, roles, scopes, designation). `roles` is the ACCESS tier
+# (asker/curator/admin/agent — what the user may retrieve, ACL before ranking);
+# `designation` is the user's ORGANISATIONAL title (T27), captured by the admin
+# at access-grant time, which conditions how an answer is framed and pitched but
+# never widens what is retrievable. The demo askers below carry a spread of
+# designations so the showcase can sign in as a developer, a tester, a delivery
+# lead or a CTO and watch the same question come back pitched for each persona.
 _ROLE_USERS = [
-    ("asker.public", ["asker"], ["public"]),
-    ("asker.restricted", ["asker"], ["public", "restricted"]),
-    ("curator", ["curator"], ["public", "restricted"]),
-    ("admin", ["admin"], ["public", "restricted"]),
-    ("qa-agent", ["agent"], ["public"]),
+    ("asker.public", ["asker"], ["public"], ""),
+    ("asker.restricted", ["asker"], ["public", "restricted"], ""),
+    ("developer", ["asker"], ["public"], "Developer"),
+    ("tester", ["asker"], ["public"], "QA Engineer"),
+    ("architect", ["asker"], ["public", "restricted"], "Solution Architect"),
+    ("delivery", ["asker"], ["public", "restricted"], "Delivery Head"),
+    ("cto", ["asker"], ["public", "restricted"], "CTO"),
+    ("curator", ["curator"], ["public", "restricted"], "Knowledge Curator"),
+    ("admin", ["admin"], ["public", "restricted"], "Platform Admin"),
+    ("qa-agent", ["agent"], ["public"], "Automation Agent"),
 ]
 DEMO_USERS = {"qualizeal": list(_ROLE_USERS)}
+
+
+def user_fields(row) -> tuple[str, list, list, str]:
+    """Unpack a directory row tolerantly. Rows are (subject, roles, scopes,
+    designation); older callers and add-user payloads may omit the designation,
+    so it defaults to "" — keeping the directory forward/backward compatible."""
+    subject, roles, scopes = row[0], list(row[1]), list(row[2])
+    designation = row[3] if len(row) > 3 else ""
+    return subject, roles, scopes, designation
 
 
 def validate_identifiers() -> list[str]:
@@ -84,24 +106,32 @@ def principal_for(platform, tenant: str, subject: str) -> Principal:
     ``asker.restricted``, ``curator``, ``admin``, ``qa-agent``), so the
     isolation tests never need to mutate the shipped directory.
     """
-    for s, roles, scopes in DEMO_USERS.get(tenant, []):
-        if s == subject:
-            token = platform.idp.mint(
-                Principal(
-                    subject=s, tenant=tenant, roles=roles, scopes=scopes, agent="agent" in roles
-                )
-            )
-            return platform.idp.authenticate({"token": token})
-    # test-only isolation path — synthesize from the role template
-    for s, roles, scopes in _ROLE_USERS:
+    for row in DEMO_USERS.get(tenant, []):
+        s, roles, scopes, designation = user_fields(row)
         if s == subject:
             token = platform.idp.mint(
                 Principal(
                     subject=s,
                     tenant=tenant,
-                    roles=list(roles),
-                    scopes=list(scopes),
+                    roles=roles,
+                    scopes=scopes,
                     agent="agent" in roles,
+                    designation=designation,
+                )
+            )
+            return platform.idp.authenticate({"token": token})
+    # test-only isolation path — synthesize from the role template
+    for row in _ROLE_USERS:
+        s, roles, scopes, designation = user_fields(row)
+        if s == subject:
+            token = platform.idp.mint(
+                Principal(
+                    subject=s,
+                    tenant=tenant,
+                    roles=roles,
+                    scopes=scopes,
+                    agent="agent" in roles,
+                    designation=designation,
                 )
             )
             return platform.idp.authenticate({"token": token})

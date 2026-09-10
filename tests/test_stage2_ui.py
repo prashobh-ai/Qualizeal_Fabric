@@ -261,7 +261,7 @@ class TestMarkup(unittest.TestCase):
         # so the static question list is empty.
         prod = "qualizeal"
         self.assertEqual(
-            [u["subject"] for u in d["users"][prod]], [s for s, _, _ in demo.DEMO_USERS[prod]]
+            [u["subject"] for u in d["users"][prod]], [s for s, *_ in demo.DEMO_USERS[prod]]
         )
         self.assertEqual(d["questions"][prod], [])
         self.assertEqual(ui_common.demo_directory(), d)  # deterministic
@@ -808,9 +808,9 @@ class TestServedPages(unittest.TestCase):
             self.assertIn(k, b)
         code, u = self._json("GET", "/admin/users", token=tok)
         self.assertEqual(code, 200)
-        self.assertEqual({x["subject"] for x in u["users"]}, {s for s, _, _ in demo._ROLE_USERS})
+        self.assertEqual({x["subject"] for x in u["users"]}, {s for s, *_ in demo._ROLE_USERS})
         for x in u["users"]:
-            for k in ("subject", "roles", "scopes"):
+            for k in ("subject", "roles", "scopes", "designation"):
                 self.assertIn(k, x)
         code, a = self._json("GET", "/admin/audit?limit=40", token=tok)
         self.assertEqual(code, 200)

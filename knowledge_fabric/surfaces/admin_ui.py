@@ -88,14 +88,17 @@ _BUDGET = card(
 _USERS = card(
     "Users &amp; access",
     '<div class="row" id="add-user-form" style="margin-bottom:10px;gap:6px">'
-    '<input id="nu-subject" placeholder="user id (e.g. analyst.jo)" style="flex:1;min-width:150px">'
+    '<input id="nu-subject" placeholder="user id (e.g. analyst.jo)" style="flex:1;min-width:130px">'
+    '<input id="nu-designation" placeholder="designation (e.g. Developer, CTO)" '
+    'title="The user&#39;s org title — conditions how answers are framed (T27)" '
+    'style="flex:1;min-width:150px">'
     '<select id="nu-role"><option value="asker">Asker</option>'
     '<option value="curator">Curator</option><option value="admin">Admin</option></select>'
     '<label class="small muted"><input type="checkbox" id="nu-restricted"> restricted</label>'
     '<button class="btn primary sm" id="add-user-btn">Add user</button></div>'
     '<div class="tablewrap"><table id="users-table">'
-    "<thead><tr><th>Subject</th><th>Roles</th><th>Scopes</th><th></th></tr></thead>"
-    '<tbody id="users-rows"><tr><td colspan="4" class="empty">—</td></tr></tbody></table></div>',
+    "<thead><tr><th>Subject</th><th>Designation</th><th>Roles</th><th>Scopes</th><th></th></tr></thead>"
+    '<tbody id="users-rows"><tr><td colspan="5" class="empty">—</td></tr></tbody></table></div>',
     "users",
 )
 

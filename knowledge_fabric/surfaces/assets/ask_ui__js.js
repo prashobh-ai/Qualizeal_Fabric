@@ -63,7 +63,34 @@ function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
   '<button class="fbbtn up" title="Helpful">&#128077;</button>'+
   '<button class="fbbtn down" title="Not helpful — flag for the curators">&#128078;</button>'+
   '<span class="fbmsg muted small"></span></div>';
- return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+'</div>'+body+fb+'</div>'}
+ return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+'</div>'+body+roleLens(a)+fb+'</div>'}
+// T27 — the designation/persona lens. Same grounded answer, framed for the
+// reader's org role, decided by the SIGNED-IN identity (the designation the
+// admin captured), never picked here. A reader with no designation sees the
+// clean answer (no strip); a developer/tester/delivery/exec see a persona strip;
+// a curator the governance frame; an admin the operations frame.
+const LENS_TAG={builder:'Developer view',quality:'Quality view',delivery:'Delivery view',
+ executive:'Executive view',curation:'Curator view',operations:'Admin view'};
+function metaChip(k,v){return '<span class="rm"><i>'+esc(k)+'</i> '+esc(String(v))+'</span>'}
+function roleLens(a){const rv=a.role_view;if(!rv||rv.lens==='answer')return '';
+ const tag=LENS_TAG[rv.lens]||'View';
+ if(rv.lens==='curation'){const meta=[metaChip('Grounding',pct(rv.grounding)),metaChip('Sources',rv.sources),
+   rv.authoritative?metaChip('Authority','✓'):''].join('');
+  return '<div class="rlens curation"><span class="rtag">'+tag+'</span><span class="rnote">'+esc(rv.note||'')+'</span>'+
+   '<div class="rmeta">'+meta+'</div>'+(rv.gap_hint?'<div class="rgap">'+esc(rv.gap_hint)+'</div>':'')+'</div>'}
+ if(rv.lens==='operations'){const meta=[metaChip('Level',rv.level),metaChip('Model',rv.model||'—'),
+   metaChip('Cost','$'+Number(rv.cost||0).toFixed(4)),rv.cache_hit?metaChip('Cache','hit'):'',
+   metaChip('Tokens',(rv.tokens_in||0)+'/'+(rv.tokens_out||0))].join('');
+  return '<div class="rlens operations"><span class="rtag">'+tag+'</span><span class="rnote">'+esc(rv.note||'')+'</span>'+
+   '<div class="rmeta">'+meta+'</div></div>'}
+ // persona strips (builder / quality / delivery / executive): the framing note
+ // plus how the answer was pitched (depth + what it emphasised).
+ const DEPTH={headline:'headline',brief:'brief',full:'full detail'};
+ const EMPH={code:'implementation',test:'tests & coverage',authority:'authoritative source'};
+ const meta=[metaChip('Pitched',DEPTH[rv.depth]||rv.depth),
+   rv.emphasis&&rv.emphasis!=='none'?metaChip('Emphasis',EMPH[rv.emphasis]||rv.emphasis):''].join('');
+ return '<div class="rlens '+esc(rv.lens)+'"><span class="rtag">'+tag+'</span><span class="rnote">'+esc(rv.note||'')+'</span>'+
+   '<div class="rmeta">'+meta+'</div></div>'}
 // Render an answer body: prose with inline citation chips, plus fenced code
 // blocks (```lang … ```) rendered verbatim for code answers (T25). A code
 // citation links straight to the exact lines on GitHub; a document citation

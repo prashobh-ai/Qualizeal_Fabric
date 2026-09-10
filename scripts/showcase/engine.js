@@ -34,8 +34,20 @@
   // anyone with a QualiZeal address signs in by default (single sign-on).
   var SSO_DOMAIN = "@qualizeal.com";
   var SEED = {
-    "admin@qualizeal.com": { pw: "kf@qz2026", roles: ["admin"], scopes: ["public", "restricted"] },
-    "curator@qualizeal.com": { pw: "kf@qz2026", roles: ["curator"], scopes: ["public", "restricted"] }
+    "admin@qualizeal.com": { pw: "kf@qz2026", roles: ["admin"], scopes: ["public", "restricted"], designation: "Platform Admin" },
+    "curator@qualizeal.com": { pw: "kf@qz2026", roles: ["curator"], scopes: ["public", "restricted"], designation: "Knowledge Curator" }
+  };
+  // T27 — demo designations: signing in with one of these QualiZeal local-parts
+  // (developer@qualizeal.com, cto@qualizeal.com, …) grants that org designation,
+  // so the showcase can be signed in as each persona and watch the same question
+  // come back pitched for it. In the live product the corporate directory
+  // supplies the designation the admin captured at access-grant time.
+  var DEMO_DESIGNATIONS = {
+    developer: "Developer", dev: "Developer", engineer: "Software Engineer",
+    architect: "Solution Architect", devops: "DevOps Engineer",
+    tester: "QA Engineer", qa: "QA Engineer", qe: "QE Lead", sdet: "SDET",
+    delivery: "Delivery Head", manager: "Engineering Manager", scrum: "Scrum Master",
+    cto: "CTO", ceo: "CEO", director: "Director", vp: "VP Engineering"
   };
   var ready = realFetch(base + "/snapshot.json")
     .then(function (r) { return r.json(); })
@@ -93,9 +105,9 @@
   function loginOf(subject) { return SESSION_LOGINS[subject] || (SNAP.login || {})[subject] || null; }
 
   // Register a signed-in identity so downstream requests resolve its role/scope.
-  function mint(subject, roles, scopes) {
+  function mint(subject, roles, scopes, designation) {
     var token = "demo-" + subject;
-    var l = { token: token, subject: subject, roles: roles, scopes: scopes };
+    var l = { token: token, subject: subject, roles: roles, scopes: scopes, designation: designation || "" };
     SESSION_LOGINS[subject] = l;
     TOKEN2SUBJECT[token] = subject;
     return l;
@@ -111,20 +123,30 @@
     if ((SNAP.login || {})[subject]) return { login: (SNAP.login)[subject] };
     if (SEED[subject]) {
       var seed = SEED[subject];
-      return password === seed.pw ? { login: mint(subject, seed.roles, seed.scopes) } : { code: 401 };
+      return password === seed.pw ? { login: mint(subject, seed.roles, seed.scopes, seed.designation) } : { code: 401 };
     }
     var promoted = (STATE.users && STATE.users.users || []).filter(function (u) {
       return (u.subject || "").toLowerCase() === subject;
     })[0];
-    if (promoted) return { login: mint(subject, promoted.roles || ["asker"], promoted.scopes || ["public"]) };
+    if (promoted) return { login: mint(subject, promoted.roles || ["asker"], promoted.scopes || ["public"], promoted.designation || "") };
     if (subject.slice(-SSO_DOMAIN.length) === SSO_DOMAIN) {
-      return { login: mint(subject, ["asker"], ["public"]) };
+      var local = subject.slice(0, subject.length - SSO_DOMAIN.length);
+      return { login: mint(subject, ["asker"], ["public"], DEMO_DESIGNATIONS[local] || "") };
     }
     return { code: 404 };
   }
   function bucketOf(subject) {
     var l = loginOf(subject), roles = (l && l.roles) || [];
     return roles.indexOf("admin") >= 0 ? "admin" : roles.indexOf("curator") >= 0 ? "curator" : "asker";
+  }
+  // T27 — the signed-in identity's org designation (from login, else the baked
+  // directory row), and the persona it maps to.
+  function designationOf(subject) {
+    var l = loginOf(subject);
+    if (l && l.designation) return l.designation;
+    var users = (STATE.users && STATE.users.users) || [];
+    var row = users.filter(function (u) { return u.subject === subject; })[0];
+    return (row && row.designation) || "";
   }
   function scopeKey(subject) {
     var l = loginOf(subject), sc = (l && l.scopes) || [];
@@ -417,7 +439,9 @@
     });
     return mkAnswer("discovery", 1, parts.join("\n"), cites, 0.85);
   }
-  function composeAnswer(question, scored) {
+  function composeAnswer(question, scored, prof) {
+    prof = prof || PERSONA_PROFILE.general;
+    var cap = PERSONA_DEPTH[prof.depth] || 3, emphasis = prof.emphasis;
     var qt = tokenize(question).filter(function (t) { return !STOP[t]; });
     var top = scored.slice(0, 8);
     var code = top.filter(function (x) {
@@ -426,44 +450,128 @@
       return qt.some(function (t) { return t.length >= 3 && hay.indexOf(t) >= 0; });
     });
     if (code.length) {
+      // T27 emphasis — a quality persona leads with the verifying test, a builder
+      // with the implementation; a tiebreaker only over passages already matched.
+      code.sort(function (x, y) { return pbiasCode(y.p, emphasis) - pbiasCode(x.p, emphasis); });
       var p = code[0].p;
       return mkAnswer("lookup", 1, (p.text || p.symbol) + " [1]", [citeFor(p)], 0.85);
     }
     var docs = top.filter(function (x) { return x.p.kind !== "code" && x.p.kind !== "test"; });
     if (!docs.length || docs[0].score < 1.0) return null;  // too weak — honest gap
-    var lead = docs.slice(0, 2), parts = [], cites = [];
+    var lead = docs.slice(0, Math.max(1, Math.min(cap, 2))), parts = [], cites = [];  // T27 depth
     lead.forEach(function (x, i) { parts.push(bestSentence(x.p.text, qt) + " [" + (i + 1) + "]"); cites.push(citeFor(x.p)); });
     return mkAnswer("fast", 2, parts.join(" "), cites, 0.7);
   }
-  function retrieve(question) {
+  function pbiasCode(p, emphasis) {
+    var isTest = p.kind === "test" || (p.path || "").toLowerCase().indexOf("test") >= 0;
+    if (emphasis === "test") return isTest ? 1 : 0;
+    if (emphasis === "code") return isTest ? 0 : 1;
+    return 0;
+  }
+  function retrieve(question, prof) {
     if (!(SNAP.index && SNAP.index.passages && SNAP.index.passages.length)) return null;
     var qt = tokenize(question).filter(function (t) { return !STOP[t]; });
     if (!qt.length) return null;
     var scored = bm25(qt);
     if (!scored.length) return null;
-    return DISCOVERY.test(question) ? discoveryAnswer(scored) : composeAnswer(question, scored);
+    return DISCOVERY.test(question) ? discoveryAnswer(scored) : composeAnswer(question, scored, prof);
   }
 
+  // ---- T27: role-conditioned lens ---------------------------------------
+  // The role is the signed-in identity's org DESIGNATION (granted by the admin
+  // at access time), read via designationOf — never chosen on the ask window.
+  // persona_for maps the many titles onto a small set of personas, each with a
+  // profile (depth + emphasis + note + lens). The grounded facts stay truthful;
+  // the persona changed emphasis (which grounded evidence led) and depth (how
+  // many sentences), and the lens frames the result — a verbatim mirror of the
+  // server's personas.py + _persona_view.
+  var PERSONA_PROFILE = {
+    developer: { depth: "full", emphasis: "code", lens: "builder", note: "Developer view — implementation and code emphasised, in full." },
+    quality: { depth: "full", emphasis: "test", lens: "quality", note: "Quality view — tests, coverage and how it is verified, in full." },
+    delivery: { depth: "brief", emphasis: "authority", lens: "delivery", note: "Delivery view — the status in brief, from the authoritative source." },
+    executive: { depth: "headline", emphasis: "authority", lens: "executive", note: "Executive view — the headline, grounded in the authoritative source." },
+    curation: { depth: "full", emphasis: "none", lens: "curation", note: "Curator view — how well grounded, and where the gaps are." },
+    operations: { depth: "full", emphasis: "none", lens: "operations", note: "Admin view — the level, model and cost that produced this." },
+    general: { depth: "full", emphasis: "none", lens: "answer", note: "" }
+  };
+  var PERSONA_DEPTH = { headline: 1, brief: 2, full: 3 };
+  var PERSONA_KEYWORDS = [
+    ["ceo", "executive"], ["cto", "executive"], ["coo", "executive"], ["cio", "executive"],
+    ["cfo", "executive"], ["chief", "executive"], ["director", "executive"], ["vp", "executive"],
+    ["vice president", "executive"], ["head of", "executive"], ["founder", "executive"],
+    ["delivery", "delivery"], ["manager", "delivery"], ["scrum", "delivery"],
+    ["project lead", "delivery"], ["program", "delivery"], ["product owner", "delivery"],
+    ["tester", "quality"], ["test engineer", "quality"], ["qe", "quality"], ["qa", "quality"],
+    ["sdet", "quality"], ["quality", "quality"], ["automation", "quality"],
+    ["developer", "developer"], ["engineer", "developer"], ["architect", "developer"],
+    ["devops", "developer"], ["sre", "developer"], ["programmer", "developer"], ["sde", "developer"],
+    ["curator", "curation"], ["knowledge manager", "curation"], ["steward", "curation"],
+    ["admin", "operations"], ["operator", "operations"], ["platform", "operations"]
+  ];
+  function personaFor(designation) {
+    var d = String(designation || "").trim().toLowerCase();
+    if (!d) return "general";
+    for (var i = 0; i < PERSONA_KEYWORDS.length; i++) {
+      if (PERSONA_KEYWORDS[i][0] === "lead") continue;
+      if (d.indexOf(PERSONA_KEYWORDS[i][0]) >= 0) return PERSONA_KEYWORDS[i][1];
+    }
+    return d.indexOf("lead") >= 0 ? "delivery" : "general";
+  }
+  function personaDepthCap(designation) { return PERSONA_DEPTH[PERSONA_PROFILE[personaFor(designation)].depth]; }
+  function opsNote(a) {
+    var model = a.model_name || model_name_or(a), cache = a.cache_hit ? " · served from cache" : "";
+    return "Level " + a.level + " · " + model + " · $" + Number(a.cost || 0).toFixed(4) + cache + ".";
+  }
+  function model_name_or(a) { return a.model_name || "none (extractive core)"; }
+  function curationNote(a, cited) {
+    if (a.kind !== "answer") return "Declined — review whether the corpus should cover this.";
+    var auth = a.authoritative_source ? "an authoritative source" : cited + " source(s)";
+    return "Grounded at " + Number(a.grounding_score || 0).toFixed(2) + " on " + auth + ".";
+  }
+  function roleView(a, designation) {
+    var prof = PERSONA_PROFILE[personaFor(designation)], lens = prof.lens;
+    var view = { lens: lens, persona: personaFor(designation), designation: designation || "",
+      depth: prof.depth, emphasis: prof.emphasis, note: prof.note };
+    var answered = a.kind === "answer", cited = (a.citations || []).length;
+    if (lens === "curation") {
+      var gap = null;
+      if (answered && cited <= 1) gap = "Rests on a single source — consider adding corroborating material.";
+      else if (!answered) gap = "No grounded answer yet — a candidate gap for the backlog.";
+      view.note = curationNote(a, cited);
+      view.grounding = Number((a.grounding_score || 0).toFixed(3));
+      view.sources = cited; view.authoritative = !!a.authoritative_source; view.gap_hint = gap;
+    } else if (lens === "operations") {
+      view.note = opsNote(a); view.level = a.level; view.model = a.model_name || "";
+      view.cost = Number((a.cost || 0).toFixed(6)); view.cost_saved = Number((a.cost_saved || 0).toFixed(6));
+      view.cache_hit = !!a.cache_hit; view.tokens_in = a.tokens_in || 0; view.tokens_out = a.tokens_out || 0;
+    }
+    return view;
+  }
   function answerFor(subject, question, context) {
+    var designation = designationOf(subject);  // the signed-in identity's org title
     // Rich two-turn context from the client, else a legacy history of strings.
     var turns = (context && context.turns) ||
       ((context && context.history) || []).map(function (q) {
         return { question: q, subject: "", answer_docs: [], kind: "answer", options: [] };
       });
+    var prof = PERSONA_PROFILE[personaFor(designation)];  // T27 depth + emphasis
     var res = resolveCtx(question, turns);
+    var a;
     if (res.clarify) {
-      var ca = clarifyChips(res.clarify.chips, res.clarify.reason);
-      bumpUsage(subject, ca);
-      return ca;
+      a = clarifyChips(res.clarify.chips, res.clarify.reason);
+    } else {
+      var rq = res.question;  // the (possibly rewritten) question to retrieve on
+      // A baked answer is persona-agnostic; live retrieval applies the persona's
+      // emphasis + depth so an unbaked question differs per designation.
+      a = lookup(rq) || retrieve(rq, prof);
+      if (!a) {
+        var s2 = subjectInText(rq);
+        if (s2) a = clarifyAnswer(s2, question, turns.map(function (t) { return t.question; }));
+      }
+      if (!a) a = gapAnswer(question);
+      if (res.understood_as) a.understood_as = res.understood_as;  // shown under the bubble
     }
-    var rq = res.question;  // the (possibly rewritten) question to retrieve on
-    var a = lookup(rq) || retrieve(rq);  // Level-0 cache, else real BM25 retrieval
-    if (!a) {
-      var s2 = subjectInText(rq);
-      if (s2) a = clarifyAnswer(s2, question, turns.map(function (t) { return t.question; }));
-    }
-    if (!a) a = gapAnswer(question);
-    if (res.understood_as) a.understood_as = res.understood_as;  // shown under the bubble
+    a.role_view = roleView(a, designation);  // T27 — the designation/persona lens
     bumpUsage(subject, a);
     return a;
   }

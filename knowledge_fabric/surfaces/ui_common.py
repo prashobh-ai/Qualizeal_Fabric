@@ -59,7 +59,10 @@ def demo_directory() -> dict:
     display = {t.tenant: t.display for t in demo.DEMO_TENANTS}
     tenants = [{"tenant": t, "display": display.get(t, t)} for t in demo.DEMO_USERS]
     users = {
-        t: [{"subject": s, "roles": list(r)} for s, r, _ in rows]
+        t: [
+            {"subject": s, "roles": list(r), "designation": dg}
+            for s, r, _sc, dg in map(demo.user_fields, rows)
+        ]
         for t, rows in demo.DEMO_USERS.items()
     }
     # Suggested questions now come from the live question bank over the real

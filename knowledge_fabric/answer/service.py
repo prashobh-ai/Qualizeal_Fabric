@@ -44,7 +44,7 @@ from ..contracts.types import (
 from ..governance import authority
 from ..stores import versioning
 from . import lang as langmod
-from . import reasoning
+from . import personas, reasoning
 from . import selector as sel
 from .search import discover, is_discovery
 
@@ -141,12 +141,143 @@ class AnswerService:
         if not _nested and context:
             res = self._resolve_context(principal, question, context)
             if res.clarify:
-                return self._context_clarify(principal, res.clarify)
+                clarify = self._context_clarify(principal, res.clarify)
+                clarify.role_view = self._persona_view(principal, clarify)
+                return clarify
             question, understood = res.question, res.understood_as
         answer = self._answer(principal, question, k, allow_model, _nested)
         if understood:
             answer.understood_as = understood
+        # T27 — stamp the designation/persona lens on the finished answer. The
+        # grounded facts and citations stay truthful; the persona changed the
+        # emphasis (which grounded evidence led, applied in retrieval) and the
+        # depth (how many sentences, applied in composition), and the lens frames
+        # the result. Skipped for nested sub-asks (internal, not user-facing).
+        if not _nested:
+            answer.role_view = self._persona_view(principal, answer)
         return answer
+
+    def _persona_view(self, principal, answer) -> dict:
+        """The designation-conditioned lens (T27): the same grounded answer,
+        framed for the reader's organisational role. ``persona_for`` maps the
+        many titles a company uses onto a small set of personas, each with a
+        profile (depth + emphasis + note + lens). Every field is derived from the
+        finished answer and the profile, so the browser engine computes the
+        identical lens from a baked answer with no per-persona bake.
+
+        - **builder** (developer / architect / devops) — implementation in full.
+        - **quality** (tester / QE / SDET) — tests and verification in full.
+        - **delivery** (manager / delivery head) — the status in brief.
+        - **executive** (director / CxO) — the headline.
+        - **curation** (curator) — the governance frame (grounding, gaps).
+        - **operations** (platform admin) — the operations frame (level, cost).
+        - **general** (no designation) — the clean answer, no adornment.
+        """
+        prof = personas.profile_for(principal.designation)
+        lens = prof["lens"]
+        view = {
+            "lens": lens,
+            "persona": personas.persona_for(principal.designation),
+            "designation": principal.designation or "",
+            "depth": prof["depth"],
+            "emphasis": prof["emphasis"],
+            "note": prof["note"],
+        }
+        answered = answer.kind == AnswerKind.ANSWER
+        cited = len(answer.citations)
+        if lens == "curation":
+            gap = None
+            if answered and cited <= 1:
+                gap = "Rests on a single source — consider adding corroborating material."
+            elif not answered:
+                gap = "No grounded answer yet — a candidate gap for the backlog."
+            view.update(
+                {
+                    "note": self._curation_note(answer, cited),
+                    "grounding": round(answer.grounding_score, 3),
+                    "sources": cited,
+                    "authoritative": bool(answer.authoritative_source),
+                    "gap_hint": gap,
+                }
+            )
+        elif lens == "operations":
+            view.update(
+                {
+                    "note": self._operations_note(answer),
+                    "level": answer.level,
+                    "model": answer.model_name,
+                    "cost": round(answer.cost, 6),
+                    "cost_saved": round(answer.cost_saved, 6),
+                    "cache_hit": answer.cache_hit,
+                    "tokens_in": answer.tokens_in,
+                    "tokens_out": answer.tokens_out,
+                }
+            )
+        return view
+
+    @staticmethod
+    def _curation_note(answer, cited) -> str:
+        if answer.kind != AnswerKind.ANSWER:
+            return "Declined — review whether the corpus should cover this."
+        auth = "an authoritative source" if answer.authoritative_source else f"{cited} source(s)"
+        return f"Grounded at {round(answer.grounding_score, 2)} on {auth}."
+
+    @staticmethod
+    def _operations_note(answer) -> str:
+        model = answer.model_name or model_for_tier(answer.tier)
+        cache = " · served from cache" if answer.cache_hit else ""
+        return f"Level {answer.level} · {model} · ${answer.cost:.4f}{cache}."
+
+    @staticmethod
+    def _answer_scope(principal) -> list[str]:
+        """The full-answer cache key scope: the accessible ACLs plus a persona
+        sentinel, so each designation's persona-conditioned answer is cached
+        distinctly. The sentinel lives only in the cache key — never in the ACLs
+        used for retrieval — so personas still share the persona-agnostic
+        retrieval cache and no persona ever widens what it can retrieve."""
+        return principal.accessible_acls() + [
+            f"@persona:{personas.persona_for(principal.designation)}"
+        ]
+
+    def _persona_boost(self, principal, tenant, fused):
+        """Emphasis (T27): gently lift the grounded evidence a persona cares about
+        — a developer's answer leads with code, a tester's with tests, a delivery
+        lead's or a CxO's with the authoritative source. The bump is a soft
+        tie-breaker (a fraction of the top score), so a strongly grounded passage
+        still wins; only among comparable passages does the persona-relevant one
+        lead. Facts never change — only which grounded passage is cited first."""
+        emphasis = personas.profile_for(principal.designation)["emphasis"]
+        if emphasis == "none" or not fused:
+            return fused
+        mx = max((s for _, s in fused), default=0.0) or 1.0
+        bump = 0.5 * mx
+        scores = dict(fused)
+        for pid in list(scores):
+            pas = self.p.passages.get(tenant, pid)
+            if pas and self._persona_match(tenant, pas, emphasis):
+                scores[pid] += bump
+        return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    def _persona_match(self, tenant, pas, emphasis) -> bool:
+        is_code = pas.coordinate.kind.value == "symbol_line"
+        loc = pas.coordinate.locator or {}
+        path = (loc.get("path") or "").lower()
+        if emphasis == "code":
+            return is_code and "test" not in path  # implementation, not test code
+        if emphasis == "test":
+            if is_code and "test" in path:
+                return True
+            d = self.p.documents.get(tenant, pas.document_id) or {}
+            hay = f"{d.get('title', '')} {d.get('uri', '')} {pas.text[:200]}".lower()
+            return any(w in hay for w in ("test", " qa", "quality", "coverage", "automation"))
+        if emphasis == "authority":
+            try:
+                from ..governance import authority
+
+                return bool(authority.is_authoritative(self.p, tenant, pas.document_id))
+            except Exception:
+                return False
+        return False
 
     def _resolve_context(self, principal, question, context):
         from . import context as convo
@@ -211,6 +342,10 @@ class AnswerService:
         tenant = principal.tenant
         trace_id = new_id("traj_")
         accessible = principal.accessible_acls()
+        # T27 — the answer is persona-conditioned (emphasis + depth), so the full
+        # answer cache must be keyed per persona (see _answer_scope), or the first
+        # reader's framing would be served to every designation.
+        answer_scope = self._answer_scope(principal)
         traj = {"selected": [], "graph_node_keys": []}
         qlang = langmod.detect(question)
         rq = langmod.translate_query_to_en(question, qlang, p.model, tenant)  # retrieve on English
@@ -257,7 +392,7 @@ class AnswerService:
                     )
 
             # B. cache layer 1 — full answer cache (also serves repeated reasoned questions)
-            cached = p.cache.get_answer(tenant, question, accessible)
+            cached = p.cache.get_answer(tenant, question, answer_scope)
             if cached:
                 pay = cached["payload"]
                 saved = cached["cost"]
@@ -323,6 +458,7 @@ class AnswerService:
                     p.cache.put_retrieval(tenant, rq, accessible, fused)
                 fused = self._authority_boost(tenant, fused)
                 fused = self._subject_boost(tenant, rq, fused, accessible)
+                fused = self._persona_boost(principal, tenant, fused)  # T27 emphasis
 
             candidates: list[Candidate] = []
             for pid, fscore in fused[: k * 3]:
@@ -576,7 +712,7 @@ class AnswerService:
                 authoritative_source=auth,
                 dataset_version=dsv,
             )
-            p.cache.put_answer(tenant, question, accessible, answer.to_dict(), cost)
+            p.cache.put_answer(tenant, question, answer_scope, answer.to_dict(), cost)
 
             if not _nested:
                 self._audit(principal, "ask", "answered", trace_id)
@@ -761,7 +897,7 @@ class AnswerService:
             dataset_version=dsv,
             reasoning=surface,
         )
-        p.cache.put_answer(tenant, question, principal.accessible_acls(), answer.to_dict(), cost)
+        p.cache.put_answer(tenant, question, self._answer_scope(principal), answer.to_dict(), cost)
         span.set(
             kind="answer",
             tier=tier,
@@ -1137,7 +1273,13 @@ class AnswerService:
             Candidate(passage=pas, vector_score=float(s), fused_score=float(s))
             for s, pas in scored[:4]
         ]
-        text, citations, *_ = self._compose_code(rq, sel)
+        # T27 — persona depth + emphasis reach the early code path too, so a
+        # tester's code answer leads with the verifying test and a CxO's shows
+        # one block.
+        prof = personas.profile_for(principal.designation)
+        text, citations, *_ = self._compose_code(
+            rq, sel, personas.DEPTH_CAP[prof["depth"]], prof["emphasis"]
+        )
         if not citations:
             return None
         text = self._localize(text, qlang, principal, "none")
@@ -1302,12 +1444,14 @@ class AnswerService:
         ]
         return (named or sents)[:n]
 
-    def _compose_code(self, question, selected):
+    def _compose_code(self, question, selected, cap=2, emphasis="none"):
         """Code answer shape (T25): a one-line deterministic summary then the
         cited function verbatim in a fenced block, GitHub line-anchored. Never
         paraphrases code, so the model is bypassed entirely. Returns None when
         this is not a code question (no code passage carries a query identifier),
-        so the caller falls back to prose composition."""
+        so the caller falls back to prose composition. ``cap`` bounds how many
+        code blocks a persona sees (T27 depth): an executive gets one, a builder
+        up to two."""
         qtok = [t for t in _qtokens(question) if len(t) >= 3]
         ranked = []
         for c in selected:
@@ -1315,12 +1459,28 @@ class AnswerService:
                 continue
             loc = c.passage.coordinate.locator or {}
             ranked.append((self._ident_score(loc, qtok), c, loc))
-        ranked.sort(reverse=True, key=lambda x: (x[0], x[1].vector_score))
-        if not ranked or ranked[0][0] <= 0:
+
+        # T27 emphasis — among code passages that match the identifier, a quality
+        # persona (tester/QE) leads with the TEST that verifies the symbol, a
+        # builder with the IMPLEMENTATION. A tiebreaker only: it reorders passages
+        # that already matched, never surfaces an unmatched one. `none` (default)
+        # leaves the identifier ranking untouched, so non-persona callers (T25)
+        # are unaffected.
+        def _pbias(loc):
+            is_test = "test" in (loc.get("path") or "").lower()
+            if emphasis == "test":
+                return 1 if is_test else 0
+            if emphasis == "code":
+                return 1 if not is_test else 0
+            return 0
+
+        ranked = [r for r in ranked if r[0] > 0]  # only real identifier hits qualify
+        if not ranked:
             return None  # no identifier hit → let prose compose handle it
+        ranked.sort(reverse=True, key=lambda x: (_pbias(x[2]), x[0], x[1].vector_score))
 
         citations, parts = [], []
-        for hits, c, loc in ranked[:2]:  # at most two code blocks
+        for hits, c, loc in ranked[: max(1, min(2, cap))]:  # 1..2 blocks by persona depth
             if hits <= 0:
                 break
             pas = c.passage
@@ -1344,21 +1504,28 @@ class AnswerService:
         return "\n\n".join(parts), citations, 0, 0, 0, 0.0, model_for_tier("none")
 
     def _compose(self, principal, question, selected, tier):
-        code = self._compose_code(question, selected)
+        # T27 depth: how many sentences this designation's answer may carry —
+        # headline (1) for an executive, brief (2) for delivery, full (3) for a
+        # builder/quality/curator/admin/general reader. Facts stay grounded; the
+        # persona only decides how much of the grounded answer to surface.
+        cap = personas.depth_cap(principal.designation)
+        emphasis = personas.profile_for(principal.designation)["emphasis"]
+        code = self._compose_code(question, selected, cap, emphasis)
         if code is not None:
             return code
         qtok = set(_qtokens(question))
         subj_docs = set(self._subject_of(principal.tenant, question).values())
 
-        chosen: list = []  # (passage, sentence) — up to three distinct sentences
+        chosen: list = []  # (passage, sentence) — up to `cap` distinct sentences
         seen_txt: set = set()
 
         # 1) Definition lead. When the question names a distinctive entity, open
         #    with that document's own first substantive sentences — its
         #    definition — rather than whatever co-occurrence the embedder ranked.
+        lead_cap = min(2, cap)
         for did in subj_docs:
             for pas, s in self._doc_lead(principal.tenant, did, qtok, 2):
-                if len(chosen) < 2 and s not in seen_txt:
+                if len(chosen) < lead_cap and s not in seen_txt:
                     chosen.append((pas, s))
                     seen_txt.add(s)
             if chosen:
@@ -1390,11 +1557,11 @@ class AnswerService:
         for pas, _s in chosen:
             per_doc[pas.document_id] = per_doc.get(pas.document_id, 0) + 1
         for _score, s, pas, is_subj in pool:
-            if len(chosen) >= 3:
+            if len(chosen) >= cap:
                 break
             did = pas.document_id
-            cap = 2 if (is_subj and subj_docs) else 1  # breadth unless it's the subject doc
-            if s in seen_txt or per_doc.get(did, 0) >= cap:
+            doc_cap = 2 if (is_subj and subj_docs) else 1  # breadth unless it's the subject doc
+            if s in seen_txt or per_doc.get(did, 0) >= doc_cap:
                 continue
             chosen.append((pas, s))
             seen_txt.add(s)
