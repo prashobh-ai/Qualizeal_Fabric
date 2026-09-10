@@ -877,20 +877,30 @@ class AnswerService:
                 {"role": "system", "content": _SYSTEM_PREAMBLE},
                 {"role": "user", "content": extractive},
             ]
-            out = self.p.model.complete(principal.tenant, tier, msg, {"temperature": 0.0})
-            cost = out["cost"]
-            usage = out.get("usage", {})
-            tin = int(usage.get("in") or (len(_SYSTEM_PREAMBLE.split()) + len(extractive.split())))
-            tout = int(usage.get("out") or max(1, len(out.get("text", "").split())))
-            model_name = out.get("model_name") or model_for_tier(tier)
-            input_cost = tin * (5e-6 if tier in ("deep", "escalation") else 1e-6)
-            saved = self.p.cache.prompt_discount(_SYSTEM_PREAMBLE, input_cost)
-            cost = max(0.0, cost - saved)
-            self.p.policy.try_spend(
-                principal.tenant, cost, principal.subject if principal.agent else None
-            )
-            checked = self._postcheck(out["text"], selected)
-            text = checked or extractive
+            try:
+                out = self.p.model.complete(principal.tenant, tier, msg, {"temperature": 0.0})
+                cost = out["cost"]
+                usage = out.get("usage", {})
+                tin = int(
+                    usage.get("in") or (len(_SYSTEM_PREAMBLE.split()) + len(extractive.split()))
+                )
+                tout = int(usage.get("out") or max(1, len(out.get("text", "").split())))
+                model_name = out.get("model_name") or model_for_tier(tier)
+                input_cost = tin * (5e-6 if tier in ("deep", "escalation") else 1e-6)
+                saved = self.p.cache.prompt_discount(_SYSTEM_PREAMBLE, input_cost)
+                cost = max(0.0, cost - saved)
+                self.p.policy.try_spend(
+                    principal.tenant, cost, principal.subject if principal.agent else None
+                )
+                checked = self._postcheck(out["text"], selected)
+                text = checked or extractive
+            except Exception:
+                # A model or network error must never lose the answer: fall back
+                # to the grounded extractive text — the citations already hold.
+                cost = tin = tout = 0
+                saved = 0.0
+                text = extractive
+                model_name = model_for_tier("none")
         return text, citations, cost, tin, tout, saved, model_name
 
     def _postcheck(self, text, selected):

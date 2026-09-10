@@ -155,6 +155,15 @@ _ANTHROPIC_PRICE = {
 }
 
 
+def _accepts_sampling(model: str) -> bool:
+    """Opus 5 / Sonnet 5 / Opus 4.6-4.8 / Fable reject ``temperature`` (and the
+    other sampling params) with a 400; Haiku 4.5 and older accept them."""
+    m = (model or "").lower()
+    return not any(
+        b in m for b in ("opus-5", "opus-4-6", "opus-4-7", "opus-4-8", "sonnet-5", "fable")
+    )
+
+
 def _anthropic_model_for_tier(tier: str) -> str:
     """Anthropic model id for a router tier. ``fast/deep`` map to the small
     model; ``escalation`` maps to the large model. Names come from env with
@@ -206,7 +215,7 @@ class AnthropicModelClient:
         }
         if system is not None:
             body["system"] = system
-        if "temperature" in opts:
+        if "temperature" in opts and _accepts_sampling(model):
             body["temperature"] = float(opts["temperature"])
         req = urllib.request.Request(
             f"{self.base}/v1/messages",
