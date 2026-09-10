@@ -41,6 +41,10 @@ main{max-width:none;padding:0;display:flex;flex-direction:column}
 .chipcite{display:inline-flex;align-items:center;gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:20px;
  padding:0 8px;font-size:12px;cursor:pointer;color:var(--qz-blue-deep);margin:0 2px;line-height:1.7;white-space:nowrap;font-weight:600}
 .chipcite:hover{border-color:var(--qz-blue)}
+.chipcite.gh{text-decoration:none;color:var(--qz-blue);border-color:var(--qz-blue)}
+.codeblock{margin:10px 0;padding:12px 14px;background:#0f172a;color:#e2e8f0;border-radius:10px;
+ overflow-x:auto;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre}
+.codeblock code{font:inherit;color:inherit;background:none;padding:0;white-space:pre}
 .decline{border-left:3px solid var(--qz-amber);background:#FCF7EC;border-radius:0 8px 8px 0;padding:10px 12px;font-size:14px;color:var(--qz-ink)}
 .decline .why{color:var(--mut);font-size:13px;margin-top:6px}
 .clarify-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}

@@ -50,7 +50,7 @@ function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
   (a.cache_hit?'<span class="pill good">cached</span>':'');
  let body;
  if(a.kind==='answer'){const quote=lw.cls==='lv-quote';
-  body='<div class="answer-text'+(quote?' quote':'')+'">'+withChips(a)+'</div>';}
+  body='<div class="answer-text'+(quote?' quote':'')+'">'+renderAnswer(a)+'</div>';}
  else{const reason=(a.why||{}).explain||(a.clarify_back||'');
   const sugg=(a.kind==='clarify'&&(a.suggestions||[]).length)?
    '<div class="clarify-chips">'+a.suggestions.map(s=>'<span class="chip" data-cq="'+esc(s)+'">'+esc(s)+'</span>').join('')+'</div>':'';
@@ -61,12 +61,28 @@ function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
   '<button class="fbbtn down" title="Not helpful — flag for the curators">&#128078;</button>'+
   '<span class="fbmsg muted small"></span></div>';
  return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+'</div>'+body+fb+'</div>'}
-// inline citation chips: [n] -> "Title · p.14" (opens the page viewer, L2.2).
-function withChips(a){const cs=a.citations||[];
- return esc(a.answer_text||'').replace(/\[(\d+)\]/g,(m,n)=>{const c=cs[+n-1];if(!c)return '';
-  return '<span class="chipcite" data-cite="'+esc(n)+'">'+esc(c.document_title)+' &middot; '+esc(c.coordinate_render)+'</span>'})}
+// Render an answer body: prose with inline citation chips, plus fenced code
+// blocks (```lang … ```) rendered verbatim for code answers (T25). A code
+// citation links straight to the exact lines on GitHub; a document citation
+// opens the passage viewer (L2.2).
+function renderAnswer(a){const cs=a.citations||[];
+ const parts=String(a.answer_text||'').split('```');
+ let html='';
+ for(let i=0;i<parts.length;i++){
+  if(i%2===1){ // fenced code segment; first line may name the language
+   const seg=parts[i], nl=seg.indexOf('\n');
+   const code=nl>=0?seg.slice(nl+1):seg;
+   html+='<pre class="codeblock"><code>'+esc(code.replace(/\s+$/,''))+'</code></pre>';
+  }else{ html+=chipify(parts[i],cs); }
+ }
+ return html}
+function chipify(text,cs){return esc(text).replace(/\[(\d+)\]/g,(m,n)=>{const c=cs[+n-1];if(!c)return '';
+  const url=((c.coordinate||{}).locator||{}).url||'';
+  const label=esc(c.document_title)+' &middot; '+esc(c.coordinate_render);
+  if(url)return '<a class="chipcite gh" href="'+esc(url)+'" target="_blank" rel="noopener" title="Open on GitHub">'+label+' &#8599;</a>';
+  return '<span class="chipcite" data-cite="'+esc(n)+'">'+label+'</span>'})}
 function wireCites(){const t=curThread();if(!t)return;
- $$('#messages .chipcite').forEach(el=>el.onclick=ev=>{ev.stopPropagation();
+ $$('#messages span.chipcite').forEach(el=>el.onclick=ev=>{ev.stopPropagation();
   const turn=t.turns[+el.closest('.msg.ai').dataset.i];openPage((turn.a.citations||[])[+el.dataset.cite-1])})}
 // L6 — a reader flags an answer; 👎 records negative feedback for the curators.
 function wireFeedback(){const t=curThread();if(!t)return;
