@@ -51,6 +51,11 @@ jobs:
         run: uv run pytest -q
       - name: Identifier-safety gate
         run: uv run python -c "from knowledge_fabric.tenants import demo; assert demo.validate_identifiers()==[], demo.validate_identifiers()"
+      - name: Answer-quality gate (T28)
+        # Golden suite over the model-free extractive path (the deployed floor):
+        # a regression in grounding, citations, decline, code answers, discovery,
+        # follow-up context, or persona conditioning fails the build.
+        run: uv run python scripts/quality_gate.py
       - name: End-to-end execution demo
         run: uv run python scripts/demo.py
 
