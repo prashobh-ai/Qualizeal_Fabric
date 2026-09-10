@@ -58,6 +58,12 @@ jobs:
         run: uv run python scripts/quality_gate.py
       - name: End-to-end execution demo
         run: uv run python scripts/demo.py
+      - name: Answering-intelligence demo (T34)
+        # The T24–T33 capstone narrated end to end on the model-free floor:
+        # discovery, code answers, two-turn context, role framing, telemetry,
+        # MCP parity, the quality gate and a load burst. Exits non-zero if the
+        # quality suite or the load SLOs regress, so it doubles as a smoke check.
+        run: uv run python scripts/demo_answering.py
 
   full:
     needs: lite
