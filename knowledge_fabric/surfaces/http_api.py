@@ -358,6 +358,13 @@ class Handler(BaseHTTPRequestHandler):
                     prin.tenant, first("window", "7d"), first("subject"), first("role")
                 ),
             )
+        if u.path == "/api/events":
+            # T29 — flat telemetry for the self-serve Explorer (filter/pivot any
+            # dimension in one table). Curator+ only, like analytics.
+            prin = self._require("curate")
+            if not prin:
+                return
+            return self._send(200, {"events": p.telemetry.events(prin.tenant)})
         if u.path == "/api/suggestions":
             # P1.6 — Suggested questions from the tenant question bank,
             # filtered by the asker's ACL (they never see a question

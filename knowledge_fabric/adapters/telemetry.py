@@ -274,3 +274,42 @@ class SqlTelemetry:
             "timeseries": timeseries,
             "bucket_seconds": bucket,
         }
+
+    def events(self, tenant: str) -> list[dict]:
+        """Flat one-row-per-answer telemetry for the self-serve Explorer (T29):
+        every dimension (role, level, model, language, complexity, kind) beside
+        every metric (tokens, cost, cost saved, latency, trust, cited), so any
+        permutation can be filtered and grouped in one table."""
+        out = []
+        for r in self.db.query(
+            "SELECT * FROM spans WHERE tenant=? AND name='answer' ORDER BY started_at", (tenant,)
+        ):
+            try:
+                a = json.loads(r["attrs"]) if r["attrs"] else {}
+            except Exception:
+                a = {}
+            why = a.get("why") or {}
+            kind = a.get("kind") or ("gap" if r["level"] in ("gap", "clarify") else "answer")
+            roles = (r["roles"] or "").split(",")
+            role = (roles[0] if roles and roles[0] else "asker").split(".")[0]
+            out.append(
+                {
+                    "subject": r["subject"] or "",
+                    "role": role,
+                    "level": why.get("level_name") or r["level"] or "—",
+                    "model": r["model_name"] or "demo model",
+                    "lang": (r["lang"] or "en").upper(),
+                    "complexity": r["complexity"] or "simple",
+                    "kind": kind,
+                    "answered": 1 if kind == "answer" else 0,
+                    "declined": 0 if kind == "answer" else 1,
+                    "cited": 1 if (r["citations_count"] or 0) > 0 else 0,
+                    "tokens_in": int(r["tokens_in"] or 0),
+                    "tokens_out": int(r["tokens_out"] or 0),
+                    "cost": round(float(r["cost"] or 0.0), 6),
+                    "cost_saved": round(float(r["cost_saved"] or 0.0), 6),
+                    "latency_ms": round(float(r["duration_ms"] or 0.0), 2),
+                    "grounding": round(float(r["grounding"] or 0.0), 4),
+                }
+            )
+        return out
