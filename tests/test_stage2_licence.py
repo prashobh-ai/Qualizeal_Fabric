@@ -147,8 +147,10 @@ class GateTests(unittest.TestCase):
     def test_repository_passes_the_gate(self):
         rep = gate.run(str(ROOT), str(MANIFEST))
         self.assertTrue(rep["ok"], rep["violations"])
-        # the only third-party imports in shipped code are the guarded cloud drivers
-        self.assertEqual(rep["summary"]["third_party_imports"], ["boto3", "jwt", "pg8000"])
+        # the only third-party imports in shipped code are guarded optional deps:
+        # the cloud drivers (boto3, pg8000), OIDC verification (jwt), and the MCP
+        # server (mcp, T31) — each imported inside a function, never at module load.
+        self.assertEqual(rep["summary"]["third_party_imports"], ["boto3", "jwt", "mcp", "pg8000"])
         self.assertIn("RESULT: PASS", gate.render(rep))
 
     def test_agpl_runtime_dependency_fails(self):
