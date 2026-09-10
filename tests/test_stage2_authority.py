@@ -1,4 +1,5 @@
 """Stage-2 Section B: authoritative-source policy (ranks, weights, boost, citations)."""
+
 import unittest
 
 from knowledge_fabric.answer.service import AnswerService
@@ -11,14 +12,19 @@ T = "test-fabric"
 
 
 def _cite(doc: dict, passage_id: str = "pas_x") -> Citation:
-    return Citation(doc["id"], doc["title"], Coordinate(CoordinateKind.PAGE_PARAGRAPH,
-                                                        {"page": 1, "paragraph": 1}), passage_id, "…")
+    return Citation(
+        doc["id"],
+        doc["title"],
+        Coordinate(CoordinateKind.PAGE_PARAGRAPH, {"page": 1, "paragraph": 1}),
+        passage_id,
+        "…",
+    )
 
 
 class AuthorityBase(unittest.TestCase):
     def setUp(self):
         self.p = seeded([T])
-        self.docs = {d["source"]: d for d in self.p.documents.list(T)}   # one per source is enough
+        self.docs = {d["source"]: d for d in self.p.documents.list(T)}  # one per source is enough
         self.by_uri = {d["uri"]: d for d in self.p.documents.list(T)}
 
     def _doc(self, source):
@@ -41,9 +47,11 @@ class TestRanksAndWeights(AuthorityBase):
         auth.set_source_rank(self.p, T, "jira", 1)
         self.assertEqual(auth.rank_for(self.p, T, "jira"), 1)
         self.assertEqual(auth.weight_for(self.p, T, "jira"), 1.0)
-        auth.set_source_rank(self.p, T, "jira", 3)                       # upsert
+        auth.set_source_rank(self.p, T, "jira", 3)  # upsert
         self.assertEqual(auth.rank_for(self.p, T, "jira"), 3)
-        self.assertEqual(auth.rank_for(self.p, "isolation-check", "jira"), 4)   # other tenant untouched
+        self.assertEqual(
+            auth.rank_for(self.p, "isolation-check", "jira"), 4
+        )  # other tenant untouched
         with self.assertRaises(ValueError):
             auth.set_source_rank(self.p, T, "jira", 0)
         with self.assertRaises(ValueError):
@@ -56,7 +64,7 @@ class TestRanksAndWeights(AuthorityBase):
         rows = auth.list_ranks(self.p, T)
         sources = {r["source"] for r in rows}
         self.assertTrue(set(auth.DEFAULT_RANKS) <= sources)
-        self.assertIn("github", sources)                                  # seeded document sources
+        self.assertIn("github", sources)  # seeded document sources
         ranks = [r["rank"] for r in rows]
         self.assertEqual(ranks, sorted(ranks))
         jira = next(r for r in rows if r["source"] == "jira")
@@ -96,14 +104,17 @@ class TestBoost(AuthorityBase):
     def test_boost_reorders_by_source_weight_and_flag(self):
         files, jira, gh = self._doc("files"), self._doc("jira"), self._doc("github")
         fused = [("p_jira", 0.50), ("p_files", 0.45), ("p_gh", 0.40), ("p_unknown", 0.30)]
-        pdoc = {"p_jira": (jira["id"], "jira"), "p_files": (files["id"], "files"),
-                "p_gh": (gh["id"], "github")}
+        pdoc = {
+            "p_jira": (jira["id"], "jira"),
+            "p_files": (files["id"], "files"),
+            "p_gh": (gh["id"], "github"),
+        }
         out = auth.boost(self.p, T, fused, pdoc)
         scores = dict(out)
-        self.assertAlmostEqual(scores["p_files"], 0.45)                 # rank 1 → ×1.0
-        self.assertAlmostEqual(scores["p_jira"], 0.50 / 1.75, places=6)   # rank 4
-        self.assertAlmostEqual(scores["p_gh"], 0.40 / 1.5, places=6)      # rank 3
-        self.assertAlmostEqual(scores["p_unknown"], 0.30)               # not mapped → untouched
+        self.assertAlmostEqual(scores["p_files"], 0.45)  # rank 1 → ×1.0
+        self.assertAlmostEqual(scores["p_jira"], 0.50 / 1.75, places=6)  # rank 4
+        self.assertAlmostEqual(scores["p_gh"], 0.40 / 1.5, places=6)  # rank 3
+        self.assertAlmostEqual(scores["p_unknown"], 0.30)  # not mapped → untouched
         self.assertEqual([pid for pid, _ in out], ["p_files", "p_unknown", "p_jira", "p_gh"])
 
         auth.mark_authoritative(self.p, T, gh["id"], True, "curator")
@@ -156,7 +167,7 @@ class TestCitationExplanations(AuthorityBase):
         cites = [_cite(jira, "p1"), _cite(files, "p2"), _cite(gh, "p3"), _cite(files, "p4")]
         out = auth.conflicts(self.p, T, cites)
         pairs = {(c["a"], c["b"]): c for c in out}
-        self.assertEqual(len(out), 3)                     # jira/files, jira/github, files/github
+        self.assertEqual(len(out), 3)  # jira/files, jira/github, files/github
         self.assertEqual(pairs[(jira["id"], files["id"])]["preferred"], files["id"])
         self.assertEqual(pairs[(jira["id"], gh["id"])]["preferred"], gh["id"])
         self.assertEqual(pairs[(files["id"], gh["id"])]["preferred"], files["id"])

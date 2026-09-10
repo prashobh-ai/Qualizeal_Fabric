@@ -24,19 +24,30 @@ shown so the admin can see and remove stale config).
 
 Every read/write is tenant-filtered (I5); every write is audited.
 """
+
 from __future__ import annotations
 
 import json
 import re
-from typing import Any, Optional
+from typing import Any
 
 from ..contracts.types import new_id, now_ms
 from ..stores.repositories import _guard
 from . import registry
 
 __all__ = [
-    "ALLOW_KEYS", "DEFAULT_ALLOW_KEY", "upsert", "get", "list_all", "is_enabled",
-    "enable", "disable", "declared_scopes", "check_scopes", "effective_config", "allow_key",
+    "ALLOW_KEYS",
+    "DEFAULT_ALLOW_KEY",
+    "upsert",
+    "get",
+    "list_all",
+    "is_enabled",
+    "enable",
+    "disable",
+    "declared_scopes",
+    "check_scopes",
+    "effective_config",
+    "allow_key",
 ]
 
 #: connector-specific config key that carries its allow-list
@@ -96,33 +107,52 @@ def declared_scopes(source: str) -> list[str]:
 
 
 def _default(source: str) -> dict:
-    return {"source": source, "enabled": True, "config": {}, "allow": [],
-            "scopes": declared_scopes(source), "updated_at": None,
-            "registered": source in registry.REGISTRY}
+    return {
+        "source": source,
+        "enabled": True,
+        "config": {},
+        "allow": [],
+        "scopes": declared_scopes(source),
+        "updated_at": None,
+        "registered": source in registry.REGISTRY,
+    }
 
 
 def _row_to_dict(r) -> dict:
-    return {"source": r["source"], "enabled": bool(r["enabled"]),
-            "config": _loads(r["config"], {}), "allow": _loads(r["allow"], []),
-            "scopes": _loads(r["scopes"], []), "updated_at": r["updated_at"],
-            "registered": r["source"] in registry.REGISTRY}
+    return {
+        "source": r["source"],
+        "enabled": bool(r["enabled"]),
+        "config": _loads(r["config"], {}),
+        "allow": _loads(r["allow"], []),
+        "scopes": _loads(r["scopes"], []),
+        "updated_at": r["updated_at"],
+        "registered": r["source"] in registry.REGISTRY,
+    }
 
 
 # --------------------------------------------------------------------------
 # contract: upsert / get / list_all / is_enabled
 # --------------------------------------------------------------------------
-def get(platform, tenant: str, source: str) -> Optional[dict]:
+def get(platform, tenant: str, source: str) -> dict | None:
     """The stored config for one connector, or ``None`` if never configured."""
     _guard(tenant)
     _check_source(source)
-    r = platform.db.one("SELECT * FROM connector_config WHERE tenant=? AND source=?",
-                        (tenant, source))
+    r = platform.db.one(
+        "SELECT * FROM connector_config WHERE tenant=? AND source=?", (tenant, source)
+    )
     return _row_to_dict(r) if r else None
 
 
-def upsert(platform, tenant: str, source: str, enabled: Optional[bool] = None,
-           config: Optional[dict] = None, allow: Optional[list] = None,
-           scopes: Optional[list] = None, by_subject: str = _AUDIT_SUBJECT) -> dict:
+def upsert(
+    platform,
+    tenant: str,
+    source: str,
+    enabled: bool | None = None,
+    config: dict | None = None,
+    allow: list | None = None,
+    scopes: list | None = None,
+    by_subject: str = _AUDIT_SUBJECT,
+) -> dict:
     """Create or partially update a connector's config; ``None`` leaves a field as is.
 
     A first upsert starts from the defaults (enabled, no allow-list, declared
@@ -148,11 +178,26 @@ def upsert(platform, tenant: str, source: str, enabled: Optional[bool] = None,
            ON CONFLICT(tenant,source) DO UPDATE SET enabled=excluded.enabled,
            config=excluded.config, allow=excluded.allow, scopes=excluded.scopes,
            updated_at=excluded.updated_at""",
-        (tenant, source, 1 if rec["enabled"] else 0, json.dumps(rec["config"], default=str),
-         json.dumps(rec["allow"]), json.dumps(rec["scopes"]), rec["updated_at"]))
-    platform.audit.write(tenant, by_subject or _AUDIT_SUBJECT, False, "connector.upsert",
-                         f"connector:{source}", "enabled" if rec["enabled"] else "disabled",
-                         new_id("cfg_"), now_ms())
+        (
+            tenant,
+            source,
+            1 if rec["enabled"] else 0,
+            json.dumps(rec["config"], default=str),
+            json.dumps(rec["allow"]),
+            json.dumps(rec["scopes"]),
+            rec["updated_at"],
+        ),
+    )
+    platform.audit.write(
+        tenant,
+        by_subject or _AUDIT_SUBJECT,
+        False,
+        "connector.upsert",
+        f"connector:{source}",
+        "enabled" if rec["enabled"] else "disabled",
+        new_id("cfg_"),
+        now_ms(),
+    )
     return get(platform, tenant, source)
 
 
@@ -160,8 +205,12 @@ def list_all(platform, tenant: str) -> list[dict]:
     """Registry ∪ configured connectors, sorted by source, each with
     ``registered`` and ``declared_scopes``."""
     _guard(tenant)
-    rows = {r["source"]: _row_to_dict(r) for r in platform.db.query(
-        "SELECT * FROM connector_config WHERE tenant=? ORDER BY source", (tenant,))}
+    rows = {
+        r["source"]: _row_to_dict(r)
+        for r in platform.db.query(
+            "SELECT * FROM connector_config WHERE tenant=? ORDER BY source", (tenant,)
+        )
+    }
     out = []
     for source in sorted(set(registry.REGISTRY) | set(rows)):
         entry = rows.get(source) or _default(source)
@@ -174,8 +223,9 @@ def is_enabled(platform, tenant: str, source: str) -> bool:
     """``True`` unless the tenant explicitly disabled the connector."""
     _guard(tenant)
     _check_source(source)
-    r = platform.db.one("SELECT enabled FROM connector_config WHERE tenant=? AND source=?",
-                        (tenant, source))
+    r = platform.db.one(
+        "SELECT enabled FROM connector_config WHERE tenant=? AND source=?", (tenant, source)
+    )
     return True if r is None else bool(r["enabled"])
 
 
@@ -196,12 +246,16 @@ def check_scopes(platform, tenant: str, source: str) -> dict:
     declared = declared_scopes(source)
     granted = list(rec["scopes"]) if rec is not None else list(declared)
     missing = [s for s in declared if s not in granted]
-    return {"source": source, "declared": declared, "granted": granted,
-            "missing": missing, "ok": not missing}
+    return {
+        "source": source,
+        "declared": declared,
+        "granted": granted,
+        "missing": missing,
+        "ok": not missing,
+    }
 
 
-def effective_config(platform, tenant: str, source: str,
-                     base: Optional[dict] = None) -> dict:
+def effective_config(platform, tenant: str, source: str, base: dict | None = None) -> dict:
     """Config handed to the connector: stored admin config, overlaid with
     ``base`` (a schedule's or request's config), with the admin allow-list
     written last into the connector's allow-list key when one is set."""

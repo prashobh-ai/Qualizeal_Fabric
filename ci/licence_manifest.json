@@ -559,8 +559,12 @@
       "licence_name": "Apache License 2.0",
       "approved": true,
       "status": "optional",
-      "import_names": ["sentence_transformers"],
-      "distributions": ["sentence-transformers"],
+      "import_names": [
+        "sentence_transformers"
+      ],
+      "distributions": [
+        "sentence-transformers"
+      ],
       "why": "Serves bge-m3 (MIT weights) behind the same three-method Embedder interface; guarded import.",
       "evidence": "pyproject.toml [engines]"
     },
@@ -572,8 +576,12 @@
       "licence_name": "PyTorch BSD-3-Clause",
       "approved": true,
       "status": "optional",
-      "import_names": ["torch"],
-      "distributions": ["torch"],
+      "import_names": [
+        "torch"
+      ],
+      "distributions": [
+        "torch"
+      ],
       "why": "CPU int8 default; only pulled by the full profile.",
       "evidence": "pyproject.toml [engines]"
     },
@@ -585,8 +593,12 @@
       "licence_name": "Apache License 2.0",
       "approved": true,
       "status": "optional",
-      "import_names": ["transformers"],
-      "distributions": ["transformers"],
+      "import_names": [
+        "transformers"
+      ],
+      "distributions": [
+        "transformers"
+      ],
       "why": "Hosts the NLLB-200 (CC-BY-NC-4.0) engine — model weight licences are cleared per deployment.",
       "evidence": "pyproject.toml [engines]"
     },
@@ -598,8 +610,12 @@
       "licence_name": "Apache License 2.0",
       "approved": true,
       "status": "optional",
-      "import_names": ["lingua"],
-      "distributions": ["lingua-language-detector"],
+      "import_names": [
+        "lingua"
+      ],
+      "distributions": [
+        "lingua-language-detector"
+      ],
       "why": "Replaces the stdlib lexicon detector when installed.",
       "evidence": "pyproject.toml [engines]"
     },
@@ -611,8 +627,12 @@
       "licence_name": "MIT License",
       "approved": true,
       "status": "optional",
-      "import_names": ["spacy"],
-      "distributions": ["spacy"],
+      "import_names": [
+        "spacy"
+      ],
+      "distributions": [
+        "spacy"
+      ],
       "why": "NER for extract.py entity typing; guarded import.",
       "evidence": "pyproject.toml [engines]"
     },
@@ -624,8 +644,12 @@
       "licence_name": "MIT License",
       "approved": true,
       "status": "optional",
-      "import_names": ["tiktoken"],
-      "distributions": ["tiktoken"],
+      "import_names": [
+        "tiktoken"
+      ],
+      "distributions": [
+        "tiktoken"
+      ],
       "why": "Used by the provider gateway to count tokens the same way the vendor does.",
       "evidence": "pyproject.toml [engines]"
     },
@@ -637,8 +661,12 @@
       "licence_name": "MIT License",
       "approved": true,
       "status": "optional",
-      "import_names": ["docling"],
-      "distributions": ["docling"],
+      "import_names": [
+        "docling"
+      ],
+      "distributions": [
+        "docling"
+      ],
       "why": "Replaces DoclingLite when installed; same convert() interface.",
       "evidence": "pyproject.toml [engines]"
     },
@@ -650,8 +678,12 @@
       "licence_name": "Apache License 2.0",
       "approved": true,
       "status": "optional",
-      "import_names": ["opentelemetry"],
-      "distributions": ["opentelemetry-api"],
+      "import_names": [
+        "opentelemetry"
+      ],
+      "distributions": [
+        "opentelemetry-api"
+      ],
       "why": "OTel API surface; ships behind the Telemetry protocol.",
       "evidence": "pyproject.toml [otel]"
     },
@@ -664,7 +696,9 @@
       "approved": true,
       "status": "optional",
       "import_names": [],
-      "distributions": ["opentelemetry-sdk"],
+      "distributions": [
+        "opentelemetry-sdk"
+      ],
       "why": "Runtime that backs opentelemetry-api; not imported directly by app code.",
       "evidence": "pyproject.toml [otel]"
     },
@@ -677,7 +711,9 @@
       "approved": true,
       "status": "optional",
       "import_names": [],
-      "distributions": ["opentelemetry-exporter-otlp-proto-http"],
+      "distributions": [
+        "opentelemetry-exporter-otlp-proto-http"
+      ],
       "why": "Sends spans to the OTel Collector in the full profile.",
       "evidence": "pyproject.toml [otel]"
     },
@@ -690,7 +726,9 @@
       "approved": true,
       "status": "optional",
       "import_names": [],
-      "distributions": ["opentelemetry-semantic-conventions"],
+      "distributions": [
+        "opentelemetry-semantic-conventions"
+      ],
       "why": "Names for gen_ai.usage.* attributes on model spans.",
       "evidence": "pyproject.toml [otel]"
     },
@@ -703,7 +741,9 @@
       "approved": true,
       "status": "optional",
       "import_names": [],
-      "distributions": ["opentelemetry-instrumentation"],
+      "distributions": [
+        "opentelemetry-instrumentation"
+      ],
       "why": "Base package pulled by concrete instrumentors.",
       "evidence": "pyproject.toml [otel]"
     },
@@ -715,8 +755,12 @@
       "licence_name": "Apache License 2.0",
       "approved": true,
       "status": "optional",
-      "import_names": ["openai"],
-      "distributions": ["openai"],
+      "import_names": [
+        "openai"
+      ],
+      "distributions": [
+        "openai"
+      ],
       "why": "OpenAI-compatible client; used by providers/gateway.py::openai_.",
       "evidence": "pyproject.toml [providers]"
     },
@@ -728,8 +772,12 @@
       "licence_name": "MIT License",
       "approved": true,
       "status": "optional",
-      "import_names": ["msal"],
-      "distributions": ["msal"],
+      "import_names": [
+        "msal"
+      ],
+      "distributions": [
+        "msal"
+      ],
       "why": "Microsoft Authentication Library — pulled only when SharePoint is enabled.",
       "evidence": "pyproject.toml [connectors]"
     },
@@ -741,8 +789,12 @@
       "licence_name": "Apache License 2.0",
       "approved": true,
       "status": "optional",
-      "import_names": ["atlassian"],
-      "distributions": ["atlassian-python-api"],
+      "import_names": [
+        "atlassian"
+      ],
+      "distributions": [
+        "atlassian-python-api"
+      ],
       "why": "Read-only pull from Confluence/Jira via the Atlassian API.",
       "evidence": "pyproject.toml [connectors]"
     },
@@ -754,8 +806,12 @@
       "licence_name": "Apache License 2.0",
       "approved": true,
       "status": "optional",
-      "import_names": ["googleapiclient"],
-      "distributions": ["google-api-python-client"],
+      "import_names": [
+        "googleapiclient"
+      ],
+      "distributions": [
+        "google-api-python-client"
+      ],
       "why": "Read-only Drive files.list/get with delegated OAuth.",
       "evidence": "pyproject.toml [connectors]"
     },
@@ -768,7 +824,9 @@
       "approved": true,
       "status": "optional",
       "import_names": [],
-      "distributions": ["PyGithub"],
+      "distributions": [
+        "PyGithub"
+      ],
       "why": "LGPL is acceptable when we call the service over the network rather than link its code into our shipped image; the connector talks to api.github.com only.",
       "evidence": "pyproject.toml [connectors]"
     },
@@ -780,8 +838,12 @@
       "licence_name": "MIT License",
       "approved": true,
       "status": "optional",
-      "import_names": ["faster_whisper"],
-      "distributions": ["faster-whisper"],
+      "import_names": [
+        "faster_whisper"
+      ],
+      "distributions": [
+        "faster-whisper"
+      ],
       "why": "CTranslate2 Whisper — small int8 model, CPU-friendly.",
       "evidence": "pyproject.toml [speech]"
     },
@@ -793,8 +855,12 @@
       "licence_name": "MIT License",
       "approved": true,
       "status": "optional",
-      "import_names": ["silero_vad"],
-      "distributions": ["silero-vad"],
+      "import_names": [
+        "silero_vad"
+      ],
+      "distributions": [
+        "silero-vad"
+      ],
       "why": "End-of-utterance detection for the speech loop.",
       "evidence": "pyproject.toml [speech]"
     },
@@ -806,8 +872,12 @@
       "licence_name": "Apache License 2.0",
       "approved": true,
       "status": "optional",
-      "import_names": ["kokoro"],
-      "distributions": ["kokoro"],
+      "import_names": [
+        "kokoro"
+      ],
+      "distributions": [
+        "kokoro"
+      ],
       "why": "82M-parameter multilingual TTS; Apache-2.0 code, Apache-2.0 weights.",
       "evidence": "pyproject.toml [speech]"
     },
@@ -819,8 +889,12 @@
       "licence_name": "BSD 3-Clause License",
       "approved": true,
       "status": "optional",
-      "import_names": ["soundfile"],
-      "distributions": ["soundfile"],
+      "import_names": [
+        "soundfile"
+      ],
+      "distributions": [
+        "soundfile"
+      ],
       "why": "Reads/writes PCM WAV frames from the WebSocket protocol.",
       "evidence": "pyproject.toml [speech]"
     },
@@ -832,8 +906,12 @@
       "licence_name": "BSD 3-Clause License",
       "approved": true,
       "status": "optional",
-      "import_names": ["numpy"],
-      "distributions": ["numpy"],
+      "import_names": [
+        "numpy"
+      ],
+      "distributions": [
+        "numpy"
+      ],
       "why": "Fast frame math for VAD + ASR; pulled by faster-whisper anyway.",
       "evidence": "pyproject.toml [speech]"
     },
@@ -846,7 +924,9 @@
       "approved": true,
       "status": "optional",
       "import_names": [],
-      "distributions": ["ruff"],
+      "distributions": [
+        "ruff"
+      ],
       "why": "Development / CI lint; never shipped in the runtime image.",
       "evidence": "pyproject.toml [dev]"
     },
@@ -859,7 +939,9 @@
       "approved": true,
       "status": "optional",
       "import_names": [],
-      "distributions": ["mypy"],
+      "distributions": [
+        "mypy"
+      ],
       "why": "Development / CI type check; never shipped in the runtime image.",
       "evidence": "pyproject.toml [dev]"
     },
@@ -872,7 +954,9 @@
       "approved": true,
       "status": "optional",
       "import_names": [],
-      "distributions": ["hatchling"],
+      "distributions": [
+        "hatchling"
+      ],
       "why": "Wheel builder invoked by `pip install`; not shipped, only runs during build.",
       "evidence": "pyproject.toml [build-system]"
     },
@@ -888,6 +972,151 @@
       "distributions": [],
       "why": "Transparent PNG lockup (1674x204), mark (512x512), favicons and watermark, plus tokens.css and BRAND.md. QualiZeal owns them; served locally from /static/assets/brand/, never from a CDN.",
       "evidence": "knowledge_fabric/surfaces/static/assets/brand/logo/"
+    },
+    {
+      "name": "FastAPI",
+      "role": "HTTP application framework (T05, api/main.py)",
+      "linkage": "runtime",
+      "licence": "MIT",
+      "licence_name": "MIT License",
+      "approved": true,
+      "status": "planned",
+      "import_names": [
+        "fastapi"
+      ],
+      "distributions": [
+        "fastapi"
+      ],
+      "why": "The shipped ASGI application framework; the only web dependency of the process.",
+      "evidence": "pyproject.toml [project].dependencies (fastapi[standard])"
+    },
+    {
+      "name": "Pydantic",
+      "role": "contract/validation models (T04, contracts/types.py)",
+      "linkage": "runtime",
+      "licence": "MIT",
+      "licence_name": "MIT License",
+      "approved": true,
+      "status": "planned",
+      "import_names": [
+        "pydantic"
+      ],
+      "distributions": [
+        "pydantic"
+      ],
+      "why": "Typed request/response contracts and settings validation across the API surface.",
+      "evidence": "pyproject.toml [project].dependencies (pydantic>=2)"
+    },
+    {
+      "name": "Uvicorn",
+      "role": "ASGI server (runtime, api entrypoint)",
+      "linkage": "runtime",
+      "licence": "BSD-3-Clause",
+      "licence_name": "BSD 3-Clause License",
+      "approved": true,
+      "status": "planned",
+      "import_names": [
+        "uvicorn"
+      ],
+      "distributions": [
+        "uvicorn"
+      ],
+      "why": "Serves the FastAPI application in every shape (laptop, interim host, cloud).",
+      "evidence": "pyproject.toml [project].dependencies (uvicorn>=0.30)"
+    },
+    {
+      "name": "pytest",
+      "role": "test runner (dev / CI only)",
+      "linkage": "tooling",
+      "licence": "MIT",
+      "licence_name": "MIT License",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [
+        "pytest"
+      ],
+      "why": "Runs the unit/integration/api test tiers; never shipped in the image.",
+      "evidence": "pyproject.toml [project.optional-dependencies].dev; Makefile test target"
+    },
+    {
+      "name": "pytest-asyncio",
+      "role": "async test support (dev / CI only)",
+      "linkage": "tooling",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [
+        "pytest-asyncio"
+      ],
+      "why": "Enables asyncio_mode=auto for the FastAPI async test tier; never shipped.",
+      "evidence": "pyproject.toml [project.optional-dependencies].dev; [tool.pytest.ini_options]"
+    },
+    {
+      "name": "HTTPX",
+      "role": "test HTTP client (dev / CI only)",
+      "linkage": "tooling",
+      "licence": "BSD-3-Clause",
+      "licence_name": "BSD 3-Clause License",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [
+        "httpx"
+      ],
+      "why": "Drives the FastAPI TestClient/ASGI transport in the api test tier; never shipped.",
+      "evidence": "pyproject.toml [project.optional-dependencies].dev"
+    },
+    {
+      "name": "pip-audit",
+      "role": "dependency vulnerability audit (dev / CI only)",
+      "linkage": "tooling",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [
+        "pip-audit"
+      ],
+      "why": "Audits declared dependencies for known advisories in CI; never shipped.",
+      "evidence": "pyproject.toml [project.optional-dependencies].dev"
+    },
+    {
+      "name": "LiteLLM",
+      "role": "provider gateway (T08, providers/, guarded)",
+      "linkage": "optional-runtime",
+      "licence": "MIT",
+      "licence_name": "MIT License",
+      "approved": true,
+      "status": "optional",
+      "import_names": [
+        "litellm"
+      ],
+      "distributions": [
+        "litellm"
+      ],
+      "why": "Unifies hosted model providers behind one gateway; selected by env, guarded import.",
+      "evidence": "pyproject.toml [project.optional-dependencies].providers"
+    },
+    {
+      "name": "MCP Python SDK",
+      "role": "MCP server runtime (T20, mcp/, guarded)",
+      "linkage": "optional-runtime",
+      "licence": "MIT",
+      "licence_name": "MIT License",
+      "approved": true,
+      "status": "optional",
+      "import_names": [
+        "mcp"
+      ],
+      "distributions": [
+        "mcp"
+      ],
+      "why": "Exposes the fabric as MCP tools/resources; optional feature selected at start-up.",
+      "evidence": "pyproject.toml [project.optional-dependencies].mcp; tests/integration/test_mcp.py"
     }
   ]
 }

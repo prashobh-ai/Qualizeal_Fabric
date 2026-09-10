@@ -1,17 +1,21 @@
 """Stage-2 Section B: document history / diff / rollback, dataset versions, lineage."""
-import json
+
 import unittest
 
-from knowledge_fabric.ingestion.intake import Intake, IngestWorker
+from knowledge_fabric.ingestion.intake import IngestWorker, Intake
 from knowledge_fabric.stores import versioning as ver
 from tests.util import seeded
 
 T = "test-fabric"
-V1 = ("# Release Gate\n\nA release needs zero open critical defects before promotion.\n\n"
-      "Coverage of priority-1 requirements must reach 95 percent.\n")
-V2 = ("# Release Gate\n\nA release needs zero open critical defects before promotion.\n\n"
-      "Coverage of priority-1 requirements must reach 97 percent.\n\n"
-      "Security scan findings above medium block the release.\n")
+V1 = (
+    "# Release Gate\n\nA release needs zero open critical defects before promotion.\n\n"
+    "Coverage of priority-1 requirements must reach 95 percent.\n"
+)
+V2 = (
+    "# Release Gate\n\nA release needs zero open critical defects before promotion.\n\n"
+    "Coverage of priority-1 requirements must reach 97 percent.\n\n"
+    "Security scan findings above medium block the release.\n"
+)
 
 
 class VersioningBase(unittest.TestCase):
@@ -21,8 +25,15 @@ class VersioningBase(unittest.TestCase):
         self.worker = IngestWorker(self.p, self.intake)
 
     def _ingest(self, body: str, source_version: str) -> dict:
-        raw = self.intake.canonical(T, "files", "file://qa/release-gate.md", "Release Gate",
-                                    body.encode(), mime="text/markdown", source_version=source_version)
+        raw = self.intake.canonical(
+            T,
+            "files",
+            "file://qa/release-gate.md",
+            "Release Gate",
+            body.encode(),
+            mime="text/markdown",
+            source_version=source_version,
+        )
         self.intake.submit(raw)
         res = self.worker.drain()
         self.assertEqual(len(res), 1)
@@ -32,8 +43,15 @@ class VersioningBase(unittest.TestCase):
         """What the pipeline hook does after chunking: record the version in the ledger."""
         doc = self.p.documents.get(T, res["document_id"])
         live = [p for p in self.p.passages.by_document(T, doc["id"]) if p.version == res["version"]]
-        ver.record_version(self.p, T, doc["id"], res["version"], doc["content_hash"],
-                           [p.id for p in live], doc["source_version"])
+        ver.record_version(
+            self.p,
+            T,
+            doc["id"],
+            res["version"],
+            doc["content_hash"],
+            [p.id for p in live],
+            doc["source_version"],
+        )
 
     def _two_versions(self):
         r1 = self._ingest(V1, "1")
@@ -67,7 +85,7 @@ class TestHistoryAndDiff(VersioningBase):
         ver.record_version(self.p, T, doc_id, 2, h[1]["content_hash"], ["x"], "2")
         h2 = ver.history(self.p, T, doc_id)
         self.assertEqual(len(h2), 2)
-        self.assertEqual(h2[1]["passages"], 1)     # replaced, not duplicated
+        self.assertEqual(h2[1]["passages"], 1)  # replaced, not duplicated
 
     def test_diff_reports_added_removed_unchanged(self):
         doc_id = self._two_versions()
@@ -100,7 +118,9 @@ class TestHistoryAndDiff(VersioningBase):
         r2 = self._ingest(V2, "2")
         doc_id = r2["document_id"]
         # simulate documents ingested BEFORE the ledger hook existed: drop their rows
-        self.p.db.execute("DELETE FROM document_versions WHERE tenant=? AND document_id=?", (T, doc_id))
+        self.p.db.execute(
+            "DELETE FROM document_versions WHERE tenant=? AND document_id=?", (T, doc_id)
+        )
         h = ver.history(self.p, T, doc_id)
         self.assertEqual([x["version"] for x in h], [1, 2])
         self.assertFalse(h[0]["recorded"])
@@ -108,7 +128,9 @@ class TestHistoryAndDiff(VersioningBase):
         self.assertEqual(ver.backfill(self.p, T, doc_id), 0)
         h = ver.history(self.p, T, doc_id)
         self.assertTrue(all(x["recorded"] for x in h))
-        self.assertEqual(h[0]["content_hash"], self.p.passages.by_document(T, doc_id)[0].provenance.content_hash)
+        self.assertEqual(
+            h[0]["content_hash"], self.p.passages.by_document(T, doc_id)[0].provenance.content_hash
+        )
         self.assertEqual(r1["document_id"], doc_id)
 
     def test_history_is_tenant_scoped(self):
@@ -134,7 +156,9 @@ class TestRollback(VersioningBase):
         live = self._live(doc_id)
         self.assertEqual({p.id for p in live}, v1_ids)
         self.assertEqual({p.version for p in live}, {1})
-        superseded = [p for p in self.p.passages.by_document(T, doc_id) if p.superseded_by is not None]
+        superseded = [
+            p for p in self.p.passages.by_document(T, doc_id) if p.superseded_by is not None
+        ]
         self.assertTrue(all(p.superseded_by == "v3" for p in superseded if p.version == 2))
 
         # document row points at restored content
@@ -147,8 +171,10 @@ class TestRollback(VersioningBase):
         h = ver.history(self.p, T, doc_id)
         self.assertEqual([x["version"] for x in h], [1, 2, 3])
         self.assertEqual(h[2]["content_hash"], h[0]["content_hash"])
-        self.assertEqual(ver.diff(self.p, T, doc_id, 1, 3), {**ver.diff(self.p, T, doc_id, 1, 3),
-                                                            "added": [], "removed": []})
+        self.assertEqual(
+            ver.diff(self.p, T, doc_id, 1, 3),
+            {**ver.diff(self.p, T, doc_id, 1, 3), "added": [], "removed": []},
+        )
 
         # tenant-wide live count: v2's passages left, v1's came back
         n_v2 = len([p for p in superseded if p.version == 2])
@@ -156,8 +182,14 @@ class TestRollback(VersioningBase):
         # retrieval only sees the restored passages
         hits = self.p.lindex.search(T, "security scan findings block release", 20, ["public"])
         self.assertFalse(any(pid in {p.id for p in superseded} for pid, _ in hits))
-        self.assertTrue(any(pid in v1_ids for pid, _ in
-                            self.p.lindex.search(T, "coverage 95 percent priority", 20, ["public"])))
+        self.assertTrue(
+            any(
+                pid in v1_ids
+                for pid, _ in self.p.lindex.search(
+                    T, "coverage 95 percent priority", 20, ["public"]
+                )
+            )
+        )
 
         # audited
         entries = self.p.audit.for_tenant(T, 500)
@@ -171,7 +203,7 @@ class TestRollback(VersioningBase):
         doc_id = self._two_versions()
         ver.rollback(self.p, T, doc_id, 1, by_subject="curator")
         res = self._ingest(V1, "1")
-        self.assertEqual(res["status"], "noop")       # idempotent-by-hash after restore
+        self.assertEqual(res["status"], "noop")  # idempotent-by-hash after restore
         res = self._ingest(V2, "3")
         self.assertEqual(res["status"], "updated")
         self.assertEqual(res["version"], 4)
@@ -201,7 +233,9 @@ class TestRollback(VersioningBase):
         self.p.vindex.delete(T, v1_ids)
         ver.rollback(self.p, T, doc_id, 1, by_subject="curator")
         for pid in v1_ids:
-            r = self.p.db.one("SELECT COUNT(*) c FROM embeddings WHERE tenant=? AND passage_id=?", (T, pid))
+            r = self.p.db.one(
+                "SELECT COUNT(*) c FROM embeddings WHERE tenant=? AND passage_id=?", (T, pid)
+            )
             self.assertEqual(r["c"], 1)
 
     def test_rollback_errors(self):
@@ -210,7 +244,7 @@ class TestRollback(VersioningBase):
             ver.rollback(self.p, T, doc_id, 7, by_subject="curator")
         with self.assertRaises(KeyError):
             ver.rollback(self.p, T, "doc_missing", 1, by_subject="curator")
-        with self.assertRaises(KeyError):                 # wrong tenant cannot touch it
+        with self.assertRaises(KeyError):  # wrong tenant cannot touch it
             ver.rollback(self.p, "isolation-check", doc_id, 1, by_subject="asker.public")
         with self.assertRaises(ValueError):
             ver.rollback(self.p, T, doc_id, 1, by_subject="")
@@ -221,10 +255,10 @@ class TestRollback(VersioningBase):
 
 class TestDatasetAndLineage(VersioningBase):
     def test_dataset_version_bumps_and_counts(self):
-        v0 = ver.current_dataset(self.p, T)          # seeding already versioned the corpus
+        v0 = ver.current_dataset(self.p, T)  # seeding already versioned the corpus
         v1 = ver.bump_dataset(self.p, T, "initial seed")
         self.assertEqual(v1, v0 + 1)
-        self._two_versions()                          # each changed batch bumps the dataset
+        self._two_versions()  # each changed batch bumps the dataset
         v_mid = ver.current_dataset(self.p, T)
         v2 = ver.bump_dataset(self.p, T, "release-gate updated")
         self.assertEqual(v2, v_mid + 1)

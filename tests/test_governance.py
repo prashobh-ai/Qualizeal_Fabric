@@ -1,11 +1,11 @@
 """Governance checklist (Section 20) + Runbook 4-6: identity, isolation,
 permission-before-ranking, per-agent identity, audit, budget race, rate limit."""
+
 import threading
-import time
 import unittest
 
 from knowledge_fabric.answer.service import AnswerService
-from knowledge_fabric.contracts.types import AnswerKind, Principal
+from knowledge_fabric.contracts.types import Principal
 from knowledge_fabric.tenants import demo
 from tests.util import seeded
 
@@ -25,10 +25,12 @@ class TestGovernance(unittest.TestCase):
         hits = self.p.vindex.search("test-fabric", qvec, 10, ["public"])
         for pid, _ in hits:
             pas = self.p.passages.get("test-fabric", pid)
-            self.assertIsNotNone(pas)          # never a isolation-check passage
+            self.assertIsNotNone(pas)  # never a isolation-check passage
         # cross-tenant token cannot read the other tenant
-        self.assertEqual(self.p.vindex.search("test-fabric", qvec, 10, ["public"]),
-                         self.p.vindex.search("test-fabric", qvec, 10, ["public"]))
+        self.assertEqual(
+            self.p.vindex.search("test-fabric", qvec, 10, ["public"]),
+            self.p.vindex.search("test-fabric", qvec, 10, ["public"]),
+        )
 
     # --- I6 permission before ranking ---------------------------------
     def test_restricted_doc_never_enters_retrieval(self):

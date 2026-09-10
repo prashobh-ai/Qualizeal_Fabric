@@ -26,6 +26,7 @@ What it checks
 Exit status: 0 clean · 1 violations · 2 manifest missing/invalid or bad args.
 Pure standard library; deterministic (sorted) output.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -215,8 +216,9 @@ def scan_imports(repo_root: str, packages: list[str]) -> dict[str, list[dict]]:
                 with open(path, encoding="utf-8") as fh:
                     tree = ast.parse(fh.read(), filename=rel)
             except (SyntaxError, ValueError, OSError) as e:
-                out.setdefault("<parse-error>", []).append({"file": rel, "line": 0, "guarded": False,
-                                                            "error": str(e)})
+                out.setdefault("<parse-error>", []).append(
+                    {"file": rel, "line": 0, "guarded": False, "error": str(e)}
+                )
                 continue
             for mod, line, guarded in _guarded_imports(tree):
                 if _is_stdlib(mod) or mod in local:
@@ -272,7 +274,7 @@ def _pyproject_dists(text: str) -> list[str]:
     project metadata as if they were requirement pins.
     """
     dists: list[str] = []
-    tables: list[tuple[str, int, int]] = []   # (table_name, start_line, end_line)
+    tables: list[tuple[str, int, int]] = []  # (table_name, start_line, end_line)
     lines = text.splitlines()
     # locate table boundaries
     heads: list[tuple[int, str]] = []
@@ -280,8 +282,8 @@ def _pyproject_dists(text: str) -> list[str]:
         m = _TOML_TABLE.match(line)
         if m:
             heads.append((i, m.group(1).strip()))
-    heads.append((len(lines), ""))     # sentinel
-    for (start, name), (end, _) in zip(heads, heads[1:]):
+    heads.append((len(lines), ""))  # sentinel
+    for (start, name), (end, _) in zip(heads, heads[1:], strict=False):
         tables.append((name, start, end))
 
     def _extract_arrays(block: str) -> list[str]:
@@ -304,7 +306,7 @@ def _pyproject_dists(text: str) -> list[str]:
                     if depth == 0:
                         break
                 j += 1
-            arr = block[m.end():j]
+            arr = block[m.end() : j]
             for s in re.finditer(r'"([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:[<>=!~\[;].*?)?"', arr):
                 out.append(s.group(1))
             i = j + 1
@@ -317,10 +319,14 @@ def _pyproject_dists(text: str) -> list[str]:
             # match only `dependencies = [...]`
             m = re.search(r"^\s*dependencies\s*=\s*\[", block, re.M)
             if m:
-                for s in re.finditer(r'"([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:[<>=!~\[;].*?)?"',
-                                     block[m.end():]):
+                for s in re.finditer(
+                    r'"([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:[<>=!~\[;].*?)?"', block[m.end() :]
+                ):
                     dists.append(s.group(1))
-        elif name.startswith("project.optional-dependencies") or name == "project.optional-dependencies":
+        elif (
+            name.startswith("project.optional-dependencies")
+            or name == "project.optional-dependencies"
+        ):
             dists.extend(_extract_arrays(block))
     return dists
 
@@ -328,8 +334,11 @@ def _pyproject_dists(text: str) -> list[str]:
 # --------------------------------------------------------------------------
 # evaluation
 # --------------------------------------------------------------------------
-def evaluate(manifest: dict, imports: dict[str, list[dict]] | None = None,
-             requirements: dict[str, str] | None = None) -> dict:
+def evaluate(
+    manifest: dict,
+    imports: dict[str, list[dict]] | None = None,
+    requirements: dict[str, str] | None = None,
+) -> dict:
     """Apply the policy; return ``{"ok", "violations", "warnings", "summary", "components"}``.
 
     ``imports``/``requirements`` are the outputs of ``scan_imports``/
@@ -351,25 +360,41 @@ def evaluate(manifest: dict, imports: dict[str, list[dict]] | None = None,
         cls = licence_class(policy, licence)
         rejected = c.get("status") == "rejected"
         allowed = cls is not None and cls in rules.get(linkage, [])
-        rows.append({"name": name, "role": c.get("role", ""), "linkage": linkage, "licence": licence,
-                     "class": cls, "approved": bool(c["approved"]), "status": c.get("status", ""),
-                     "allowed": allowed})
+        rows.append(
+            {
+                "name": name,
+                "role": c.get("role", ""),
+                "linkage": linkage,
+                "licence": licence,
+                "class": cls,
+                "approved": bool(c["approved"]),
+                "status": c.get("status", ""),
+                "allowed": allowed,
+            }
+        )
         for imp in c.get("import_names", []) or []:
             by_import[imp] = c
         for dist in c.get("distributions", []) or []:
             by_dist[_norm(dist)] = c
         if rejected:
             if c["approved"]:
-                viol("rejected_but_approved", name, "status=rejected components must have approved=false")
+                viol(
+                    "rejected_but_approved",
+                    name,
+                    "status=rejected components must have approved=false",
+                )
             continue
         if not c["approved"]:
             viol("not_approved", name, f"component is not approved (status={c.get('status')!r})")
         if cls is None:
             viol("unknown_licence", name, f"licence {licence!r} is not in any licence class")
         elif not allowed:
-            viol("linkage_denied", name,
-                 f"licence {licence} ({cls}) is not allowed for linkage {linkage!r}; "
-                 f"allowed classes: {', '.join(rules.get(linkage, []))}")
+            viol(
+                "linkage_denied",
+                name,
+                f"licence {licence} ({cls}) is not allowed for linkage {linkage!r}; "
+                f"allowed classes: {', '.join(rules.get(linkage, []))}",
+            )
 
     for mod, sites in (imports or {}).items():
         where = ", ".join(f"{s['file']}:{s['line']}" for s in sites)
@@ -378,7 +403,11 @@ def evaluate(manifest: dict, imports: dict[str, list[dict]] | None = None,
             continue
         comp = by_import.get(mod)
         if comp is None:
-            viol("undeclared_import", mod, f"third-party import {mod!r} is not declared in the manifest ({where})")
+            viol(
+                "undeclared_import",
+                mod,
+                f"third-party import {mod!r} is not declared in the manifest ({where})",
+            )
             continue
         if comp.get("status") == "rejected" or not comp["approved"]:
             viol("rejected_import", comp["name"], f"import of rejected component {mod!r} ({where})")
@@ -386,17 +415,30 @@ def evaluate(manifest: dict, imports: dict[str, list[dict]] | None = None,
         if comp["linkage"] == "optional-runtime":
             bare = [s for s in sites if not s["guarded"]]
             if bare:
-                viol("unguarded_optional_import", comp["name"],
-                     f"optional-runtime import {mod!r} must be inside try/except ImportError: "
-                     + ", ".join(f"{s['file']}:{s['line']}" for s in bare))
+                viol(
+                    "unguarded_optional_import",
+                    comp["name"],
+                    f"optional-runtime import {mod!r} must be inside try/except ImportError: "
+                    + ", ".join(f"{s['file']}:{s['line']}" for s in bare),
+                )
         elif comp["linkage"] not in ("runtime",):
-            viol("linkage_mismatch", comp["name"],
-                 f"{mod!r} is imported by shipped code but declared as {comp['linkage']!r} ({where})")
+            viol(
+                "linkage_mismatch",
+                comp["name"],
+                (
+                    f"{mod!r} is imported by shipped code but declared as {comp['linkage']!r} "
+                    f"({where})"
+                ),
+            )
 
     for dist, src in (requirements or {}).items():
         comp = by_dist.get(dist)
         if comp is None:
-            viol("requirements_undeclared", dist, f"{src} pins {dist!r}, which is not in the manifest")
+            viol(
+                "requirements_undeclared",
+                dist,
+                f"{src} pins {dist!r}, which is not in the manifest",
+            )
         elif comp.get("status") == "rejected" or not comp["approved"]:
             viol("requirements_rejected", comp["name"], f"{src} pins rejected component {dist!r}")
 
@@ -405,17 +447,24 @@ def evaluate(manifest: dict, imports: dict[str, list[dict]] | None = None,
         if r["status"] != "rejected":
             linkage_counts[r["linkage"]] = linkage_counts.get(r["linkage"], 0) + 1
     if not (imports or {}):
-        warnings.append({"code": "no_third_party_imports",
-                         "detail": "no third-party imports found in shipped code (stdlib-only)"})
+        warnings.append(
+            {
+                "code": "no_third_party_imports",
+                "detail": "no third-party imports found in shipped code (stdlib-only)",
+            }
+        )
     violations.sort(key=lambda v: (v["code"], str(v["component"]), v["detail"]))
     return {
         "ok": not violations,
         "violations": violations,
         "warnings": warnings,
-        "summary": {"components": len(rows), "rejected": sum(1 for r in rows if r["status"] == "rejected"),
-                    "by_linkage": dict(sorted(linkage_counts.items())),
-                    "third_party_imports": sorted((imports or {}).keys()),
-                    "requirements": sorted((requirements or {}).keys())},
+        "summary": {
+            "components": len(rows),
+            "rejected": sum(1 for r in rows if r["status"] == "rejected"),
+            "by_linkage": dict(sorted(linkage_counts.items())),
+            "third_party_imports": sorted((imports or {}).keys()),
+            "requirements": sorted((requirements or {}).keys()),
+        },
         "components": rows,
     }
 
@@ -440,11 +489,16 @@ def render(report: dict) -> str:
     for r in report["components"]:
         flag = "yes" if r["approved"] else ("rejected" if r["status"] == "rejected" else "NO")
         mark = "" if r["allowed"] or r["status"] == "rejected" else "  <-- DENIED"
-        lines.append(f"{r['name']:<{width}}  {r['linkage']:<16} {r['licence']:<22} "
-                     f"{str(r['class']):<18} {flag}{mark}")
+        lines.append(
+            f"{r['name']:<{width}}  {r['linkage']:<16} {r['licence']:<22} "
+            f"{str(r['class']):<18} {flag}{mark}"
+        )
     s = report["summary"]
-    lines += ["", f"third-party imports in shipped code: "
-                  f"{', '.join(s['third_party_imports']) or 'none (stdlib-only)'}"]
+    lines += [
+        "",
+        f"third-party imports in shipped code: "
+        f"{', '.join(s['third_party_imports']) or 'none (stdlib-only)'}",
+    ]
     if s["requirements"]:
         lines.append("requirements pinned: " + ", ".join(s["requirements"]))
     for w in report["warnings"]:
@@ -461,7 +515,9 @@ def render(report: dict) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="licence_gate", description=__doc__.strip().splitlines()[0])
-    ap.add_argument("--manifest", default=None, help=f"manifest path (default: <repo>/{DEFAULT_MANIFEST})")
+    ap.add_argument(
+        "--manifest", default=None, help=f"manifest path (default: <repo>/{DEFAULT_MANIFEST})"
+    )
     ap.add_argument("--repo", default=None, help="repository root (default: this checkout)")
     ap.add_argument("--json", action="store_true", help="print the report as JSON")
     args = ap.parse_args(argv)

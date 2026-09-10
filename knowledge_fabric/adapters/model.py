@@ -11,12 +11,14 @@
 Prices are per-token illustrative tiers; the point is that cost is real,
 attributable and capped, not that these are any provider's list prices.
 """
+
 from __future__ import annotations
 
 import os
 import time
 
 _TIER_PRICE = {"fast": 1e-6, "deep": 5e-6, "escalation": 1e-5}
+
 
 # ---- multi-model gateway: one gateway in front of several models/providers ----
 # Each tier maps to a NAMED model (roadmap WS2: "one gateway in front of three AI
@@ -25,14 +27,22 @@ _TIER_PRICE = {"fast": 1e-6, "deep": 5e-6, "escalation": 1e-5}
 # "which model ran, when, and why".
 def model_for_tier(tier: str) -> str:
     defaults = {"fast": "kf-mock-small", "deep": "kf-mock-mid", "escalation": "kf-mock-large"}
-    env = {"fast": os.environ.get("KF_MODEL_FAST"), "deep": os.environ.get("KF_MODEL_DEEP"),
-           "escalation": os.environ.get("KF_MODEL_ESCALATION")}
+    env = {
+        "fast": os.environ.get("KF_MODEL_FAST"),
+        "deep": os.environ.get("KF_MODEL_DEEP"),
+        "escalation": os.environ.get("KF_MODEL_ESCALATION"),
+    }
     if tier in ("", "none", None):
         return "none (extractive core)"
     return env.get(tier) or defaults.get(tier, "kf-mock-small")
 
 
-COMPLEXITY_OF_TIER = {"none": "simple", "fast": "medium", "deep": "complex", "escalation": "complex"}
+COMPLEXITY_OF_TIER = {
+    "none": "simple",
+    "fast": "medium",
+    "deep": "complex",
+    "escalation": "complex",
+}
 
 
 class MockModelClient:
@@ -55,8 +65,12 @@ class MockModelClient:
         in_tokens = sum(len(m.get("content", "").split()) for m in messages)
         tokens = in_tokens + out_tokens
         cost = tokens * _TIER_PRICE.get(tier, 1e-6)
-        return {"text": draft, "usage": {"tokens": tokens, "in": in_tokens, "out": out_tokens},
-                "cost": cost, "model_name": model_for_tier(tier)}
+        return {
+            "text": draft,
+            "usage": {"tokens": tokens, "in": in_tokens, "out": out_tokens},
+            "cost": cost,
+            "model_name": model_for_tier(tier),
+        }
 
 
 class DisabledModelClient:
@@ -71,7 +85,9 @@ class HostedModelClient:
     def __init__(self):
         self.base = os.environ.get("KF_MODEL_BASE_URL", "")
         self.key = os.environ.get("KF_MODEL_API_KEY", "")
-        self.model = os.environ.get("KF_MODEL_NAME", "gpt-4o-mini")   # fallback when a tier has no name
+        self.model = os.environ.get(
+            "KF_MODEL_NAME", "gpt-4o-mini"
+        )  # fallback when a tier has no name
 
     def available(self) -> bool:
         return bool(self.base and self.key)
@@ -79,21 +95,41 @@ class HostedModelClient:
     def complete(self, tenant: str, tier: str, messages: list[dict], opts: dict) -> dict:
         import json
         import urllib.request
-        model = os.environ.get({"fast": "KF_MODEL_FAST", "deep": "KF_MODEL_DEEP",
-                                "escalation": "KF_MODEL_ESCALATION"}.get(tier, ""), "") or self.model
-        body = json.dumps({"model": model, "messages": messages,
-                           "temperature": opts.get("temperature", 0.0)}).encode()
+
+        model = (
+            os.environ.get(
+                {
+                    "fast": "KF_MODEL_FAST",
+                    "deep": "KF_MODEL_DEEP",
+                    "escalation": "KF_MODEL_ESCALATION",
+                }.get(tier, ""),
+                "",
+            )
+            or self.model
+        )
+        body = json.dumps(
+            {"model": model, "messages": messages, "temperature": opts.get("temperature", 0.0)}
+        ).encode()
         req = urllib.request.Request(
-            self.base.rstrip("/") + "/chat/completions", data=body,
-            headers={"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"})
+            self.base.rstrip("/") + "/chat/completions",
+            data=body,
+            headers={"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"},
+        )
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read())
         text = data["choices"][0]["message"]["content"]
         usage = data.get("usage", {})
         tokens = usage.get("total_tokens", len(text.split()))
-        return {"text": text, "usage": {"tokens": tokens, "in": usage.get("prompt_tokens", 0),
-                                        "out": usage.get("completion_tokens", 0)},
-                "cost": tokens * _TIER_PRICE.get(tier, 5e-6), "model_name": model}
+        return {
+            "text": text,
+            "usage": {
+                "tokens": tokens,
+                "in": usage.get("prompt_tokens", 0),
+                "out": usage.get("completion_tokens", 0),
+            },
+            "cost": tokens * _TIER_PRICE.get(tier, 5e-6),
+            "model_name": model,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -112,8 +148,11 @@ class HostedModelClient:
 # ---------------------------------------------------------------------------
 
 # Illustrative-only fallback prices, used when the API does not return usage.
-_ANTHROPIC_PRICE = {"fast": (1.0e-6, 5.0e-6), "deep": (2.0e-6, 10.0e-6),
-                    "escalation": (5.0e-6, 25.0e-6)}
+_ANTHROPIC_PRICE = {
+    "fast": (1.0e-6, 5.0e-6),
+    "deep": (2.0e-6, 10.0e-6),
+    "escalation": (5.0e-6, 25.0e-6),
+}
 
 
 def _anthropic_model_for_tier(tier: str) -> str:
@@ -135,6 +174,7 @@ class AnthropicModelClient:
     Reads the API key from ``ANTHROPIC_API_KEY``. Never commits a key.
     ``available()`` is True only when the key is present.
     """
+
     def __init__(self):
         self.key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
         self.base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
@@ -146,6 +186,7 @@ class AnthropicModelClient:
     def complete(self, tenant: str, tier: str, messages: list[dict], opts: dict) -> dict:
         import json
         import urllib.request
+
         model = _anthropic_model_for_tier(tier)
         # Split any system-role message off into the top-level `system` field;
         # the Anthropic Messages API rejects `role: "system"` inside messages.
@@ -179,17 +220,26 @@ class AnthropicModelClient:
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read())
         # `content` is a list of blocks; concatenate every text block.
-        text = "".join(b.get("text", "") for b in data.get("content", [])
-                       if b.get("type") == "text")
+        text = "".join(
+            b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
+        )
         usage = data.get("usage", {})
         in_tok = int(usage.get("input_tokens", 0))
         out_tok = int(usage.get("output_tokens", 0))
         pin, pout = _ANTHROPIC_PRICE.get(tier, _ANTHROPIC_PRICE["deep"])
         cost = in_tok * pin + out_tok * pout
-        return {"text": text, "usage": {"tokens": in_tok + out_tok, "in": in_tok, "out": out_tok,
-                                        "cache_read": int(usage.get("cache_read_input_tokens", 0)),
-                                        "cache_creation": int(usage.get("cache_creation_input_tokens", 0))},
-                "cost": cost, "model_name": data.get("model") or model}
+        return {
+            "text": text,
+            "usage": {
+                "tokens": in_tok + out_tok,
+                "in": in_tok,
+                "out": out_tok,
+                "cache_read": int(usage.get("cache_read_input_tokens", 0)),
+                "cache_creation": int(usage.get("cache_creation_input_tokens", 0)),
+            },
+            "cost": cost,
+            "model_name": data.get("model") or model,
+        }
 
 
 # ---- Provider registry: what KF_MODEL_MODE picks, and the escalation order.
@@ -219,7 +269,7 @@ def build_model_client() -> object:
         # is empty until the company key arrives (F0.3).
         hosted = HostedModelClient()
         return hosted if hosted.available() else MockModelClient()
-    if mode == "hosted":                # legacy alias for `openai`
+    if mode == "hosted":  # legacy alias for `openai`
         hosted = HostedModelClient()
         return hosted if hosted.available() else MockModelClient()
     if mode in ("bedrock", "vllm"):

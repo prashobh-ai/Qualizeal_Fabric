@@ -7,6 +7,7 @@ what invariant I9 requires ("embeddings are never re-computed at a provider
 swap"). On a GPU box this adapter is swapped for a bge-m3-class server behind
 the same three methods — nothing else changes.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -45,7 +46,7 @@ class HashingEmbedder:
             toks = _tokens(t)
             for tok in toks:
                 self._feature(tok, vec)
-            for a, b in zip(toks, toks[1:]):
+            for a, b in zip(toks, toks[1:], strict=False):
                 self._feature(a + "_" + b, vec)
             norm = math.sqrt(sum(x * x for x in vec)) or 1.0
             out.append([x / norm for x in vec])
@@ -53,4 +54,4 @@ class HashingEmbedder:
 
 
 def cosine(a: list[float], b: list[float]) -> float:
-    return sum(x * y for x, y in zip(a, b))
+    return sum(x * y for x, y in zip(a, b, strict=False))

@@ -6,6 +6,7 @@ synthetic corpus fixture into a **test-only** fabric id (`test-fabric` by
 default). The synthetic corpus never touches the `qualizeal` product
 fabric.
 """
+
 import os
 
 from knowledge_fabric.app import Platform

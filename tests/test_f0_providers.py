@@ -3,9 +3,9 @@
 The Anthropic API is never actually called: `urllib.request.urlopen` is
 patched so tests run without a network connection (or a real key).
 """
+
 from __future__ import annotations
 
-import io
 import json
 import os
 import unittest
@@ -20,9 +20,16 @@ class TestBuildModelClient(unittest.TestCase):
 
     def setUp(self):
         # Snapshot and clear the four env vars this test touches.
-        self._snap = {k: os.environ.get(k) for k in
-                      ("KF_MODEL_MODE", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
-                       "KF_MODEL_BASE_URL", "KF_MODEL_API_KEY")}
+        self._snap = {
+            k: os.environ.get(k)
+            for k in (
+                "KF_MODEL_MODE",
+                "ANTHROPIC_API_KEY",
+                "OPENAI_API_KEY",
+                "KF_MODEL_BASE_URL",
+                "KF_MODEL_API_KEY",
+            )
+        }
         for k in self._snap:
             os.environ.pop(k, None)
 
@@ -68,11 +75,17 @@ class TestAnthropicModelClient(unittest.TestCase):
 
     def test_complete_maps_system_and_reads_usage(self):
         canned = {
-            "id": "msg_1", "type": "message", "role": "assistant",
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
             "model": "claude-opus-5",
             "content": [{"type": "text", "text": "OK."}],
-            "usage": {"input_tokens": 10, "output_tokens": 3,
-                      "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 3,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
         }
         captured = {}
 
@@ -84,17 +97,22 @@ class TestAnthropicModelClient(unittest.TestCase):
 
         client = model.AnthropicModelClient()
         with mock.patch("urllib.request.urlopen", fake_urlopen):
-            out = client.complete("test-fabric", "escalation",
-                                  [{"role": "system", "content": "You are helpful."},
-                                   {"role": "user", "content": "hi"}],
-                                  {"max_tokens": 128})
+            out = client.complete(
+                "test-fabric",
+                "escalation",
+                [
+                    {"role": "system", "content": "You are helpful."},
+                    {"role": "user", "content": "hi"},
+                ],
+                {"max_tokens": 128},
+            )
         # The system role is lifted out of `messages` into top-level `system`.
         self.assertEqual(captured["body"]["system"], "You are helpful.")
-        self.assertEqual(captured["body"]["messages"],
-                         [{"role": "user", "content": "hi"}])
+        self.assertEqual(captured["body"]["messages"], [{"role": "user", "content": "hi"}])
         # Model selection follows KF_MODEL_LARGE for the escalation tier.
-        self.assertEqual(captured["body"]["model"],
-                         os.environ.get("KF_MODEL_LARGE", "claude-opus-5"))
+        self.assertEqual(
+            captured["body"]["model"], os.environ.get("KF_MODEL_LARGE", "claude-opus-5")
+        )
         # Response shape flows through to the platform's expected dict.
         self.assertEqual(out["text"], "OK.")
         self.assertEqual(out["usage"]["in"], 10)
@@ -105,6 +123,7 @@ class TestAnthropicModelClient(unittest.TestCase):
 
 class _Response:
     """Minimal urlopen-return stand-in."""
+
     def __init__(self, payload):
         self._data = json.dumps(payload).encode()
 
@@ -120,9 +139,10 @@ class _Response:
 
 class TestDoctorModelIdCheck(unittest.TestCase):
     def setUp(self):
-        self._snap = {k: os.environ.get(k) for k in
-                      ("ANTHROPIC_API_KEY", "OPENAI_API_KEY",
-                       "KF_MODEL_SMALL", "KF_MODEL_LARGE")}
+        self._snap = {
+            k: os.environ.get(k)
+            for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "KF_MODEL_SMALL", "KF_MODEL_LARGE")
+        }
 
     def tearDown(self):
         for k, v in self._snap.items():
@@ -135,6 +155,7 @@ class TestDoctorModelIdCheck(unittest.TestCase):
         os.environ.pop("ANTHROPIC_API_KEY", None)
         os.environ.pop("OPENAI_API_KEY", None)
         from scripts import doctor
+
         rep = doctor.check_model_ids()
         self.assertEqual(rep["providers"]["anthropic"]["status"], "skipped")
         self.assertEqual(rep["providers"]["openai"]["status"], "skipped")
@@ -143,14 +164,16 @@ class TestDoctorModelIdCheck(unittest.TestCase):
         os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
         os.environ["KF_MODEL_SMALL"] = "claude-haiku-4-5"
         os.environ["KF_MODEL_LARGE"] = "claude-opus-5"
-        payload = {"data": [
-            {"id": "claude-haiku-4-5"},
-            {"id": "claude-opus-5"},
-            {"id": "claude-sonnet-5"},
-        ]}
-        with mock.patch("urllib.request.urlopen",
-                         lambda *_a, **_kw: _Response(payload)):
+        payload = {
+            "data": [
+                {"id": "claude-haiku-4-5"},
+                {"id": "claude-opus-5"},
+                {"id": "claude-sonnet-5"},
+            ]
+        }
+        with mock.patch("urllib.request.urlopen", lambda *_a, **_kw: _Response(payload)):
             from scripts import doctor
+
             rep = doctor.check_model_ids()
         self.assertEqual(rep["providers"]["anthropic"]["status"], "ok")
         self.assertTrue(rep["providers"]["anthropic"]["small_valid"])
@@ -161,9 +184,9 @@ class TestDoctorModelIdCheck(unittest.TestCase):
         os.environ["KF_MODEL_SMALL"] = "claude-was-retired"
         os.environ["KF_MODEL_LARGE"] = "claude-opus-5"
         payload = {"data": [{"id": "claude-opus-5"}, {"id": "claude-haiku-4-5"}]}
-        with mock.patch("urllib.request.urlopen",
-                         lambda *_a, **_kw: _Response(payload)):
+        with mock.patch("urllib.request.urlopen", lambda *_a, **_kw: _Response(payload)):
             from scripts import doctor
+
             rep = doctor.check_model_ids()
         self.assertEqual(rep["providers"]["anthropic"]["status"], "stale")
         self.assertFalse(rep["providers"]["anthropic"]["small_valid"])

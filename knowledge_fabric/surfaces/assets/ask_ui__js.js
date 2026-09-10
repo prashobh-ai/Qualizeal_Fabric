@@ -1,0 +1,260 @@
+
+const {$,$$,esc,num,pct,money,ms,toast,gate,api}=KF;
+
+// ---- reader-facing level words (never a number or an internal code, L1.5) ---
+const LEVEL_WORDS={
+ lookup:{word:'Look it up',cls:'lv-look'},
+ fast:{word:'Quote it',cls:'lv-quote'},
+ reason:{word:'Summarise it',cls:'lv-sum'},
+ escalation:{word:'Reason about it',cls:'lv-reason'},
+ clarify:{word:'Needs a clearer question',cls:''},
+ gap:{word:'Outside the knowledge base',cls:''}};
+function levelWord(name){const k=String(name||'');
+ if(k.indexOf('reasoning')===0)return {word:'Reason about it',cls:'lv-reason'};
+ return LEVEL_WORDS[k]||{word:'—',cls:''}}
+const KIND_CLS={answer:'good',clarify:'warn',gap:'bad'};
+const CPLX_CLS={simple:'good',medium:'warn',complex:'violet'};
+const DECLINE="There isn't enough evidence in the fabric to answer that.";
+
+// ===================== threads (per-session) =========================
+let THREADS=[], CUR=null;
+function loadThreads(){try{THREADS=JSON.parse(sessionStorage.getItem('kf.threads')||'[]')}catch(e){THREADS=[]}}
+function saveThreads(){try{sessionStorage.setItem('kf.threads',JSON.stringify(THREADS.slice(0,40)))}catch(e){}}
+function newThread(){const t={id:'t'+Date.now(),title:'New chat',turns:[],at:Date.now()};THREADS.unshift(t);CUR=t.id;saveThreads();renderThreads();renderMessages();$('#question').focus()}
+function curThread(){return THREADS.find(t=>t.id===CUR)}
+function openThread(id){CUR=id;renderThreads();renderMessages();const t=curThread();
+ if(t&&t.turns.length)selectAnswer(t.turns[t.turns.length-1])}
+function renderThreads(){const box=$('#thread-list');
+ if(!THREADS.length){box.innerHTML='<div class="empty">No conversations yet.</div>';return}
+ box.innerHTML=THREADS.map(t=>'<div class="thread'+(t.id===CUR?' active':'')+'" data-id="'+t.id+'">'+
+  '<div class="t">'+esc(t.title)+'</div><div class="m">'+t.turns.length+' message'+(t.turns.length===1?'':'s')+'</div></div>').join('');
+ $$('#thread-list .thread').forEach(el=>el.onclick=()=>openThread(el.dataset.id))}
+
+// ===================== conversation ==================================
+function renderMessages(){const box=$('#messages');const t=curThread();
+ if(!t||!t.turns.length){box.innerHTML='<div class="empty-chat"><h2>Ask the knowledge fabric</h2>'+
+   '<p class="muted">Every answer is grounded in your documents, routed to the right level, and fully explained on the right.</p>'+
+   '<div class="samples" id="samples"></div></div>';samples();return}
+ box.innerHTML=t.turns.map((tn,i)=>'<div class="turn" data-i="'+i+'">'+
+   '<div class="msg user">'+esc(tn.q)+'</div>'+aiBlock(tn.a,i)+'</div>').join('');
+ $$('#messages .msg.ai').forEach(el=>el.onclick=()=>selectAnswer(t.turns[+el.dataset.i]));
+ wireCites();wireFeedback();box.scrollTop=box.scrollHeight}
+function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
+ const badges='<span class="pill '+(KIND_CLS[a.kind]||'')+'">'+esc(a.kind)+'</span>'+
+  (a.kind==='answer'?'<span class="pill '+lw.cls+'">'+esc(lw.word)+'</span>':'')+
+  '<span class="pill">'+esc((a.lang||'en').toUpperCase())+'</span>'+
+  (a.cache_hit?'<span class="pill good">cached</span>':'');
+ let body;
+ if(a.kind==='answer'){const quote=lw.cls==='lv-quote';
+  body='<div class="answer-text'+(quote?' quote':'')+'">'+withChips(a)+'</div>';}
+ else{const reason=(a.why||{}).explain||(a.clarify_back||'');
+  body='<div class="decline">'+esc(a.kind==='clarify'?(a.clarify_back||DECLINE):DECLINE)+
+   (reason&&a.kind!=='clarify'?'<div class="why">'+esc(reason)+'</div>':'')+'</div>';}
+ const fb='<div class="fbbar" data-i="'+i+'"><span class="muted small">Was this helpful?</span>'+
+  '<button class="fbbtn up" title="Helpful">&#128077;</button>'+
+  '<button class="fbbtn down" title="Not helpful — flag for the curators">&#128078;</button>'+
+  '<span class="fbmsg muted small"></span></div>';
+ return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+'</div>'+body+fb+'</div>'}
+// inline citation chips: [n] -> "Title · p.14" (opens the page viewer, L2.2).
+function withChips(a){const cs=a.citations||[];
+ return esc(a.answer_text||'').replace(/\[(\d+)\]/g,(m,n)=>{const c=cs[+n-1];if(!c)return '';
+  return '<span class="chipcite" data-cite="'+esc(n)+'">'+esc(c.document_title)+' &middot; '+esc(c.coordinate_render)+'</span>'})}
+function wireCites(){const t=curThread();if(!t)return;
+ $$('#messages .chipcite').forEach(el=>el.onclick=ev=>{ev.stopPropagation();
+  const turn=t.turns[+el.closest('.msg.ai').dataset.i];openPage((turn.a.citations||[])[+el.dataset.cite-1])})}
+// L6 — a reader flags an answer; 👎 records negative feedback for the curators.
+function wireFeedback(){const t=curThread();if(!t)return;
+ $$('#messages .fbbar').forEach(bar=>{const turn=t.turns[+bar.dataset.i];if(!turn)return;
+  const done=v=>{bar.querySelector('.fbmsg').textContent=v==='down'?'Thanks — flagged for the curators.':'Thanks for the feedback.';
+   bar.querySelectorAll('.fbbtn').forEach(b=>b.disabled=true)};
+  bar.querySelector('.up').onclick=e=>{e.stopPropagation();done('up')};
+  bar.querySelector('.down').onclick=e=>{e.stopPropagation();
+   api('/feedback',{method:'POST',body:{question:turn.q,trace_id:turn.a.trajectory_id,
+    level:(turn.a.why||{}).level_name||'',verdict:'down'}}).catch(()=>{});done('down')}})}
+
+// ===================== the card (L2.3) ===============================
+function bars(sig){const order=['retrieval','semantic','coverage','agreement','resolvable'];
+ return '<span class="bars" title="grounding signals: '+order.join(', ')+'">'+
+  order.map(k=>'<i class="'+(((sig||{})[k]||0)>=0.5?'on':'')+'" title="'+k+' '+pct((sig||{})[k])+'"></i>').join('')+'</span>'}
+function reasonWord(a){const r=((a.why||{}).reasons||[]).map(x=>x.code);
+ return r.indexOf('confidence_fail')>=0?'Yes — escalated after a confidence check':'No'}
+function modelLabel(a){const m=a.model_name||'';
+ return (!m||/mock|echo|demo|off|none/i.test(m))?'demo model':esc(m)}
+let CARD_GX={};
+function card(a){const box=$('#answer-card');const w=a.why||{};const lw=levelWord(w.level_name);
+ const trust=Math.round((Number(a.confidence)||0)*100);
+ const found=(w.retrieved!=null?w.retrieved:(a.citations||[]).length);
+ const cited=(a.citations||[]).length;
+ const gx=CARD_GX[a.trajectory_id]||{};
+ const topCost=(Number(a.cost)||0)+(Number(a.cost_saved)||0);
+ const auth=a.authoritative_source;
+ const rows=[];
+ rows.push(['Answered by','<span class="pill '+lw.cls+'">'+esc(lw.word)+'</span>']);
+ rows.push(['Why','<span style="font-weight:500">'+esc(w.explain||'—')+'</span>']);
+ rows.push(['Model',modelLabel(a)]);
+ rows.push(['Moved levels',esc(reasonWord(a))]);
+ // --- under Details ---
+ const det=[];
+ det.push(['Relationships',(gx.relationships!=null?gx.relationships:0)+' &middot; '+(gx.hops!=null?gx.hops:0)+' hop(s) &middot; '+(gx.documents!=null?gx.documents:cited)+' docs']);
+ det.push(['Sources',found+' found &middot; '+cited+' cited']);
+ det.push(['Trust','<span class="trust-num">'+trust+'</span> '+bars(w.signals)+' <span class="muted small" title="grounding score">g '+pct(a.grounding_score)+'</span>']);
+ det.push(['Language','<span class="pill">'+esc((a.lang||'en').toUpperCase())+'</span>']);
+ det.push(['Tokens',num(a.tokens_in)+' in &middot; '+num(a.tokens_out)+' out &middot; cache read —']);
+ det.push(['Cost',money(a.cost)+' &middot; top '+money(topCost)+' &middot; saved '+money(a.cost_saved)]);
+ det.push(['Cache',a.cache_hit?'<span class="pill good">hit</span>':'<span class="pill">miss</span>']);
+ det.push(['Timing',a._ms!=null?ms(a._ms):'—']);
+ det.push(['Complexity','<span class="pill '+(CPLX_CLS[a.complexity]||'')+'">'+esc(a.complexity||'n/a')+'</span> &middot; dataset v'+esc(a.dataset_version||0)]);
+ let authHtml='<span class="muted">none determined</span>';
+ if(auth){authHtml='<span class="pill good">'+esc(auth.source||'authoritative')+'</span> '+esc(auth.document_title||'');
+  if((auth.conflicts||[]).length)authHtml+=' <span class="pill warn">'+auth.conflicts.length+' conflict(s)</span>';}
+ det.push(['Authoritative source',authHtml]);
+ det.push(['Trace','<a href="#" id="trace-link">show trace id</a> <span class="trace-id hidden" id="trace-val">'+esc(a.trajectory_id||'')+'</span>']);
+ const rowHtml=r=>'<div class="r"><span class="k">'+r[0]+'</span><span class="v">'+r[1]+'</span></div>';
+ box.innerHTML=rows.map(rowHtml).join('')+
+  '<details><summary>Details</summary>'+det.map(rowHtml).join('')+reasoningHtml(a)+'</details>';
+ const tl=$('#trace-link');if(tl)tl.onclick=e=>{e.preventDefault();$('#trace-val').classList.toggle('hidden')};
+ $('#explain-btn').disabled=!(a.kind==='answer');
+ $('#explain-btn').onclick=()=>openExplain(a,gx)}
+function reasoningHtml(a){const r=a.reasoning;if(!r||!(r.steps||[]).length)return '';
+ return '<div class="r"><span class="k">Reasoning</span><span class="v">'+esc(r.mode||'multistep')+'</span></div>'+
+  '<ol class="timeline">'+(r.steps||[]).map(s=>{const cls=s.skipped?'skipped':s.condition===true?'cond-true':s.condition===false?'cond-false':'';
+   return '<li class="'+cls+'"><div class="q">'+esc(s.question||s.id||'')+'</div>'+
+    (s.skipped?'<div class="muted small">'+esc(s.reason||'branch not taken')+'</div>':'<div class="a">'+esc(s.answer_text||'')+'</div>')+'</li>'}).join('')+'</ol>'}
+
+// ===================== page viewer (L2.2) ============================
+function openPage(c){if(!c)return;const d=$('#page-drawer');
+ const snip=esc(c.snippet||'');
+ d.innerHTML='<button class="btn sm right" id="page-close">Close</button>'+
+  '<h3>'+esc(c.document_title||'Document')+'</h3>'+
+  '<div class="pagemeta">'+esc(c.coordinate_render||'')+' &middot; passage '+esc(c.passage_id||'')+'</div>'+
+  '<div class="pagedoc"><mark>'+snip+'</mark></div>'+
+  '<p class="muted small" style="margin-top:10px">The full page renders here once document conversion lands; today the cited passage is shown highlighted.</p>';
+ d.classList.remove('hidden');$('#page-close').onclick=()=>d.classList.add('hidden')}
+
+// ===================== Explain overlay (L2.4) =======================
+function openExplain(a,gx){const d=$('#explain-drawer');const w=a.why||{};const lw=levelWord(w.level_name);
+ const c0=(a.citations||[])[0]||{};
+ const nodes=[
+  ['Decision','Answered by “'+lw.word+'” — '+(w.explain||'')],
+  ['Sources',((w.retrieved!=null?w.retrieved:(a.citations||[]).length))+' passages found, '+(a.citations||[]).length+' cited'],
+  ['Evidence','Trust '+Math.round((a.confidence||0)*100)+' / 100 across five grounding signals'],
+  ['Document',(a.authoritative_source&&a.authoritative_source.document_title)||c0.document_title||'—'],
+  ['Page',c0.coordinate_render||'—']];
+ d.innerHTML='<button class="btn sm right" id="ex-close">Close</button><h3>Why did the AI say this?</h3>'+
+  '<p class="muted small">Decision → Sources → Evidence → Document → Page</p><div class="explain-flow">'+
+  nodes.map((n,i)=>'<div class="enode"><div class="et">'+esc(n[0])+'</div><div class="ev">'+esc(n[1])+'</div></div>'+
+   (i<nodes.length-1?'<div class="earrow">&#8595;</div>':'')).join('')+'</div>';
+ d.classList.remove('hidden');$('#ex-close').onclick=()=>d.classList.add('hidden')}
+
+// ===================== galaxy (L2.4) ================================
+function selectAnswer(turn){const a=turn.a;
+ $$('#messages .msg.ai').forEach(el=>el.classList.remove('sel'));
+ const el=$('#messages .msg.ai[data-i="'+turn._i+'"]');if(el)el.classList.add('sel');
+ card(a);loadGalaxy(a.trajectory_id,a);loadUsage()}
+async function loadGalaxy(trace_id,a){const box=$('#galaxy'),st=$('#galaxy-stats');
+ if(!trace_id){box.innerHTML='<div class="gx-empty">Ask a question to light up the graph.</div>';st.innerHTML='';return}
+ try{const g=await api('/api/galaxy?trace_id='+encodeURIComponent(trace_id));
+  CARD_GX[trace_id]=g.stats||{};if(a)card(a);
+  renderGalaxy(g);
+  const s=g.stats||{};st.innerHTML='<span><b>'+(s.activated||0)+'</b> lit</span><span><b>'+(s.relationships||0)+
+   '</b> links</span><span><b>'+(s.hops||0)+'</b> hop(s)</span><span><b>'+(s.passages||0)+'</b> passages</span>';}
+ catch(e){box.innerHTML='<div class="gx-empty">Galaxy unavailable for this answer.</div>';st.innerHTML=''}}
+function renderGalaxy(g){const box=$('#galaxy');const nodes=(g.nodes||[]).slice(0,60);
+ if(!nodes.length){box.innerHTML='<div class="gx-empty">No graph relationships were used for this answer.</div>';return}
+ const idx={};nodes.forEach((n,i)=>idx[n.id]=i);
+ const edges=(g.edges||[]).filter(e=>idx[e.src]!=null&&idx[e.dst]!=null);
+ // deterministic seed layout on a circle, then a short force settle.
+ const N=nodes.length,P=nodes.map((n,i)=>({x:Math.cos(i/N*6.283)*100,y:Math.sin(i/N*6.283)*100}));
+ for(let it=0;it<90;it++){const fx=new Array(N).fill(0),fy=new Array(N).fill(0);
+  for(let i=0;i<N;i++)for(let j=i+1;j<N;j++){let dx=P[i].x-P[j].x,dy=P[i].y-P[j].y;let d2=dx*dx+dy*dy||0.01;let f=380/d2;
+   let d=Math.sqrt(d2);dx/=d;dy/=d;fx[i]+=dx*f;fy[i]+=dy*f;fx[j]-=dx*f;fy[j]-=dy*f}
+  edges.forEach(e=>{const i=idx[e.src],j=idx[e.dst];let dx=P[j].x-P[i].x,dy=P[j].y-P[i].y;let d=Math.sqrt(dx*dx+dy*dy)||0.01;
+   let f=(d-46)*0.04;dx/=d;dy/=d;fx[i]+=dx*f;fy[i]+=dy*f;fx[j]-=dx*f;fy[j]-=dy*f});
+  for(let i=0;i<N;i++){P[i].x+=Math.max(-8,Math.min(8,fx[i]))-P[i].x*0.008;P[i].y+=Math.max(-8,Math.min(8,fy[i]))-P[i].y*0.008}}
+ let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+ P.forEach(p=>{minx=Math.min(minx,p.x);miny=Math.min(miny,p.y);maxx=Math.max(maxx,p.x);maxy=Math.max(maxy,p.y)});
+ const pad=18,vw=(maxx-minx)+pad*2,vh=(maxy-miny)+pad*2;
+ const X=x=>x-minx+pad,Y=y=>y-miny+pad;
+ let svg='<svg viewBox="0 0 '+vw.toFixed(0)+' '+vh.toFixed(0)+'" preserveAspectRatio="xMidYMid meet">';
+ edges.forEach(e=>{const a=P[idx[e.src]],b=P[idx[e.dst]];
+  svg+='<line class="gx-edge'+(e.activated?' act':'')+'" x1="'+X(a.x).toFixed(1)+'" y1="'+Y(a.y).toFixed(1)+
+   '" x2="'+X(b.x).toFixed(1)+'" y2="'+Y(b.y).toFixed(1)+'" stroke-width="'+(e.activated?1.2:0.7)+
+   '" stroke-opacity="'+(e.activated?0.9:0.04)+'"/>'});
+ // degree per node, so only the most-connected activated nodes get a label
+ // (a compact galaxy stays legible instead of a wall of overlapping text).
+ const deg={};edges.forEach(e=>{deg[e.src]=(deg[e.src]||0)+1;deg[e.dst]=(deg[e.dst]||0)+1});
+ const labelled=new Set(nodes.filter(n=>n.activated).sort((a,b)=>(deg[b.id]||0)-(deg[a.id]||0)).slice(0,9).map(n=>n.id));
+ nodes.forEach((n,i)=>{const p=P[i];svg+='<circle class="gx-node'+(n.activated?' act flash':'')+'" cx="'+X(p.x).toFixed(1)+
+   '" cy="'+Y(p.y).toFixed(1)+'" r="'+(n.activated?4.2:2.4)+'"><title>'+esc(n.label)+'</title></circle>';
+  if(labelled.has(n.id))svg+='<text x="'+(X(p.x)+5).toFixed(1)+'" y="'+(Y(p.y)+3).toFixed(1)+'">'+esc((n.label||'').slice(0,16))+'</text>'});
+ box.innerHTML=svg+'</svg>'}
+
+// ===================== my usage (L2.5) ==============================
+let USAGE=null, USE_WIN='today';
+const WIN_LABEL={today:'Today',['7d']:'7 days',['30d']:'30 days'};
+const LV_COLOR={lookup:'#0CA678',fast:'#0096FF',reason:'#7048E8',escalation:'#F53E5A'};
+async function loadUsage(){if(!KF.session)return;
+ try{USAGE=await api('/api/usage');$('#usage-subject').textContent=esc(USAGE.subject||'');renderUsage()}
+ catch(e){/* rail stays quiet on usage errors */}}
+function renderUsage(){const box=$('#usage-body');if(!USAGE){return}
+ const w=(USAGE.windows||{})[USE_WIN]||{};
+ const wins=['today','7d','30d'];
+ let html='<div class="win">'+wins.map(k=>'<button class="btn sm'+(k===USE_WIN?' on':'')+'" data-w="'+k+'">'+WIN_LABEL[k]+'</button>').join('')+'</div>';
+ html+='<div class="g3"><div class="u"><div class="n">'+num(w.questions)+'</div><div class="l">Questions</div></div>'+
+  '<div class="u"><div class="n">'+num(w.answered)+'</div><div class="l">Answered</div></div>'+
+  '<div class="u"><div class="n">'+num(w.declined)+'</div><div class="l">Declined</div></div></div>';
+ const bl=w.by_level||{};const tot=Object.values(bl).reduce((s,v)=>s+v,0)||0;
+ if(tot){html+='<div class="split">'+Object.keys(bl).map(k=>'<i style="width:'+(bl[k]/tot*100).toFixed(1)+'%;background:'+(LV_COLOR[k]||'#7C8DA1')+'"></i>').join('')+'</div>'+
+   '<div class="legend">'+Object.keys(bl).map(k=>'<span class="k"><span class="dot" style="background:'+(LV_COLOR[k]||'#7C8DA1')+'"></span>'+esc(levelWord(k).word)+' '+bl[k]+'</span>').join('')+'</div>';}
+ html+='<div class="kv"><span>Tokens</span><b>'+num((w.tokens_in||0)+(w.tokens_out||0))+'</b></div>'+
+  '<div class="kv"><span>Cost</span><b>'+money(w.cost)+'</b></div>'+
+  '<div class="kv"><span>Saved by cache</span><b>'+money(w.cost_saved)+'</b></div>';
+ const b=USAGE.budget;
+ if(b&&isFinite(b.cap)){const used=b.cap?Math.min(1,b.spent/b.cap):0;
+  html+='<div class="kv" style="margin-top:10px"><span>Fabric budget</span><b>'+money(b.spent)+' / '+money(b.cap)+'</b></div>'+
+   '<div class="trk"><i style="width:'+(used*100).toFixed(1)+'%"></i></div>';}
+ html+='<div class="kv"><span>Speech seconds</span><b>— <span class="muted small">(with voice)</span></b></div>';
+ box.innerHTML=html;
+ $$('#usage-body .win button').forEach(bt=>bt.onclick=()=>{USE_WIN=bt.dataset.w;renderUsage()})}
+
+// ===================== ask ==========================================
+async function samples(){if(!$('#samples'))return;let qs=[];
+ if(KF.session){try{const j=await api('/api/suggestions');qs=(j.suggestions||[]).map(s=>s.question).slice(0,6)}catch(e){}}
+ if(!qs.length)qs=(KF.DIR.questions&&KF.DIR.questions['qualizeal'])||[];
+ $('#samples').innerHTML=qs.map(q=>'<span class="chip" data-q="'+esc(q)+'">'+esc(q)+'</span>').join('');
+ $$('#samples .chip').forEach(c=>c.onclick=()=>{$('#question').value=c.dataset.q;$('#question').focus()})}
+async function ask(){const q=$('#question').value.trim();if(!q)return;
+ if(!KF.session){gate({status:401,message:''},'asker');return}
+ if(!curThread())newThread();
+ const btn=$('#ask-btn');btn.disabled=true;$('#ask-status').textContent='thinking…';const t0=performance.now();
+ try{const a=await api('/ask',{method:'POST',body:{question:q}});gate(null);
+  a._ms=performance.now()-t0;
+  const t=curThread();const turn={q,a};t.turns.push(turn);turn._i=t.turns.length-1;
+  if(t.turns.length===1)t.title=q.slice(0,48);
+  t.at=Date.now();saveThreads();renderThreads();renderMessages();
+  turn._i=t.turns.length-1;selectAnswer(turn);
+  $('#ask-status').textContent=Math.round(a._ms)+' ms · '+(a.kind||'');$('#question').value='';autosize()}
+ catch(e){gate(e,'asker');$('#ask-status').textContent='failed';toast(e.message,'bad')}
+ finally{btn.disabled=false}}
+
+// ===================== corpus strip =================================
+function animateNumber(el,target,msdur){target=Number(target)||0;const from=Number(String(el.textContent).replace(/[^0-9]/g,''))||0;
+ const t0=performance.now();const dur=msdur||600;
+ (function step(t){const p=Math.min(1,(t-t0)/dur);el.textContent=num(Math.round(from+(target-from)*(1-Math.pow(1-p,3))));if(p<1)requestAnimationFrame(step)})(performance.now())}
+async function corpusStrip(){if(!KF.session)return;
+ try{const c=await api('/api/corpus');['documents','passages','entities','relationships','domains'].forEach(k=>{const el=$('#tile-'+k);if(el)animateNumber(el,c[k]||0)})}catch(e){}}
+
+// ===================== composer wiring ==============================
+function autosize(){const t=$('#question');t.style.height='auto';t.style.height=Math.min(150,t.scrollHeight)+'px'}
+$('#ask-btn').onclick=ask;
+$('#question').addEventListener('input',autosize);
+$('#question').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}});
+$('#new-chat').onclick=newThread;
+
+// ===================== session lifecycle ============================
+function boot(){loadThreads();if(!THREADS.length){CUR=null}else{CUR=THREADS[0].id}
+ renderThreads();renderMessages();
+ if(KF.session){corpusStrip();loadUsage()}else{gate({status:401,message:''},'asker')}}
+window.KF_ON_SESSION=s=>{gate(null);if(s){corpusStrip();loadUsage();samples();$('#ask-status').textContent='ready for '+s.subject}
+ else{$('#usage-body').innerHTML='<div class="placeholder">Sign in to see your usage.</div>'}};
+KF.initBar({preferRole:'asker'});boot();

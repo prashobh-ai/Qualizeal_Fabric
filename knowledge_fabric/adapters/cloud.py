@@ -16,25 +16,27 @@ jobs retry then dead-letter.
 
 Client libraries are **guarded imports**. The image stays standard-library
 only; when ``boto3`` (Apache-2.0) or a Postgres driver (``pg8000``, BSD-3) is
-absent the adapter still constructs, and raises :class:`CloudNotReady` with
+absent the adapter still constructs, and raises :class:`CloudNotReadyError` with
 the exact ``pip install`` fix the first time it is *used*. ``scripts/doctor.py``
 reports the same facts before deployment.
 """
+
 from __future__ import annotations
 
 import importlib.util
 import json
 import math
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlparse
 
 from ..contracts.types import Job
 from ..stores.repositories import _guard
 
-try:                                   # guarded: the image ships without boto3
-    import boto3 as _boto3             # type: ignore[import-not-found]
-except ImportError:                    # pragma: no cover - exercised via monkeypatch
+try:  # guarded: the image ships without boto3
+    import boto3 as _boto3  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - exercised via monkeypatch
     _boto3 = None
 
 BOTO3_HINT = "boto3 not installed; run: pip install boto3"
@@ -48,20 +50,20 @@ QUEUE_MODES = ("local", "sqs")
 _S3_MISSING_CODES = {"404", "NoSuchKey", "NotFound"}
 
 
-class CloudNotReady(RuntimeError):
+class CloudNotReadyError(RuntimeError):
     """A cloud adapter was selected but its client library (or target) is not available."""
 
 
 # --------------------------------------------------------------------------
 # library discovery (monkeypatch-able for tests: ``cloud._boto3 = None``)
 # --------------------------------------------------------------------------
-def pg_driver() -> Optional[str]:
+def pg_driver() -> str | None:
     """Name of the first installed Postgres driver, or ``None``."""
     for name in PG_DRIVERS:
         try:
             if importlib.util.find_spec(name) is not None:
                 return name
-        except (ImportError, ValueError):     # broken namespace packages etc.
+        except (ImportError, ValueError):  # broken namespace packages etc.
             continue
     return None
 
@@ -71,7 +73,7 @@ def libraries() -> dict:
     return {"boto3": _boto3 is not None, "pg_driver": pg_driver()}
 
 
-def _region(env: dict) -> Optional[str]:
+def _region(env: dict) -> str | None:
     return env.get("AWS_REGION") or env.get("AWS_DEFAULT_REGION") or None
 
 
@@ -93,8 +95,14 @@ class S3ObjectStore:
     twice. Pass ``client`` to inject a boto3-compatible client (tests use a fake).
     """
 
-    def __init__(self, bucket: str, region: Optional[str] = None, prefix: str = "originals",
-                 client: Any = None, sse: str = "AES256"):
+    def __init__(
+        self,
+        bucket: str,
+        region: str | None = None,
+        prefix: str = "originals",
+        client: Any = None,
+        sse: str = "AES256",
+    ):
         if not bucket:
             raise ValueError("S3ObjectStore requires a bucket name (KF_S3_BUCKET)")
         self.bucket = bucket
@@ -107,7 +115,7 @@ class S3ObjectStore:
     def _s3(self):
         if self._client is None:
             if _boto3 is None:
-                raise CloudNotReady(BOTO3_HINT)
+                raise CloudNotReadyError(BOTO3_HINT)
             kw = {"region_name": self.region} if self.region else {}
             self._client = _boto3.client("s3", **kw)
         return self._client
@@ -122,12 +130,17 @@ class S3ObjectStore:
     # -- contract -------------------------------------------------------------
     def put(self, tenant: str, content_hash: str, data: bytes, meta: dict) -> str:
         key = self.key(tenant, content_hash)
-        if self.exists(tenant, content_hash):          # immutable: never overwrite
+        if self.exists(tenant, content_hash):  # immutable: never overwrite
             return self.url(tenant, content_hash)
         metadata = {str(k): str(v) for k, v in (meta or {}).items()}
         metadata["tenant"] = tenant
-        kw: dict[str, Any] = {"Bucket": self.bucket, "Key": key, "Body": data,
-                              "Metadata": metadata, "ServerSideEncryption": self.sse}
+        kw: dict[str, Any] = {
+            "Bucket": self.bucket,
+            "Key": key,
+            "Body": data,
+            "Metadata": metadata,
+            "ServerSideEncryption": self.sse,
+        }
         if meta and meta.get("mime"):
             kw["ContentType"] = str(meta["mime"])
         self._s3().put_object(**kw)
@@ -143,7 +156,7 @@ class S3ObjectStore:
         try:
             self._s3().head_object(Bucket=self.bucket, Key=key)
             return True
-        except Exception as exc:                       # botocore.ClientError or a fake's error
+        except Exception as exc:  # botocore.ClientError or a fake's error
             if _error_code(exc) in _S3_MISSING_CODES:
                 return False
             raise
@@ -170,8 +183,14 @@ class SqsQueue:
     unknown id are no-ops, matching ``SqlQueue`` (an UPDATE touching zero rows).
     """
 
-    def __init__(self, queue_url: str, region: Optional[str] = None, dlq_url: Optional[str] = None,
-                 client: Any = None, max_attempts: int = 5):
+    def __init__(
+        self,
+        queue_url: str,
+        region: str | None = None,
+        dlq_url: str | None = None,
+        client: Any = None,
+        max_attempts: int = 5,
+    ):
         if not queue_url:
             raise ValueError("SqsQueue requires a queue URL (KF_SQS_URL)")
         self.queue_url = queue_url
@@ -184,7 +203,7 @@ class SqsQueue:
     def _sqs(self):
         if self._client is None:
             if _boto3 is None:
-                raise CloudNotReady(BOTO3_HINT)
+                raise CloudNotReadyError(BOTO3_HINT)
             kw = {"region_name": self.region} if self.region else {}
             self._client = _boto3.client("sqs", **kw)
         return self._client
@@ -198,17 +217,29 @@ class SqsQueue:
 
     def enqueue(self, tenant: str, job: Job) -> str:
         _guard(tenant)
-        body = {"id": job.id, "tenant": tenant, "kind": job.kind, "payload": job.payload,
-                "created_at": time.time()}
-        self._sqs().send_message(QueueUrl=self.queue_url, MessageBody=json.dumps(body, default=str),
-                                 MessageAttributes=self._attrs(tenant, kind=job.kind))
+        body = {
+            "id": job.id,
+            "tenant": tenant,
+            "kind": job.kind,
+            "payload": job.payload,
+            "created_at": time.time(),
+        }
+        self._sqs().send_message(
+            QueueUrl=self.queue_url,
+            MessageBody=json.dumps(body, default=str),
+            MessageAttributes=self._attrs(tenant, kind=job.kind),
+        )
         return job.id
 
-    def lease(self, worker: str, ttl_s: float = 30.0) -> Optional[Job]:
+    def lease(self, worker: str, ttl_s: float = 30.0) -> Job | None:
         resp = self._sqs().receive_message(
-            QueueUrl=self.queue_url, MaxNumberOfMessages=1, WaitTimeSeconds=0,
+            QueueUrl=self.queue_url,
+            MaxNumberOfMessages=1,
+            WaitTimeSeconds=0,
             VisibilityTimeout=max(1, int(math.ceil(ttl_s))),
-            AttributeNames=["ApproximateReceiveCount"], MessageAttributeNames=["All"])
+            AttributeNames=["ApproximateReceiveCount"],
+            MessageAttributeNames=["All"],
+        )
         msgs = resp.get("Messages") or []
         if not msgs:
             return None
@@ -216,11 +247,21 @@ class SqsQueue:
         body = json.loads(m["Body"])
         attempts = int((m.get("Attributes") or {}).get("ApproximateReceiveCount", 1))
         lease_until = time.time() + ttl_s
-        job = Job(id=body["id"], tenant=body["tenant"], kind=body["kind"],
-                  payload=body.get("payload") or {}, state="leased",
-                  attempts=attempts, lease=lease_until)
-        self._leases[job.id] = {"receipt": m["ReceiptHandle"], "body": body,
-                                "attempts": attempts, "worker": worker}
+        job = Job(
+            id=body["id"],
+            tenant=body["tenant"],
+            kind=body["kind"],
+            payload=body.get("payload") or {},
+            state="leased",
+            attempts=attempts,
+            lease=lease_until,
+        )
+        self._leases[job.id] = {
+            "receipt": m["ReceiptHandle"],
+            "body": body,
+            "attempts": attempts,
+            "worker": worker,
+        }
         return job
 
     def ack(self, job_id: str) -> None:
@@ -235,8 +276,9 @@ class SqsQueue:
         if lease["attempts"] >= self.max_attempts:
             self.deadletter(job_id, reason)
             return
-        self._sqs().change_message_visibility(QueueUrl=self.queue_url,
-                                              ReceiptHandle=lease["receipt"], VisibilityTimeout=0)
+        self._sqs().change_message_visibility(
+            QueueUrl=self.queue_url, ReceiptHandle=lease["receipt"], VisibilityTimeout=0
+        )
         self._leases.pop(job_id, None)
 
     def deadletter(self, job_id: str, reason: str) -> None:
@@ -246,13 +288,17 @@ class SqsQueue:
         if self.dlq_url:
             dead = dict(lease["body"])
             dead.update({"dead_letter_reason": reason, "attempts": lease["attempts"]})
-            self._sqs().send_message(QueueUrl=self.dlq_url, MessageBody=json.dumps(dead, default=str),
-                                     MessageAttributes=self._attrs(dead["tenant"], reason=reason[:256]))
+            self._sqs().send_message(
+                QueueUrl=self.dlq_url,
+                MessageBody=json.dumps(dead, default=str),
+                MessageAttributes=self._attrs(dead["tenant"], reason=reason[:256]),
+            )
         self._sqs().delete_message(QueueUrl=self.queue_url, ReceiptHandle=lease["receipt"])
 
     def depth(self) -> int:
-        resp = self._sqs().get_queue_attributes(QueueUrl=self.queue_url,
-                                                AttributeNames=["ApproximateNumberOfMessages"])
+        resp = self._sqs().get_queue_attributes(
+            QueueUrl=self.queue_url, AttributeNames=["ApproximateNumberOfMessages"]
+        )
         return int((resp.get("Attributes") or {}).get("ApproximateNumberOfMessages", 0))
 
 
@@ -264,7 +310,7 @@ class PostgresNotice:
 
     It exposes the same call surface as ``stores.db.Database`` (``execute`` /
     ``query`` / ``one`` / ``conn``) so it can sit in ``Platform.db``; every call
-    raises :class:`CloudNotReady` naming the exact gap (driver missing, or the
+    raises :class:`CloudNotReadyError` naming the exact gap (driver missing, or the
     Postgres repository adapter not yet shipped in this build). ``describe()``
     redacts the password and is what the doctor prints.
     """
@@ -280,8 +326,10 @@ class PostgresNotice:
         query = dict(p.split("=", 1) for p in u.query.split("&") if "=" in p) if u.query else {}
         return {
             "engine": "postgres",
-            "host": u.hostname or "", "port": u.port or 5432,
-            "database": (u.path or "/").lstrip("/"), "user": u.username or "",
+            "host": u.hostname or "",
+            "port": u.port or 5432,
+            "database": (u.path or "/").lstrip("/"),
+            "user": u.username or "",
             "sslmode": query.get("sslmode", "prefer"),
             "driver": pg_driver(),
             "extensions_required": ["vector"],
@@ -300,22 +348,30 @@ class PostgresNotice:
         """Return a DB-API connection using the first installed driver (pg8000 preferred)."""
         name = pg_driver()
         if name is None:
-            raise CloudNotReady(PG_HINT)
+            raise CloudNotReadyError(PG_HINT)
         d = self.describe()
         if name == "pg8000":
-            import pg8000.dbapi as drv                     # type: ignore[import-not-found]
-            return drv.connect(user=d["user"], password=self._u.password or "", host=d["host"],
-                               port=d["port"], database=d["database"],
-                               ssl_context=(d["sslmode"] not in ("disable", "allow")) or None)
+            import pg8000.dbapi as drv  # type: ignore[import-not-found]
+
+            return drv.connect(
+                user=d["user"],
+                password=self._u.password or "",
+                host=d["host"],
+                port=d["port"],
+                database=d["database"],
+                ssl_context=(d["sslmode"] not in ("disable", "allow")) or None,
+            )
         drv = importlib.import_module(name)
         return drv.connect(self.db_url)
 
     # ``Database``-shaped surface: every use fails closed with the exact gap.
     def _not_ready(self):
         if pg_driver() is None:
-            raise CloudNotReady(PG_HINT)
-        raise CloudNotReady("Postgres store adapter is not shipped in this build; "
-                            "the SQLite store is the only implemented store (docs/AWS_READINESS.md)")
+            raise CloudNotReadyError(PG_HINT)
+        raise CloudNotReadyError(
+            "Postgres store adapter is not shipped in this build; "
+            "the SQLite store is the only implemented store (docs/AWS_READINESS.md)"
+        )
 
     def execute(self, sql: str, params: tuple = ()):
         self._not_ready()
@@ -373,15 +429,22 @@ def database_target(env: dict) -> dict:
     if url.startswith(("postgres://", "postgresql://")):
         return PostgresNotice(url).describe()
     if url.startswith("sqlite:///"):
-        return {"engine": "sqlite", "path": url[len("sqlite:///"):] or ":memory:", "driver": "sqlite3"}
+        return {
+            "engine": "sqlite",
+            "path": url[len("sqlite:///") :] or ":memory:",
+            "driver": "sqlite3",
+        }
     if "://" in url:
-        raise ValueError(f"unsupported KF_DB_URL scheme in {url.split('://', 1)[0]}:// "
-                         "(expected a sqlite path or postgres://)")
+        raise ValueError(
+            f"unsupported KF_DB_URL scheme in {url.split('://', 1)[0]}:// "
+            "(expected a sqlite path or postgres://)"
+        )
     return {"engine": "sqlite", "path": url, "driver": "sqlite3"}
 
 
 def build_database(env: dict, local_factory: Callable[[str], Any]) -> Any:
-    """sqlite -> ``local_factory(path)``; postgres -> :class:`PostgresNotice` (fails closed on use)."""
+    """sqlite -> ``local_factory(path)``; postgres -> :class:`PostgresNotice`
+    (fails closed on use)."""
     target = database_target(env)
     if target["engine"] == "sqlite":
         return local_factory(target["path"])
@@ -409,8 +472,12 @@ def selection(env: dict) -> dict:
             missing.append("AWS_REGION")
         if not libs["boto3"]:
             missing.append(f"boto3 ({BOTO3_HINT.split('; ')[1]})")
-    out["objectstore"] = {"mode": os_mode, "adapter": "S3ObjectStore" if os_mode == "s3" else "FileObjectStore",
-                          "ready": not missing, "missing": missing}
+    out["objectstore"] = {
+        "mode": os_mode,
+        "adapter": "S3ObjectStore" if os_mode == "s3" else "FileObjectStore",
+        "ready": not missing,
+        "missing": missing,
+    }
 
     q_mode, problems = choose("KF_QUEUE", "local", QUEUE_MODES)
     missing = list(problems)
@@ -421,8 +488,12 @@ def selection(env: dict) -> dict:
             missing.append("AWS_REGION")
         if not libs["boto3"]:
             missing.append(f"boto3 ({BOTO3_HINT.split('; ')[1]})")
-    out["queue"] = {"mode": q_mode, "adapter": "SqsQueue" if q_mode == "sqs" else "SqlQueue",
-                    "ready": not missing, "missing": missing}
+    out["queue"] = {
+        "mode": q_mode,
+        "adapter": "SqsQueue" if q_mode == "sqs" else "SqlQueue",
+        "ready": not missing,
+        "missing": missing,
+    }
 
     missing = []
     try:
@@ -433,10 +504,16 @@ def selection(env: dict) -> dict:
     if db.get("engine") == "postgres":
         if not libs["pg_driver"]:
             missing.append(f"pg8000 ({PG_HINT.split('; ')[1]})")
-        missing.append("Postgres store adapter (not shipped in this build; SQLite is the only store)")
-    out["database"] = {"mode": db.get("engine", "unknown"), "target": db,
-                       "adapter": "PostgresNotice" if db.get("engine") == "postgres" else "Database(sqlite)",
-                       "ready": not missing, "missing": missing}
+        missing.append(
+            "Postgres store adapter (not shipped in this build; SQLite is the only store)"
+        )
+    out["database"] = {
+        "mode": db.get("engine", "unknown"),
+        "target": db,
+        "adapter": "PostgresNotice" if db.get("engine") == "postgres" else "Database(sqlite)",
+        "ready": not missing,
+        "missing": missing,
+    }
     out["ready"] = all(out[k]["ready"] for k in ("objectstore", "queue", "database"))
     # Compact view for ``GET /health`` (adapter names only — no targets, no secrets).
     out["selected"] = {k: out[k]["adapter"] for k in ("objectstore", "queue", "database")}

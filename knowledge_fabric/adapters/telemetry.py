@@ -6,6 +6,7 @@ requesting subject/roles — so the WS3 dashboards and /metrics + /api/analytics
 read directly from the store. Local OpenTelemetry stand-in; the cloud adapter
 exports the same spans to a managed backend.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,7 @@ from ..stores.db import Database
 
 
 class _Span:
-    def __init__(self, tel: "SqlTelemetry", name: str, attrs: dict):
+    def __init__(self, tel: SqlTelemetry, name: str, attrs: dict):
         self.tel = tel
         self.name = name
         self.attrs = dict(attrs)
@@ -27,7 +28,7 @@ class _Span:
     def set(self, **attrs) -> None:
         self.attrs.update(attrs)
 
-    def __enter__(self) -> "_Span":
+    def __enter__(self) -> _Span:
         self._start = time.time()
         return self
 
@@ -51,9 +52,10 @@ class SqlTelemetry:
     def _write(self, s: _Span, dur: float) -> None:
         a = s.attrs
         why = a.get("why")
-        if s.name.startswith("ingest."):          # mirror pipeline stages into the active run
+        if s.name.startswith("ingest."):  # mirror pipeline stages into the active run
             try:
                 from ..ingestion import runs as _runs
+
                 _runs.step_from_span(self, s.name, a, dur)
             except Exception:
                 pass
@@ -63,28 +65,53 @@ class SqlTelemetry:
                tokens_in,tokens_out,cache_hit,cache_technique,cost_saved,lang,sources,
                model_name,complexity,dataset_version,reasoning)
                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (s.trace_id, a.get("tenant", ""), s.name, json.dumps(a, default=str),
-             s._start or time.time(), dur, float(a.get("cost", 0.0)), int(a.get("tokens", 0)),
-             a.get("tier", ""), float(a.get("grounding", 0.0)),
-             int(a.get("citations_count", 0)), a.get("stage", s.name),
-             a.get("subject", ""), ",".join(a.get("roles", []) or []),
-             a.get("level", ""), json.dumps(why, default=str) if why is not None else None,
-             int(a.get("tokens_in", 0)), int(a.get("tokens_out", 0)),
-             int(a.get("cache_hit", 0)), a.get("cache_technique", ""),
-             float(a.get("cost_saved", 0.0)), a.get("lang", ""),
-             json.dumps(a.get("sources", []), default=str),
-             a.get("model_name", ""), a.get("complexity", ""),
-             int(a.get("dataset_version", 0) or 0),
-             json.dumps(a.get("reasoning"), default=str) if a.get("reasoning") is not None else None))
+            (
+                s.trace_id,
+                a.get("tenant", ""),
+                s.name,
+                json.dumps(a, default=str),
+                s._start or time.time(),
+                dur,
+                float(a.get("cost", 0.0)),
+                int(a.get("tokens", 0)),
+                a.get("tier", ""),
+                float(a.get("grounding", 0.0)),
+                int(a.get("citations_count", 0)),
+                a.get("stage", s.name),
+                a.get("subject", ""),
+                ",".join(a.get("roles", []) or []),
+                a.get("level", ""),
+                json.dumps(why, default=str) if why is not None else None,
+                int(a.get("tokens_in", 0)),
+                int(a.get("tokens_out", 0)),
+                int(a.get("cache_hit", 0)),
+                a.get("cache_technique", ""),
+                float(a.get("cost_saved", 0.0)),
+                a.get("lang", ""),
+                json.dumps(a.get("sources", []), default=str),
+                a.get("model_name", ""),
+                a.get("complexity", ""),
+                int(a.get("dataset_version", 0) or 0),
+                json.dumps(a.get("reasoning"), default=str)
+                if a.get("reasoning") is not None
+                else None,
+            ),
+        )
 
     # ---------------- read side ----------------------------------------
     def trace(self, trace_id: str) -> list[dict]:
-        return [dict(r) for r in self.db.query(
-            "SELECT * FROM spans WHERE trace_id=? ORDER BY id", (trace_id,))]
+        return [
+            dict(r)
+            for r in self.db.query("SELECT * FROM spans WHERE trace_id=? ORDER BY id", (trace_id,))
+        ]
 
     def metrics(self, tenant: str) -> dict:
-        rows = [dict(r) for r in self.db.query(
-            "SELECT * FROM spans WHERE tenant=? AND name='answer'", (tenant,))]
+        rows = [
+            dict(r)
+            for r in self.db.query(
+                "SELECT * FROM spans WHERE tenant=? AND name='answer'", (tenant,)
+            )
+        ]
         n = len(rows)
         lat = sorted(r["duration_ms"] for r in rows)
 
@@ -92,35 +119,54 @@ class SqlTelemetry:
             return lat[min(len(lat) - 1, int(len(lat) * p))] if lat else 0.0
 
         by_tier, by_stage = {}, {}
-        for r in self.db.query("SELECT tier, SUM(cost) c FROM spans WHERE tenant=? GROUP BY tier", (tenant,)):
+        for r in self.db.query(
+            "SELECT tier, SUM(cost) c FROM spans WHERE tenant=? GROUP BY tier", (tenant,)
+        ):
             by_tier[r["tier"] or "none"] = round(r["c"] or 0.0, 6)
-        for r in self.db.query("SELECT stage, SUM(cost) c FROM spans WHERE tenant=? GROUP BY stage", (tenant,)):
+        for r in self.db.query(
+            "SELECT stage, SUM(cost) c FROM spans WHERE tenant=? GROUP BY stage", (tenant,)
+        ):
             by_stage[r["stage"] or "?"] = round(r["c"] or 0.0, 6)
         return {
-            "tenant": tenant, "answers": n,
+            "tenant": tenant,
+            "answers": n,
             "total_cost": round(sum(r["cost"] for r in rows), 6),
             "total_tokens": sum(r["tokens"] for r in rows),
-            "latency_p50_ms": round(pct(0.5), 2), "latency_p95_ms": round(pct(0.95), 2),
-            "cost_by_tier": by_tier, "cost_by_stage": by_stage,
+            "latency_p50_ms": round(pct(0.5), 2),
+            "latency_p95_ms": round(pct(0.95), 2),
+            "cost_by_tier": by_tier,
+            "cost_by_stage": by_stage,
             "grounding_avg": round(sum(r["grounding"] for r in rows) / n, 4) if n else 0.0,
-            "citation_coverage": round(sum(1 for r in rows if r["citations_count"] > 0) / n, 4) if n else 0.0,
-            "clarify_back_rate": round(sum(1 for r in rows if r["level"] == "clarify") / n, 4) if n else 0.0,
+            "citation_coverage": round(sum(1 for r in rows if r["citations_count"] > 0) / n, 4)
+            if n
+            else 0.0,
+            "clarify_back_rate": round(sum(1 for r in rows if r["level"] == "clarify") / n, 4)
+            if n
+            else 0.0,
         }
 
-    def analytics(self, tenant: str, window: str = "7d", subject: str | None = None,
-                  role: str | None = None) -> dict:
+    def analytics(
+        self, tenant: str, window: str = "7d", subject: str | None = None, role: str | None = None
+    ) -> dict:
         """Filtered analytics for the Power BI-style dashboard (WS3 PROVE)."""
         now = time.time()
-        horizon = {"24h": 86400, "7d": 7 * 86400, "all": 10 ** 12}.get(window, 7 * 86400)
+        horizon = {"24h": 86400, "7d": 7 * 86400, "all": 10**12}.get(window, 7 * 86400)
         floor = now - horizon
         where = ["tenant=?", "name='answer'", "started_at>=?"]
         params: list = [tenant, floor]
         if subject:
-            where.append("subject=?"); params.append(subject)
+            where.append("subject=?")
+            params.append(subject)
         if role:
-            where.append("(','||roles||',') LIKE ?"); params.append(f"%,{role},%")
-        rows = [dict(r) for r in self.db.query(
-            f"SELECT * FROM spans WHERE {' AND '.join(where)} ORDER BY started_at", tuple(params))]
+            where.append("(','||roles||',') LIKE ?")
+            params.append(f"%,{role},%")
+        rows = [
+            dict(r)
+            for r in self.db.query(
+                f"SELECT * FROM spans WHERE {' AND '.join(where)} ORDER BY started_at",
+                tuple(params),
+            )
+        ]
 
         n = len(rows) or 1
         lat = sorted(r["duration_ms"] for r in rows)
@@ -136,7 +182,7 @@ class SqlTelemetry:
                 why = json.loads(r["why"]) if r["why"] else {}
             except Exception:
                 why = {}
-            for rc in (why.get("reasons") or []):
+            for rc in why.get("reasons") or []:
                 code = rc.get("code", "?")
                 reason_counts[code] = reason_counts.get(code, 0) + 1
 
@@ -178,8 +224,17 @@ class SqlTelemetry:
         series = {}
         for r in rows:
             b = int((r["started_at"] - floor) // bucket)
-            series.setdefault(b, {"bucket": b, "answers": 0, "cost": 0.0,
-                                  "tokens_in": 0, "tokens_out": 0, "cost_saved": 0.0})
+            series.setdefault(
+                b,
+                {
+                    "bucket": b,
+                    "answers": 0,
+                    "cost": 0.0,
+                    "tokens_in": 0,
+                    "tokens_out": 0,
+                    "cost_saved": 0.0,
+                },
+            )
             series[b]["answers"] += 1
             series[b]["cost"] = round(series[b]["cost"] + r["cost"], 6)
             series[b]["tokens_in"] += r["tokens_in"]
@@ -191,21 +246,31 @@ class SqlTelemetry:
         for r in rows:
             by_lang[r["lang"] or "en"] = by_lang.get(r["lang"] or "en", 0) + 1
 
-        answered = [r for r in rows if r["level"] not in ("clarify", "gap", "")]
+        [r for r in rows if r["level"] not in ("clarify", "gap", "")]
         return {
-            "tenant": tenant, "window": window, "filters": {"subject": subject, "role": role},
+            "tenant": tenant,
+            "window": window,
+            "filters": {"subject": subject, "role": role},
             "answers": len(rows),
             "tokens_in": sum(r["tokens_in"] for r in rows),
             "tokens_out": sum(r["tokens_out"] for r in rows),
             "total_cost": round(sum(r["cost"] for r in rows), 6),
             "total_cost_saved": round(sum(r["cost_saved"] or 0.0 for r in rows), 6),
             "cache_hit_rate": round(cache_hits / len(rows), 4) if rows else 0.0,
-            "latency_p50_ms": pct(0.5), "latency_p95_ms": pct(0.95),
+            "latency_p50_ms": pct(0.5),
+            "latency_p95_ms": pct(0.95),
             "grounding_avg": round(sum(r["grounding"] for r in rows) / n, 4),
             "citation_coverage": round(sum(1 for r in rows if r["citations_count"] > 0) / n, 4),
             "clarify_back_rate": round(sum(1 for r in rows if r["level"] == "clarify") / n, 4),
-            "routing_by_level": by_level, "routing_reasons": reason_counts, "routing_by_tier": by_tier,
-            "routing_by_complexity": by_complexity, "models_used": models_used,
-            "savings_by_technique": savings, "per_user": per_user, "per_role": per_role,
-            "by_language": by_lang, "timeseries": timeseries, "bucket_seconds": bucket,
+            "routing_by_level": by_level,
+            "routing_reasons": reason_counts,
+            "routing_by_tier": by_tier,
+            "routing_by_complexity": by_complexity,
+            "models_used": models_used,
+            "savings_by_technique": savings,
+            "per_user": per_user,
+            "per_role": per_role,
+            "by_language": by_lang,
+            "timeseries": timeseries,
+            "bucket_seconds": bucket,
         }

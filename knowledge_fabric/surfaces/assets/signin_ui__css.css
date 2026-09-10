@@ -1,0 +1,19 @@
+
+.signin-wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+ background:linear-gradient(180deg,var(--qz-blue-tint),var(--qz-surface) 260px)}
+.signin-card{background:var(--qz-surface);border:1px solid var(--qz-line);border-radius:14px;
+ box-shadow:var(--qz-shadow);padding:28px 30px;width:min(400px,92vw)}
+.signin-card .lockup{height:22px;width:auto;display:block;margin-bottom:18px}
+.signin-card h1{font-size:18px;margin:0 0 4px;color:var(--qz-ink);font-weight:600}
+.signin-card p.sub{margin:0 0 18px;color:var(--qz-muted);font-size:13px}
+.signin-card label{display:block;font-size:12px;color:var(--qz-muted);margin:12px 0 4px;font-weight:600}
+.signin-card input{width:100%}
+.signin-card .full{width:100%;margin-top:18px}
+.sso{width:100%;margin-top:10px;background:var(--qz-panel);color:var(--qz-soft);border:1px dashed var(--qz-line);
+ border-radius:8px;padding:9px;font-size:13px;text-align:center;cursor:not-allowed}
+.demo-picker{margin-top:20px;border-top:1px solid var(--qz-line-2);padding-top:16px}
+.demo-picker .lbl{font-size:11px;color:var(--qz-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
+.demo-picker .chips{display:flex;gap:8px;flex-wrap:wrap}
+.demo-picker button{flex:1 1 auto}
+.signin-foot{margin-top:22px;font-size:12px;color:var(--qz-soft);text-align:center}
+.err{color:var(--qz-coral);font-size:13px;margin-top:12px;min-height:16px}

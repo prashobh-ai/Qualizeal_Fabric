@@ -10,6 +10,7 @@ This is a minimal, dependency-free MCP implementation (initialize /
 tools/list / tools/call) so it runs anywhere; swapping in the official MCP
 SDK is a surface change only.
 """
+
 from __future__ import annotations
 
 import json
@@ -24,7 +25,7 @@ TOOLS = [
     {
         "name": "kf_ask",
         "description": "Ask the Knowledge Fabric a grounded, cited question. Returns an "
-                       "answer with citations, a clarifying question, or a declared gap.",
+        "answer with citations, a clarifying question, or a declared gap.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -37,8 +38,11 @@ TOOLS = [
     {
         "name": "kf_gaps",
         "description": "List the tenant's gap backlog (unanswered questions).",
-        "inputSchema": {"type": "object",
-                        "properties": {"token": {"type": "string"}}, "required": ["token"]},
+        "inputSchema": {
+            "type": "object",
+            "properties": {"token": {"type": "string"}},
+            "required": ["token"],
+        },
     },
 ]
 
@@ -52,9 +56,14 @@ class MCPServer:
         method = req.get("method")
         rid = req.get("id")
         if method == "initialize":
-            return _ok(rid, {"protocolVersion": PROTOCOL,
-                             "serverInfo": {"name": "knowledge-fabric", "version": "1.0"},
-                             "capabilities": {"tools": {}}})
+            return _ok(
+                rid,
+                {
+                    "protocolVersion": PROTOCOL,
+                    "serverInfo": {"name": "knowledge-fabric", "version": "1.0"},
+                    "capabilities": {"tools": {}},
+                },
+            )
         if method == "notifications/initialized":
             return None
         if method == "tools/list":
@@ -66,14 +75,25 @@ class MCPServer:
             try:
                 prin = self.p.idp.authenticate({"token": args.get("token", "")})
             except PermissionError as e:
-                return _ok(rid, {"content": [{"type": "text", "text": f"auth error: {e}"}],
-                                 "isError": True})
+                return _ok(
+                    rid,
+                    {"content": [{"type": "text", "text": f"auth error: {e}"}], "isError": True},
+                )
             if name == "kf_ask":
                 ans = self.svc.ask(prin, args.get("question", ""))
                 return _ok(rid, {"content": [{"type": "text", "text": json.dumps(ans.to_dict())}]})
             if name == "kf_gaps":
-                return _ok(rid, {"content": [{"type": "text",
-                                              "text": json.dumps(self.p.curation.list(prin.tenant, "gap"))}]})
+                return _ok(
+                    rid,
+                    {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": json.dumps(self.p.curation.list(prin.tenant, "gap")),
+                            }
+                        ]
+                    },
+                )
             return _err(rid, -32601, f"unknown tool {name}")
         return _err(rid, -32601, f"unknown method {method}")
 

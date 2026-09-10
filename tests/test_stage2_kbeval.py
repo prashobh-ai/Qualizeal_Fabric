@@ -1,12 +1,13 @@
 """Stage-2 Section D: knowledge-base evaluation -> curator suggestions + data quality."""
+
 import unittest
 
 from knowledge_fabric.answer.service import AnswerService
 from knowledge_fabric.health import kb_eval
-from knowledge_fabric.ingestion.intake import Intake, IngestWorker
+from knowledge_fabric.ingestion.intake import IngestWorker, Intake
 from knowledge_fabric.tenants import demo
-from tests.util import seeded
 from tests.fixtures import synthetic_corpus
+from tests.util import seeded
 
 T = "test-fabric"
 OTHER = "isolation-check"
@@ -20,14 +21,18 @@ class KbEvalBase(unittest.TestCase):
         self.p = seeded([T, OTHER])
         self.svc = AnswerService(self.p)
         self.asker = demo.principal_for(self.p, T, "asker.public")
-        self.answers = [self.svc.ask(self.asker, q) for q, _, _ in synthetic_corpus.QUESTION_BANK[:3]]
+        self.answers = [
+            self.svc.ask(self.asker, q) for q, _, _ in synthetic_corpus.QUESTION_BANK[:3]
+        ]
         self.docs = {d["uri"]: d for d in self.p.documents.list(T)}
         self.strategy = self.docs["file://qa/test-strategy.md"]
-        self.restricted = self.docs["file://qa/defect-policy.md"]   # asker cannot see it -> uncited
+        self.restricted = self.docs["file://qa/defect-policy.md"]  # asker cannot see it -> uncited
 
     def _upload_duplicate(self, filename="test-strategy-copy.md", acl=None) -> str:
         """Upload the Test Strategy body again through the upload door; returns the new doc id."""
-        body = next(b for uri, _, _, _, _, b in synthetic_corpus.CORPORA if uri == "qa/test-strategy.md")
+        body = next(
+            b for uri, _, _, _, _, b in synthetic_corpus.CORPORA if uri == "qa/test-strategy.md"
+        )
         intake = Intake(self.p)
         intake.upload(T, filename, body.encode(), acl=acl)
         results = IngestWorker(self.p, intake).drain()
@@ -35,16 +40,22 @@ class KbEvalBase(unittest.TestCase):
         return results[-1]["document_id"]
 
     def _set_authoritative(self, doc_id: str, flag: bool = True) -> None:
-        self.p.db.execute("UPDATE documents SET authoritative=? WHERE tenant=? AND id=?",
-                          (1 if flag else 0, T, doc_id))
+        self.p.db.execute(
+            "UPDATE documents SET authoritative=? WHERE tenant=? AND id=?",
+            (1 if flag else 0, T, doc_id),
+        )
 
     def _quality_of(self, doc_id: str, **kw) -> dict:
-        return next(d for d in kb_eval.document_quality(self.p, T, **kw) if d["document_id"] == doc_id)
+        return next(
+            d for d in kb_eval.document_quality(self.p, T, **kw) if d["document_id"] == doc_id
+        )
 
 
 class TestCitationUsage(KbEvalBase):
     def test_usage_maps_titles_and_passages_to_document_ids(self):
-        self.assertTrue(all(a.citations for a in self.answers), "questions must be answered with citations")
+        self.assertTrue(
+            all(a.citations for a in self.answers), "questions must be answered with citations"
+        )
         usage = kb_eval.citation_usage(self.p, T)
         doc_ids = {d["id"] for d in self.p.documents.list(T)}
         self.assertTrue(usage, "three cited answers must produce usage")
@@ -76,14 +87,18 @@ class TestDuplicates(KbEvalBase):
         dups = kb_eval.duplicates(self.p, T)
         self.assertTrue(dups)
         for d in dups:
-            self.assertEqual(set(d), {"passage_id", "dup_of", "document_id", "dup_document_id", "cosine"})
+            self.assertEqual(
+                set(d), {"passage_id", "dup_of", "document_id", "dup_document_id", "cosine"}
+            )
             self.assertNotEqual(d["document_id"], d["dup_document_id"], "cross-document only")
             self.assertGreaterEqual(d["cosine"], 0.92)
             self.assertLessEqual(d["cosine"], 1.0)
         # the newer copy is the duplicate, the original (older) document is dup_of
         self.assertEqual({d["document_id"] for d in dups}, {copy_id})
         self.assertEqual({d["dup_document_id"] for d in dups}, {self.strategy["id"]})
-        n_copy_passages = len([p for p in self.p.passages.by_document(T, copy_id) if p.superseded_by is None])
+        n_copy_passages = len(
+            [p for p in self.p.passages.by_document(T, copy_id) if p.superseded_by is None]
+        )
         self.assertEqual(len({d["passage_id"] for d in dups}), n_copy_passages)
         # deterministic ordering and a stricter threshold still finds exact copies
         self.assertEqual(dups, kb_eval.duplicates(self.p, T))
@@ -93,7 +108,9 @@ class TestDuplicates(KbEvalBase):
         copy_id = self._upload_duplicate()
         self._set_authoritative(copy_id, True)
         dups = kb_eval.duplicates(self.p, T)
-        self.assertEqual({d["document_id"] for d in dups}, {copy_id}, "newer copy stays the duplicate")
+        self.assertEqual(
+            {d["document_id"] for d in dups}, {copy_id}, "newer copy stays the duplicate"
+        )
         self.assertEqual({d["dup_document_id"] for d in dups}, {self.strategy["id"]})
 
     def test_duplicates_are_tenant_scoped(self):
@@ -115,11 +132,13 @@ class TestReadability(unittest.TestCase):
 
     def test_simple_text_scores_higher_than_dense_jargon(self):
         simple = "The test passed. The build is green. We can ship today."
-        dense = ("Notwithstanding aforementioned considerations regarding interdepartmental "
-                 "accountability frameworks, organisational stakeholders systematically "
-                 "underestimated implementation complexities associated with heterogeneous "
-                 "infrastructural modernisation initiatives spanning multiple jurisdictions "
-                 "whilst simultaneously renegotiating contractual obligations")
+        dense = (
+            "Notwithstanding aforementioned considerations regarding interdepartmental "
+            "accountability frameworks, organisational stakeholders systematically "
+            "underestimated implementation complexities associated with heterogeneous "
+            "infrastructural modernisation initiatives spanning multiple jurisdictions "
+            "whilst simultaneously renegotiating contractual obligations"
+        )
         self.assertEqual(kb_eval.readability(simple), 1.0)
         self.assertLess(kb_eval.readability(dense), kb_eval.readability(simple))
         self.assertLess(kb_eval.readability(dense), kb_eval.READABILITY_REVIEW + 0.2)
@@ -130,10 +149,29 @@ class TestReadability(unittest.TestCase):
 
 
 class TestDocumentQuality(KbEvalBase):
-    REQUIRED = {"document_id", "title", "source", "uri", "ingested_at", "passages", "authoritative",
-                "signals", "score", "suggestion", "reasons"}
-    SIGNALS = {"citation_uses", "age_days", "duplicate_passages", "contradiction_flags", "readability",
-               "coverage_contribution", "orphan_ratio", "gap_hits"}
+    REQUIRED = {
+        "document_id",
+        "title",
+        "source",
+        "uri",
+        "ingested_at",
+        "passages",
+        "authoritative",
+        "signals",
+        "score",
+        "suggestion",
+        "reasons",
+    }
+    SIGNALS = {
+        "citation_uses",
+        "age_days",
+        "duplicate_passages",
+        "contradiction_flags",
+        "readability",
+        "coverage_contribution",
+        "orphan_ratio",
+        "gap_hits",
+    }
 
     def test_shape_and_ranges(self):
         rows = kb_eval.document_quality(self.p, T)
@@ -204,7 +242,7 @@ class TestDocumentQuality(KbEvalBase):
         self.assertTrue(any("authoritative" in r for r in row["reasons"]))
 
     def test_now_ms_is_reproducible_and_never_negative(self):
-        fixed = self.strategy["ingested_at"] - 10 * DAY_MS     # clock earlier than ingest
+        fixed = self.strategy["ingested_at"] - 10 * DAY_MS  # clock earlier than ingest
         row = self._quality_of(self.strategy["id"], now_ms=fixed)
         self.assertEqual(row["signals"]["age_days"], 0.0)
         a = kb_eval.document_quality(self.p, T, now_ms=fixed)
@@ -227,9 +265,21 @@ class TestDocumentQuality(KbEvalBase):
 
 
 class TestDataQuality(KbEvalBase):
-    KEYS = {"coverage", "freshness", "contradictions", "gaps", "connectedness", "traceability",
-            "readability_avg", "duplicate_rate", "citation_coverage", "documents", "passages",
-            "suggestions", "risk_register"}
+    KEYS = {
+        "coverage",
+        "freshness",
+        "contradictions",
+        "gaps",
+        "connectedness",
+        "traceability",
+        "readability_avg",
+        "duplicate_rate",
+        "citation_coverage",
+        "documents",
+        "passages",
+        "suggestions",
+        "risk_register",
+    }
 
     def test_shape_and_consistency(self):
         dq = kb_eval.data_quality(self.p, T)
@@ -238,8 +288,15 @@ class TestDataQuality(KbEvalBase):
         self.assertEqual(dq["passages"], self.p.passages.count(T))
         self.assertEqual(sum(dq["suggestions"].values()), dq["documents"])
         self.assertEqual(set(dq["suggestions"]), {"keep", "review", "delete"})
-        for k in ("coverage", "freshness", "connectedness", "traceability", "readability_avg",
-                  "duplicate_rate", "citation_coverage"):
+        for k in (
+            "coverage",
+            "freshness",
+            "connectedness",
+            "traceability",
+            "readability_avg",
+            "duplicate_rate",
+            "citation_coverage",
+        ):
             self.assertGreaterEqual(dq[k], 0.0)
             self.assertLessEqual(dq[k], 1.0)
         self.assertEqual(dq["duplicate_rate"], 0.0)
@@ -250,6 +307,7 @@ class TestDataQuality(KbEvalBase):
 
     def test_reuses_health_snapshot_and_flags_duplicates(self):
         from knowledge_fabric.health import metrics
+
         self._upload_duplicate()
         snap = metrics.latest(self.p, T)
         base_risks = metrics.risk_register(self.p, T)

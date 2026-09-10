@@ -1,4 +1,5 @@
 """Evaluation gate + knowledge health + identifier safety (Section 20, 15, 16, 19)."""
+
 import unittest
 
 from knowledge_fabric.evaluation import gate
@@ -28,7 +29,7 @@ class TestEvalHealth(unittest.TestCase):
     def test_health_snapshot_and_risk_register(self):
         h = metrics.latest(self.p, "test-fabric")
         self.assertIn("coverage", h)
-        self.assertGreaterEqual(h["traceability"], 1.0)   # every passage has provenance
+        self.assertGreaterEqual(h["traceability"], 1.0)  # every passage has provenance
         risks = metrics.risk_register(self.p, "test-fabric")
         self.assertIsInstance(risks, list)
 
@@ -37,12 +38,17 @@ class TestEvalHealth(unittest.TestCase):
         # trivially empty; the synthetic fixture validates its own corpus.
         self.assertEqual(demo.validate_identifiers(), [])
         from tests.fixtures import synthetic_corpus
-        self.assertEqual(synthetic_corpus.validate_identifiers(), [],
-                         "synthetic fixture corpus must be identifier-safe")
+
+        self.assertEqual(
+            synthetic_corpus.validate_identifiers(),
+            [],
+            "synthetic fixture corpus must be identifier-safe",
+        )
 
     def test_identifier_safety_fails_on_real_identifier(self):
         # inject a real-looking phone number and confirm the validator would catch it
         from tests.fixtures.synthetic_corpus import _UNSAFE
+
         bad = "call us at 212-555-9034 today"
         hit = any(lbl and pat.search(bad) for pat, lbl in _UNSAFE)
         self.assertTrue(hit)

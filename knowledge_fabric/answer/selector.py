@@ -16,15 +16,52 @@ Levels → tiers:
   L3 reason     → tier deep
   L4 escalation → tier escalation  (only when confidence fails)
 """
+
 from __future__ import annotations
 
 import re
 
 _TOKEN = re.compile(r"[a-z0-9]+")
-_STOP = {"the", "a", "an", "of", "to", "in", "on", "for", "and", "or", "is", "are",
-         "what", "which", "how", "who", "when", "where", "does", "do", "did", "was"}
-_REASONING = ("why", "how", "compare", "difference", "explain", "analyse", "analyze",
-              "evaluate", "recommend", "implication", "trade-off", "tradeoff", "versus", "vs")
+_STOP = {
+    "the",
+    "a",
+    "an",
+    "of",
+    "to",
+    "in",
+    "on",
+    "for",
+    "and",
+    "or",
+    "is",
+    "are",
+    "what",
+    "which",
+    "how",
+    "who",
+    "when",
+    "where",
+    "does",
+    "do",
+    "did",
+    "was",
+}
+_REASONING = (
+    "why",
+    "how",
+    "compare",
+    "difference",
+    "explain",
+    "analyse",
+    "analyze",
+    "evaluate",
+    "recommend",
+    "implication",
+    "trade-off",
+    "tradeoff",
+    "versus",
+    "vs",
+)
 _LOOKUP = ("what", "which", "who", "when", "where", "list", "define", "status")
 
 LEVELS = {
@@ -53,8 +90,14 @@ def _definition_target(question: str) -> str:
     return " ".join(toks)
 
 
-def classify(question: str, selected, grounding: float, graph_used: bool,
-             doc_titles: dict | None = None, doc_authority: dict | None = None) -> dict:
+def classify(
+    question: str,
+    selected,
+    grounding: float,
+    graph_used: bool,
+    doc_titles: dict | None = None,
+    doc_authority: dict | None = None,
+) -> dict:
     q = question.lower()
     toks = _qtok(question)
     n_tokens = len(toks)
@@ -70,16 +113,31 @@ def classify(question: str, selected, grounding: float, graph_used: bool,
     # base level from question form
     if is_reasoning:
         level = 3
-        reasons.append({"code": "reasoning_intent", "detail": "question asks to reason/compare/explain",
-                        "signal": next((w for w in _REASONING if w in q), "")})
+        reasons.append(
+            {
+                "code": "reasoning_intent",
+                "detail": "question asks to reason/compare/explain",
+                "signal": next((w for w in _REASONING if w in q), ""),
+            }
+        )
     elif is_lookup and n_tokens <= 8:
         level = 1
-        reasons.append({"code": "factual_lookup", "detail": "short factual look-up phrasing",
-                        "signal": q.split()[0]})
+        reasons.append(
+            {
+                "code": "factual_lookup",
+                "detail": "short factual look-up phrasing",
+                "signal": q.split()[0],
+            }
+        )
     else:
         level = 2
-        reasons.append({"code": "synthesis", "detail": "moderate synthesis question",
-                        "signal": f"{n_tokens} content tokens"})
+        reasons.append(
+            {
+                "code": "synthesis",
+                "detail": "moderate synthesis question",
+                "signal": f"{n_tokens} content tokens",
+            }
+        )
 
     # L0.4 — definition rule wins early: 'what is / who is / define <X>' where
     # <X> matches the top document's title (an authoritative source raises
@@ -97,8 +155,13 @@ def classify(question: str, selected, grounding: float, graph_used: bool,
         if title_hit and authoritative:
             level = 1
             define_locked = True
-            reasons.append({"code": "definition", "signal": target,
-                            "detail": f"definition of '{target}' found in the top document title"})
+            reasons.append(
+                {
+                    "code": "definition",
+                    "signal": target,
+                    "detail": f"definition of '{target}' found in the top document title",
+                }
+            )
 
     # evidence spread pushes cost up (needs cross-document synthesis). A lookup
     # is raised at most to Level 2 by document spread; only a reasoning/
@@ -107,38 +170,72 @@ def classify(question: str, selected, grounding: float, graph_used: bool,
         if doc_spread >= 3 and level < 3:
             if is_reasoning:
                 level = 3
-                reasons.append({"code": "multi_document", "detail": f"evidence spans {doc_spread} documents",
-                                "signal": doc_spread})
+                reasons.append(
+                    {
+                        "code": "multi_document",
+                        "detail": f"evidence spans {doc_spread} documents",
+                        "signal": doc_spread,
+                    }
+                )
             elif level < 2:
                 level = 2
-                reasons.append({"code": "multi_document", "signal": doc_spread,
-                                "detail": f"evidence spans {doc_spread} documents (lookup capped at summarise)"})
+                reasons.append(
+                    {
+                        "code": "multi_document",
+                        "signal": doc_spread,
+                        "detail": f"evidence spans {doc_spread} documents "
+                        "(lookup capped at summarise)",
+                    }
+                )
         elif doc_spread >= 2 and level < 2:
             level = 2
-            reasons.append({"code": "two_document", "detail": "evidence spans 2 documents", "signal": doc_spread})
+            reasons.append(
+                {
+                    "code": "two_document",
+                    "detail": "evidence spans 2 documents",
+                    "signal": doc_spread,
+                }
+            )
 
     if graph_used and not define_locked:
-        reasons.append({"code": "graph_multi_hop", "detail": "graph pulled connected cross-doc evidence",
-                        "signal": True})
+        reasons.append(
+            {
+                "code": "graph_multi_hop",
+                "detail": "graph pulled connected cross-doc evidence",
+                "signal": True,
+            }
+        )
         if level < 2:
             level = 2
 
     # long question => more synthesis
     if n_tokens >= 12 and level < 3 and not define_locked:
         level = 3
-        reasons.append({"code": "long_query", "detail": "long, information-dense question",
-                        "signal": n_tokens})
+        reasons.append(
+            {"code": "long_query", "detail": "long, information-dense question", "signal": n_tokens}
+        )
 
     # strong grounding on a simple question keeps it cheap
     if level == 1 and grounding >= 0.7:
-        reasons.append({"code": "high_grounding", "detail": "answer sits in one place, well grounded",
-                        "signal": round(grounding, 3)})
+        reasons.append(
+            {
+                "code": "high_grounding",
+                "detail": "answer sits in one place, well grounded",
+                "signal": round(grounding, 3),
+            }
+        )
 
     name, tier = LEVELS[level]
     complexity = round(min(1.0, 0.15 * level + 0.03 * n_tokens + 0.1 * doc_spread), 3)
     explain = _explain(name, reasons, doc_spread, grounding)
-    return {"level": level, "level_name": name, "tier": tier, "reasons": reasons,
-            "explain": explain, "complexity": complexity}
+    return {
+        "level": level,
+        "level_name": name,
+        "tier": tier,
+        "reasons": reasons,
+        "explain": explain,
+        "complexity": complexity,
+    }
 
 
 def escalate(decision: dict, confidence: float, floor: float) -> dict:
@@ -148,11 +245,22 @@ def escalate(decision: dict, confidence: float, floor: float) -> dict:
     new_level = min(4, decision["level"] + 1)
     name, tier = LEVELS[new_level]
     d = dict(decision)
-    d.update(level=new_level, level_name=name, tier=tier,
-             reasons=decision["reasons"] + [{"code": "confidence_fail",
-                                             "detail": f"post-check confidence {round(confidence,3)} < {floor}",
-                                             "signal": round(confidence, 3)}])
-    d["explain"] = f"Escalated to {name}: initial confidence {round(confidence,3)} fell below {floor}."
+    d.update(
+        level=new_level,
+        level_name=name,
+        tier=tier,
+        reasons=decision["reasons"]
+        + [
+            {
+                "code": "confidence_fail",
+                "detail": f"post-check confidence {round(confidence, 3)} < {floor}",
+                "signal": round(confidence, 3),
+            }
+        ],
+    )
+    d["explain"] = (
+        f"Escalated to {name}: initial confidence {round(confidence, 3)} fell below {floor}."
+    )
     return d
 
 

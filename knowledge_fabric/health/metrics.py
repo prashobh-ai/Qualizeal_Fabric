@@ -3,6 +3,7 @@ traceability, currency, contradictions, gaps + a standing risk register.
 Written as a snapshot at the end of each ingest job and read by the Curator
 console and dashboards.
 """
+
 from __future__ import annotations
 
 from ..contracts.types import now_ms
@@ -30,14 +31,31 @@ def snapshot(platform, tenant: str, pack) -> dict:
     p.db.execute(
         """INSERT INTO health_snapshots(tenant,area,coverage,freshness,contradictions,gaps,
            connectedness,traceability,taken_at) VALUES(?,?,?,?,?,?,?,?,?)""",
-        (tenant, "all", coverage, freshness, contradictions, gaps, connectedness, traceability, now_ms()))
-    return {"coverage": coverage, "connectedness": connectedness,
-            "traceability": traceability, "contradictions": contradictions, "gaps": gaps}
+        (
+            tenant,
+            "all",
+            coverage,
+            freshness,
+            contradictions,
+            gaps,
+            connectedness,
+            traceability,
+            now_ms(),
+        ),
+    )
+    return {
+        "coverage": coverage,
+        "connectedness": connectedness,
+        "traceability": traceability,
+        "contradictions": contradictions,
+        "gaps": gaps,
+    }
 
 
 def latest(platform, tenant: str) -> dict:
     r = platform.db.one(
-        "SELECT * FROM health_snapshots WHERE tenant=? ORDER BY id DESC LIMIT 1", (tenant,))
+        "SELECT * FROM health_snapshots WHERE tenant=? ORDER BY id DESC LIMIT 1", (tenant,)
+    )
     return dict(r) if r else {}
 
 
@@ -47,13 +65,24 @@ def risk_register(platform, tenant: str) -> list[dict]:
     risks = []
     if h:
         if h["coverage"] < 0.5:
-            risks.append({"risk": "thin coverage", "value": round(h["coverage"], 2), "severity": "high"})
+            risks.append(
+                {"risk": "thin coverage", "value": round(h["coverage"], 2), "severity": "high"}
+            )
         if h["contradictions"] > 0:
-            risks.append({"risk": "contradictions flagged", "value": h["contradictions"], "severity": "high"})
+            risks.append(
+                {"risk": "contradictions flagged", "value": h["contradictions"], "severity": "high"}
+            )
         if h["connectedness"] < 0.3:
-            risks.append({"risk": "sparse graph / orphan nodes", "value": round(h["connectedness"], 2),
-                          "severity": "medium"})
+            risks.append(
+                {
+                    "risk": "sparse graph / orphan nodes",
+                    "value": round(h["connectedness"], 2),
+                    "severity": "medium",
+                }
+            )
     gaps = platform.curation.list(tenant, "gap")
     if gaps:
-        risks.append({"risk": "unanswered demand (gap backlog)", "value": len(gaps), "severity": "medium"})
+        risks.append(
+            {"risk": "unanswered demand (gap backlog)", "value": len(gaps), "severity": "medium"}
+        )
     return risks

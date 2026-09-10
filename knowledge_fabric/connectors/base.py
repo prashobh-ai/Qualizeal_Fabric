@@ -5,9 +5,8 @@ scopes. Nothing downstream (pipeline/stores/answer/surfaces) changes.
 Every connector is READ-ONLY by default (I13), declares required scopes, and
 supports change detection via a cursor (updated-at / etag).
 """
-from __future__ import annotations
 
-from typing import Optional
+from __future__ import annotations
 
 from ..contracts.types import RawItem
 
@@ -26,7 +25,7 @@ class BaseConnector:
     def discover(self, config: dict) -> dict:
         return {"source": self.source_name, "scopes": self.scopes(), "read_only": self.read_only}
 
-    def pull(self, cursor: Optional[str]) -> tuple[list[RawItem], Optional[str]]:
+    def pull(self, cursor: str | None) -> tuple[list[RawItem], str | None]:
         """Return (canonical records newer than cursor, next cursor)."""
         raise NotImplementedError
 

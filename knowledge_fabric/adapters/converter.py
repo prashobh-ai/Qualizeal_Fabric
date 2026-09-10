@@ -12,6 +12,7 @@ Real PDF/image binaries would plug a Docling/OCR engine in behind the same
 ``convert`` method; here synthetic corpora are UTF-8 text so the coordinate
 math is exact and testable offline.
 """
+
 from __future__ import annotations
 
 import csv
@@ -36,7 +37,12 @@ class DoclingLite:
 
         if mime in ("text/csv", "text/tab-separated-values") or uri.endswith((".csv", ".tsv")):
             return self._table(text, "\t" if uri.endswith(".tsv") else ",", raw.language)
-        if "transcript" in mime or "audio" in mime or "video" in mime or uri.endswith(".transcript"):
+        if (
+            "transcript" in mime
+            or "audio" in mime
+            or "video" in mime
+            or uri.endswith(".transcript")
+        ):
             return self._transcript(text, raw.language)
         if uri.endswith((".py", ".js", ".ts", ".go", ".java", ".rb")) or "code" in mime:
             return self._code(text, raw.language)
@@ -50,6 +56,7 @@ class DoclingLite:
         """Extract paragraphs from a .docx (Office Open XML) with stdlib only."""
         import io as _io
         import zipfile
+
         paras: list[str] = []
         try:
             z = zipfile.ZipFile(_io.BytesIO(data))
@@ -63,8 +70,13 @@ class DoclingLite:
                 paras.append(para)
         regions = []
         for i, p in enumerate(paras):
-            regions.append(_region(p, CoordinateKind.PAGE_PARAGRAPH,
-                                   {"page": i // _PARAS_PER_PAGE + 1, "paragraph": i % _PARAS_PER_PAGE + 1}))
+            regions.append(
+                _region(
+                    p,
+                    CoordinateKind.PAGE_PARAGRAPH,
+                    {"page": i // _PARAS_PER_PAGE + 1, "paragraph": i % _PARAS_PER_PAGE + 1},
+                )
+            )
         return ConvertedDocument(language=lang, regions=regions)
 
     def _text(self, text: str, lang: str) -> ConvertedDocument:
@@ -73,7 +85,9 @@ class DoclingLite:
         for i, p in enumerate(paras):
             page = i // _PARAS_PER_PAGE + 1
             para = i % _PARAS_PER_PAGE + 1
-            regions.append(_region(p, CoordinateKind.PAGE_PARAGRAPH, {"page": page, "paragraph": para}))
+            regions.append(
+                _region(p, CoordinateKind.PAGE_PARAGRAPH, {"page": page, "paragraph": para})
+            )
         return ConvertedDocument(language=lang, regions=regions)
 
     def _table(self, text: str, delim: str, lang: str) -> ConvertedDocument:
@@ -86,8 +100,9 @@ class DoclingLite:
             for c, val in enumerate(row):
                 col = header[c] if c < len(header) else f"col{c}"
                 cell_text = f"{col}: {val} (row {r})"
-                regions.append(_region(cell_text, CoordinateKind.CELL,
-                                       {"row": r, "col": c, "col_name": col}))
+                regions.append(
+                    _region(cell_text, CoordinateKind.CELL, {"row": r, "col": c, "col_name": col})
+                )
         return ConvertedDocument(language=lang, regions=regions)
 
     def _transcript(self, text: str, lang: str) -> ConvertedDocument:
@@ -97,8 +112,11 @@ class DoclingLite:
             if not m:
                 continue
             start = int(m.group(1)) * 60 + int(m.group(2))
-            regions.append(_region(m.group(3), CoordinateKind.TIMESTAMP,
-                                   {"start_s": start, "end_s": start + 10}))
+            regions.append(
+                _region(
+                    m.group(3), CoordinateKind.TIMESTAMP, {"start_s": start, "end_s": start + 10}
+                )
+            )
         return ConvertedDocument(language=lang, regions=regions)
 
     def _code(self, text: str, lang: str) -> ConvertedDocument:
@@ -108,28 +126,46 @@ class DoclingLite:
         for i, line in enumerate(lines, start=1):
             m = _DEF.match(line)
             if m and buf:
-                regions.append(_region("\n".join(buf), CoordinateKind.SYMBOL_LINE,
-                                       {"symbol": current_symbol, "line": start_line}))
+                regions.append(
+                    _region(
+                        "\n".join(buf),
+                        CoordinateKind.SYMBOL_LINE,
+                        {"symbol": current_symbol, "line": start_line},
+                    )
+                )
                 buf, start_line = [], i
                 current_symbol = m.group(1)
             elif m:
                 current_symbol, start_line = m.group(1), i
             buf.append(line)
         if buf:
-            regions.append(_region("\n".join(buf), CoordinateKind.SYMBOL_LINE,
-                                   {"symbol": current_symbol, "line": start_line}))
+            regions.append(
+                _region(
+                    "\n".join(buf),
+                    CoordinateKind.SYMBOL_LINE,
+                    {"symbol": current_symbol, "line": start_line},
+                )
+            )
         return ConvertedDocument(language=lang, regions=regions)
 
     def _scan(self, text: str, lang: str) -> ConvertedDocument:
         paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
         regions = []
         for i, p in enumerate(paras):
-            regions.append(_region(p, CoordinateKind.BBOX,
-                                   {"page": i // _PARAS_PER_PAGE + 1,
-                                    "bbox": [72, 100 + (i % _PARAS_PER_PAGE) * 120, 520, 90]}))
+            regions.append(
+                _region(
+                    p,
+                    CoordinateKind.BBOX,
+                    {
+                        "page": i // _PARAS_PER_PAGE + 1,
+                        "bbox": [72, 100 + (i % _PARAS_PER_PAGE) * 120, 520, 90],
+                    },
+                )
+            )
         return ConvertedDocument(language=lang, regions=regions)
 
 
 def _region(text: str, kind: CoordinateKind, locator: dict):
     from ..contracts.types import Region
+
     return Region(text=text, coordinate=Coordinate(kind, locator))

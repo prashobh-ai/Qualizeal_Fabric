@@ -1,4 +1,5 @@
 """L0.2 — the product fabric ships no documents; synthetic corpus is test-only."""
+
 from __future__ import annotations
 
 import os
@@ -25,7 +26,8 @@ class TestSeedIsDocumentFree(unittest.TestCase):
     def test_question_bank_empty_until_corpus_loads(self):
         demo.seed(self.p)
         rows = self.p.db.query(
-            "SELECT COUNT(*) c FROM question_bank WHERE tenant=?", ("qualizeal",))
+            "SELECT COUNT(*) c FROM question_bank WHERE tenant=?", ("qualizeal",)
+        )
         self.assertEqual(rows[0]["c"], 0)
 
     def test_fixture_loads_into_test_fabric_only(self):

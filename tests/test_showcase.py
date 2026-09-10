@@ -5,6 +5,7 @@ baked ``snapshot.json`` and the browser-side ``engine.js``. These tests build
 it once and assert the structure, the snapshot contents, and that the verifier
 guards the invariants (no external URLs, required files present).
 """
+
 from __future__ import annotations
 
 import json
@@ -35,8 +36,10 @@ class TestShowcaseBuilder(unittest.TestCase):
         for req in (".nojekyll", "index.html", "engine.js", "snapshot.json"):
             self.assertTrue(os.path.isfile(os.path.join(self.out, req)), f"missing {req}")
         for name in ("workspace", "admin", "curator", "signin", "dashboard"):
-            self.assertTrue(os.path.isfile(os.path.join(self.out, name, "index.html")),
-                            f"missing {name}/index.html")
+            self.assertTrue(
+                os.path.isfile(os.path.join(self.out, name, "index.html")),
+                f"missing {name}/index.html",
+            )
         for logo in ("qualizeal-lockup.png", "qualizeal-mark.png"):
             self.assertTrue(os.path.isfile(os.path.join(self.out, "assets", "brand", "logo", logo)))
 
@@ -56,23 +59,23 @@ class TestShowcaseBuilder(unittest.TestCase):
 
     def test_landing_is_explainable_and_relative(self):
         html = self._read("index.html")
-        self.assertNotIn("Showcase build pending", html)          # the placeholder is gone
+        self.assertNotIn("Showcase build pending", html)  # the placeholder is gone
         self.assertIn("./assets/brand/logo/qualizeal-lockup.png", html)
         self.assertIn("./engine.js", html)
         for w in ("Look it up", "Quote it", "Summarise it", "Reason about it"):
-            self.assertIn(w, html)                                # the four reader levels
+            self.assertIn(w, html)  # the four reader levels
         self.assertIn("Open the Workspace", html)
-        self.assertIn('id="cbtn"', html)                          # the chatbot widget
+        self.assertIn('id="cbtn"', html)  # the chatbot widget
         self.assertNotIn("http://", html)
         self.assertNotIn("https://", html)
 
     def test_surface_pages_inject_the_engine(self):
         for name in ("workspace", "admin", "curator", "signin", "dashboard"):
             html = self._read(name, "index.html")
-            self.assertIn("window.KF_SURFACE=%r" % name, html)
+            self.assertIn(f"window.KF_SURFACE={name!r}", html)
             self.assertIn('src="../engine.js"', html)
-            self.assertIn("../assets/brand/", html)               # relative assets
-            self.assertNotIn("/static/assets/", html)             # rewritten away
+            self.assertIn("../assets/brand/", html)  # relative assets
+            self.assertNotIn("/static/assets/", html)  # rewritten away
             self.assertNotIn("http://", html)
             self.assertNotIn("https://", html)
 

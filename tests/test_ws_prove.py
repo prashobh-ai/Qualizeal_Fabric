@@ -1,4 +1,5 @@
 """WS3 · PROVE — telemetry analytics filters, savings by technique, RBAC."""
+
 import unittest
 
 from knowledge_fabric.answer.service import AnswerService
@@ -20,15 +21,29 @@ class TestProve(unittest.TestCase):
 
     def test_analytics_core_fields(self):
         a = self.p.telemetry.analytics("test-fabric", "7d")
-        for key in ("answers", "tokens_in", "tokens_out", "total_cost", "total_cost_saved",
-                    "routing_by_level", "routing_reasons", "routing_by_tier",
-                    "savings_by_technique", "per_user", "per_role", "by_language", "timeseries"):
+        for key in (
+            "answers",
+            "tokens_in",
+            "tokens_out",
+            "total_cost",
+            "total_cost_saved",
+            "routing_by_level",
+            "routing_reasons",
+            "routing_by_tier",
+            "savings_by_technique",
+            "per_user",
+            "per_role",
+            "by_language",
+            "timeseries",
+        ):
             self.assertIn(key, a)
         self.assertGreaterEqual(a["answers"], 4)
 
     def test_savings_recorded_by_technique(self):
         a = self.p.telemetry.analytics("test-fabric", "7d")
-        self.assertTrue(a["savings_by_technique"], "cache savings must be attributed to a technique")
+        self.assertTrue(
+            a["savings_by_technique"], "cache savings must be attributed to a technique"
+        )
         self.assertGreater(a["total_cost_saved"], 0)
         self.assertGreater(a["cache_hit_rate"], 0)
 

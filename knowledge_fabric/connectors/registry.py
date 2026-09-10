@@ -6,6 +6,7 @@ tenant's source set. The same registry serves whether the deployment reads
 from GitHub, a standalone machine's drop folder, or an AWS account — only the
 config differs, never the application code.
 """
+
 from __future__ import annotations
 
 from .files import FilesConnector

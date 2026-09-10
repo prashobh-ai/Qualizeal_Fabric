@@ -19,15 +19,31 @@ Method (cheap, no model needed to *generate* — the answer service scores):
 ACL-filtered `/api/suggestions` endpoint shows a question only to a
 principal who can retrieve every one of its supporting documents.
 """
+
 from __future__ import annotations
 
 import re
 
 from ..contracts.types import AnswerKind
 
-_CODE_PREFIX = re.compile(r"^\s*(?:\d+[\s._-]*)+")   # "03 Product ValidAIte" -> "Product ValidAIte"
-_GENERIC = {"product", "products", "service", "services", "overview", "document",
-            "policy", "guide", "company", "the", "a", "an", "of", "and", "for"}
+_CODE_PREFIX = re.compile(r"^\s*(?:\d+[\s._-]*)+")  # "03 Product ValidAIte" -> "Product ValidAIte"
+_GENERIC = {
+    "product",
+    "products",
+    "service",
+    "services",
+    "overview",
+    "document",
+    "policy",
+    "guide",
+    "company",
+    "the",
+    "a",
+    "an",
+    "of",
+    "and",
+    "for",
+}
 CONFIDENCE_GATE = 0.56
 MIN_CITED_DOCS = 2
 
@@ -67,8 +83,11 @@ def generate(platform, tenant: str, principal=None) -> int:
 
     svc = AnswerService(platform)
     if principal is None:
-        token = platform.idp.mint(Principal(subject="bank-bot", tenant=tenant,
-                                            roles=["asker"], scopes=["public", "restricted"]))
+        token = platform.idp.mint(
+            Principal(
+                subject="bank-bot", tenant=tenant, roles=["asker"], scopes=["public", "restricted"]
+            )
+        )
         principal = platform.idp.authenticate({"token": token})
 
     platform.db.execute("DELETE FROM question_bank WHERE tenant=?", (tenant,))
@@ -83,7 +102,11 @@ def generate(platform, tenant: str, principal=None) -> int:
             continue
         family = "definition" if q.startswith("what is") else "coverage"
         platform.db.execute(
-            "INSERT OR REPLACE INTO question_bank(id,tenant,question,expected_docs,family) VALUES(?,?,?,?,?)",
-            (f"{tenant}-gen{kept}", tenant, q, ",".join(uris), family))
+            (
+                "INSERT OR REPLACE INTO question_bank(id,tenant,question,expected_docs,family) "
+                "VALUES(?,?,?,?,?)"
+            ),
+            (f"{tenant}-gen{kept}", tenant, q, ",".join(uris), family),
+        )
         kept += 1
     return kept

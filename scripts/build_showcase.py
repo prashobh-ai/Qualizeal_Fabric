@@ -19,6 +19,7 @@ any base path (the Pages repo path, localhost, an AWS subpath).
 
 Usage:  python scripts/build_showcase.py --out dist/showcase
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,17 +36,16 @@ ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, ROOT)
 os.environ.setdefault("KF_MODEL_MODE", "mock")  # deterministic, no network
 
-from knowledge_fabric.app import Platform                                 # noqa: E402
-from knowledge_fabric.answer.service import AnswerService                 # noqa: E402
-from knowledge_fabric.evaluation import bank as qbank                     # noqa: E402
-from knowledge_fabric.surfaces import http_api                           # noqa: E402
-from knowledge_fabric.surfaces.admin_ui import ADMIN_HTML                # noqa: E402
-from knowledge_fabric.surfaces.ask_ui import ASK_HTML                    # noqa: E402
-from knowledge_fabric.surfaces.curator_ui import CURATOR_HTML            # noqa: E402
-from knowledge_fabric.surfaces.dashboard import DASHBOARD_HTML           # noqa: E402
-from knowledge_fabric.surfaces.signin_ui import SIGNIN_HTML              # noqa: E402
-from knowledge_fabric.tenants import demo                               # noqa: E402
-from tests.fixtures import synthetic_corpus                             # noqa: E402
+from knowledge_fabric.answer.service import AnswerService  # noqa: E402
+from knowledge_fabric.evaluation import bank as qbank  # noqa: E402
+from knowledge_fabric.surfaces import http_api  # noqa: E402
+from knowledge_fabric.surfaces.admin_ui import ADMIN_HTML  # noqa: E402
+from knowledge_fabric.surfaces.ask_ui import ASK_HTML  # noqa: E402
+from knowledge_fabric.surfaces.curator_ui import CURATOR_HTML  # noqa: E402
+from knowledge_fabric.surfaces.dashboard import DASHBOARD_HTML  # noqa: E402
+from knowledge_fabric.surfaces.signin_ui import SIGNIN_HTML  # noqa: E402
+from knowledge_fabric.tenants import demo  # noqa: E402
+from tests.fixtures import synthetic_corpus  # noqa: E402
 
 BRAND_SRC = os.path.join(ROOT, "knowledge_fabric", "surfaces", "static", "assets", "brand")
 ENGINE_SRC = os.path.join(ROOT, "scripts", "showcase", "engine.js")
@@ -58,15 +58,21 @@ SCRIPT = [
     ("asker.public", "why does a component with an open defect block dependent releases?"),
     ("asker.public", "which requirement has a traceability gap?"),
     ("asker.public", "what blocks the release according to the standup?"),
-    ("asker.public", "what must a release achieve before promotion?"),          # cache hit
+    ("asker.public", "what must a release achieve before promotion?"),  # cache hit
     ("curator", "how fast must critical defects be triaged?"),
     ("curator", "compare acceptance criteria across the strategy and the runbook"),
     ("asker.public", "how fast must critical defects be triaged?"),
-    ("asker.restricted", "what must a release achieve before promotion and which requirement has a traceability gap?"),
-    ("asker.public", "quel est le critère d acceptation pour la couverture?"),   # FR
-    ("asker.public", "¿cuál es el criterio de aceptación para la cobertura?"),   # ES
+    (
+        "asker.restricted",
+        (
+            "what must a release achieve before promotion and which requirement has a traceability "
+            "gap?"
+        ),
+    ),
+    ("asker.public", "quel est le critère d acceptation pour la couverture?"),  # FR
+    ("asker.public", "¿cuál es el criterio de aceptación para la cobertura?"),  # ES
     ("qa-agent", "what is required before a release is promoted?"),
-    ("asker.public", "what is the capital of France?"),                          # gap
+    ("asker.public", "what is the capital of France?"),  # gap
     ("curator", "why does an open defect block its dependent releases?"),
 ]
 
@@ -85,17 +91,28 @@ ROLES = ["asker.public", "asker.restricted", "curator", "admin", "qa-agent"]
 # GET endpoints to capture per bucket (askers use only the /api/* set).
 ASKER_GETS = ["/api/corpus"]
 CURATOR_GETS = ["/curator/quality", "/curator/gaps", "/curator/documents", "/admin/sources"]
-ADMIN_GETS = ["/admin/users", "/admin/runs?limit=12", "/admin/audit?limit=40", "/admin/sources",
-              "/admin/connectors", "/admin/budget", "/admin/authority",
-              "/curator/quality", "/curator/gaps", "/curator/documents"]
+ADMIN_GETS = [
+    "/admin/users",
+    "/admin/runs?limit=12",
+    "/admin/audit?limit=40",
+    "/admin/sources",
+    "/admin/connectors",
+    "/admin/budget",
+    "/admin/authority",
+    "/curator/quality",
+    "/curator/gaps",
+    "/curator/documents",
+]
 
 
 def _seed():
-    p = http_api.Platform(db_path=":memory:", blob_root=os.path.join(ROOT, "data", "showcase-blobs"))
+    p = http_api.Platform(
+        db_path=":memory:", blob_root=os.path.join(ROOT, "data", "showcase-blobs")
+    )
     demo.seed(p, [TENANT])
-    synthetic_corpus.load_into(p, TENANT)          # self-contained demo knowledge
+    synthetic_corpus.load_into(p, TENANT)  # self-contained demo knowledge
     p.policy.set_budget(TENANT, 20.0)
-    qbank.generate(p, TENANT)                      # bank from the loaded corpus
+    qbank.generate(p, TENANT)  # bank from the loaded corpus
     svc = AnswerService(p)
     for subject, q in SCRIPT:
         try:
@@ -129,9 +146,18 @@ class _Client:
 
 
 def _bake(client) -> dict:
-    snap: dict = {"login": {}, "get": {"asker": {}, "curator": {}, "admin": {}},
-                  "answers": {}, "galaxy": {}, "usage": {}, "suggestions": {},
-                  "analytics": {}, "versions": {}, "doctor": {}, "bank": []}
+    snap: dict = {
+        "login": {},
+        "get": {"asker": {}, "curator": {}, "admin": {}},
+        "answers": {},
+        "galaxy": {},
+        "usage": {},
+        "suggestions": {},
+        "analytics": {},
+        "versions": {},
+        "doctor": {},
+        "bank": [],
+    }
     tokens = {}
     for subject in ROLES:
         code, j = client.call("POST", "/login", {"tenant": TENANT, "subject": subject})
@@ -141,6 +167,7 @@ def _bake(client) -> dict:
 
     def norm(q):
         import re
+
         return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", q.lower())).strip()
 
     # answers + galaxy (bake as the broad asker so citations are full)
@@ -153,7 +180,7 @@ def _bake(client) -> dict:
             continue
         _, s = client.call("GET", "/api/suggestions", token=tok)
         snap["suggestions"][key] = s
-        for item in (s.get("suggestions") or []):
+        for item in s.get("suggestions") or []:
             q = item.get("question")
             if q:
                 EXTRA_Q.append(q)
@@ -209,7 +236,9 @@ def _bake(client) -> dict:
     for d in docs[:8]:
         did = d.get("document_id") or d.get("id")
         if did:
-            code, j = client.call("GET", "/curator/versions?document_id=" + did, token=tokens.get("curator"))
+            code, j = client.call(
+                "GET", "/curator/versions?document_id=" + did, token=tokens.get("curator")
+            )
             if code == 200:
                 snap["versions"][did] = j
     return snap
@@ -223,8 +252,9 @@ def _rewrite(html: str, surface: str, asset_prefix: str, engine_href: str) -> st
     html = html.replace("/static/assets/", asset_prefix)
     # root links (the lockup on standalone pages) point at the showcase root.
     html = html.replace('href="/"', 'href="../"')
-    inject = ('<script>window.KF_SURFACE=%r;</script>\n<script src="%s"></script>\n'
-              % (surface, engine_href))
+    inject = (
+        f'<script>window.KF_SURFACE={surface!r};</script>\n<script src="{engine_href}"></script>\n'
+    )
     # the engine must run before ANY page script (it installs the fetch shim and
     # sets KF_BASE). Inject before the first <script> — works for the shared
     # runtime pages and the standalone telemetry page alike.
@@ -253,20 +283,26 @@ def build(out_dir: str) -> None:
     http_api._platform = p
     http_api._svc = AnswerService(p)
     srv = ThreadingHTTPServer(("127.0.0.1", 0), http_api.Handler)
-    base = "http://127.0.0.1:%d" % srv.server_address[1]
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
     th = threading.Thread(target=srv.serve_forever, daemon=True)
     th.start()
     try:
         snap = _bake(_Client(base))
     finally:
-        srv.shutdown(); srv.server_close()
+        srv.shutdown()
+        srv.server_close()
         http_api._platform, http_api._svc = saved
 
     with open(os.path.join(out, "snapshot.json"), "w", encoding="utf-8") as fh:
         json.dump(snap, fh, separators=(",", ":"), default=str)
 
-    surfaces = {"workspace": ASK_HTML, "admin": ADMIN_HTML, "curator": CURATOR_HTML,
-                "signin": SIGNIN_HTML, "dashboard": DASHBOARD_HTML}
+    surfaces = {
+        "workspace": ASK_HTML,
+        "admin": ADMIN_HTML,
+        "curator": CURATOR_HTML,
+        "signin": SIGNIN_HTML,
+        "dashboard": DASHBOARD_HTML,
+    }
     for name, html in surfaces.items():
         folder = os.path.join(out, name)
         os.makedirs(folder, exist_ok=True)
@@ -281,9 +317,11 @@ def build(out_dir: str) -> None:
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as fh:
         fh.write(landing)
 
-    entries = sorted(os.listdir(out))
-    print("showcase built at %s\n  %s\n  answers=%d galaxies=%d bank=%d"
-          % (out, ", ".join(entries), len(snap["answers"]), len(snap["galaxy"]), len(snap["bank"])))
+    entries = ", ".join(sorted(os.listdir(out)))
+    print(
+        f"showcase built at {out}\n  {entries}\n"
+        f"  answers={len(snap['answers'])} galaxies={len(snap['galaxy'])} bank={len(snap['bank'])}"
+    )
 
 
 def main(argv=None):

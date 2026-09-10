@@ -11,6 +11,7 @@ thread and never bind a tenant to a connection. The tenant is a query
 parameter on every statement, so a pooled/reused connection cannot leak
 another tenant's rows.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -161,11 +162,15 @@ class Database:
 
     def _new_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(
-            self.path, check_same_thread=False, isolation_level=None,
+            self.path,
+            check_same_thread=False,
+            isolation_level=None,
             timeout=30.0,
         )
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL" if not self._is_memory else "PRAGMA journal_mode=MEMORY")
+        conn.execute(
+            "PRAGMA journal_mode=WAL" if not self._is_memory else "PRAGMA journal_mode=MEMORY"
+        )
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 

@@ -1,4 +1,5 @@
 """Answer service checklist (Section 20) + Runbook 3.2 golden path."""
+
 import os
 import unittest
 
@@ -34,10 +35,15 @@ class TestAnswer(unittest.TestCase):
     def test_grounding_gate_five_signals(self):
         qvec = self.p.embedder.embed(["coverage acceptance criteria"])[0]
         from knowledge_fabric.contracts.types import Candidate
-        cands = [Candidate(passage=p, vector_score=0.5, fused_score=0.02)
-                 for p in self.p.passages.for_tenant("test-fabric")[:4]]
+
+        cands = [
+            Candidate(passage=p, vector_score=0.5, fused_score=0.02)
+            for p in self.p.passages.for_tenant("test-fabric")[:4]
+        ]
         signals, g = self.svc._grounding("coverage acceptance criteria", qvec, cands)
-        self.assertEqual(set(signals), {"retrieval", "semantic", "coverage", "agreement", "resolvable"})
+        self.assertEqual(
+            set(signals), {"retrieval", "semantic", "coverage", "agreement", "resolvable"}
+        )
         self.assertTrue(0.0 <= g <= 1.0)
 
     def test_trajectory_id_present_and_traced(self):
@@ -68,6 +74,7 @@ class TestAnswer(unittest.TestCase):
 
     def test_post_check_drops_unsupported_sentences(self):
         from knowledge_fabric.contracts.types import Candidate
+
         sel = [Candidate(passage=p) for p in self.p.passages.for_tenant("test-fabric")[:3]]
         text = "Coverage is ninety five percent. Elephants live in the Arctic tundra always."
         kept = self.svc._postcheck(text, sel)
@@ -77,7 +84,7 @@ class TestAnswer(unittest.TestCase):
         vec = [("p1", 0.9), ("p2", 0.5)]
         lex = [("p2", 3.0), ("p3", 1.0)]
         fused = dict(self.svc._rrf(vec, lex))
-        self.assertGreater(fused["p2"], fused["p1"])   # appears in both -> boosted
+        self.assertGreater(fused["p2"], fused["p1"])  # appears in both -> boosted
 
 
 if __name__ == "__main__":

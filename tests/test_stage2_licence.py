@@ -5,6 +5,7 @@ anything that is not, and (b) the spans we already record — tier, tokens
 in/out, cost, why, cache savings, per user/role, model, complexity — leave the
 platform in the OpenTelemetry wire format over plain urllib.
 """
+
 import copy
 import importlib.util
 import json
@@ -45,12 +46,14 @@ gate = _load_gate()
 
 def _attrs(span: dict) -> dict:
     """Flatten an OTLP attribute list into {key: python value}."""
+
     def val(v):
         if "arrayValue" in v:
             return [val(x) for x in v["arrayValue"]["values"]]
         if "kvlistValue" in v:
             return {kv["key"]: val(kv["value"]) for kv in v["kvlistValue"]["values"]}
         return next(iter(v.values()))
+
     return {kv["key"]: val(kv["value"]) for kv in span["attributes"]}
 
 
@@ -64,16 +67,31 @@ class ManifestTests(unittest.TestCase):
     def test_manifest_is_valid_and_covers_every_layer(self):
         self.assertEqual(gate.validate_manifest(self.m), [])
         roles = " ".join(c["role"].lower() for c in self.m["components"])
-        for layer in ("runtime", "store", "vector", "lexical", "object store", "queue", "identity",
-                      "embedding", "llm serving", "converter", "infrastructure as code", "ci",
-                      "dashboards", "observability"):
+        for layer in (
+            "runtime",
+            "store",
+            "vector",
+            "lexical",
+            "object store",
+            "queue",
+            "identity",
+            "embedding",
+            "llm serving",
+            "converter",
+            "infrastructure as code",
+            "ci",
+            "dashboards",
+            "observability",
+        ):
             self.assertIn(layer, roles, f"manifest lacks a component for layer {layer!r}")
 
     def test_cited_licences_are_concrete(self):
         by = {c["name"]: c for c in self.m["components"]}
         self.assertEqual(by["LangSmith"]["licence"], "LicenseRef-Proprietary")
         self.assertEqual(by["LangFuse"]["licence"], "MIT")
-        self.assertEqual(by["OpenTelemetry Collector (OTLP/HTTP receiver)"]["licence"], "Apache-2.0")
+        self.assertEqual(
+            by["OpenTelemetry Collector (OTLP/HTTP receiver)"]["licence"], "Apache-2.0"
+        )
         self.assertEqual(by["Grafana"]["licence"], "AGPL-3.0-only")
         self.assertEqual(by["MinIO"]["licence"], "AGPL-3.0-only")
         self.assertEqual(by["OpenTofu"]["licence"], "MPL-2.0")
@@ -108,8 +126,16 @@ class GateTests(unittest.TestCase):
 
     def _with(self, **component) -> dict:
         m = copy.deepcopy(self.m)
-        base = {"name": "x", "role": "test", "linkage": "runtime", "licence": "MIT",
-                "approved": True, "status": "in-use", "import_names": [], "distributions": []}
+        base = {
+            "name": "x",
+            "role": "test",
+            "linkage": "runtime",
+            "licence": "MIT",
+            "approved": True,
+            "status": "in-use",
+            "import_names": [],
+            "distributions": [],
+        }
         base.update(component)
         m["components"].append(base)
         return m
@@ -132,18 +158,30 @@ class GateTests(unittest.TestCase):
         self.assertIn("minio-py", gate.render(rep))
 
     def test_agpl_external_service_is_allowed(self):
-        rep = gate.evaluate(self._with(name="grafana-2", licence="AGPL-3.0-only", linkage="external-service"))
+        rep = gate.evaluate(
+            self._with(name="grafana-2", licence="AGPL-3.0-only", linkage="external-service")
+        )
         self.assertTrue(rep["ok"], rep["violations"])
 
     def test_mpl_ok_for_tooling_but_not_runtime(self):
-        self.assertTrue(gate.evaluate(self._with(name="tofu-2", licence="MPL-2.0", linkage="tooling"))["ok"])
+        self.assertTrue(
+            gate.evaluate(self._with(name="tofu-2", licence="MPL-2.0", linkage="tooling"))["ok"]
+        )
         rep = gate.evaluate(self._with(name="mpl-lib", licence="MPL-2.0", linkage="runtime"))
         self.assertEqual(self._codes(rep), ["linkage_denied"])
 
     def test_proprietary_and_source_available_never_pass_any_linkage(self):
         for lic in ("LicenseRef-Proprietary", "SSPL-1.0", "BUSL-1.1"):
-            for linkage in ("runtime", "optional-runtime", "tooling", "external-service", "model-weights"):
-                rep = gate.evaluate(self._with(name=f"{lic}-{linkage}", licence=lic, linkage=linkage))
+            for linkage in (
+                "runtime",
+                "optional-runtime",
+                "tooling",
+                "external-service",
+                "model-weights",
+            ):
+                rep = gate.evaluate(
+                    self._with(name=f"{lic}-{linkage}", licence=lic, linkage=linkage)
+                )
                 self.assertFalse(rep["ok"], (lic, linkage))
 
     def test_unknown_licence_and_bad_approval_flags(self):
@@ -162,16 +200,22 @@ class GateTests(unittest.TestCase):
             (pkg / "a.py").write_text("import os\nimport requests\n")
             (pkg / "b.py").write_text("from langsmith import Client\n")
             (pkg / "c.py").write_text("import boto3\n")
-            (pkg / "d.py").write_text("try:\n    import pg8000\nexcept ImportError:\n    pg8000 = None\n")
-            (pkg / "e.py").write_text("def connect():\n    import pg8000.dbapi as drv\n    return drv\n")
+            (pkg / "d.py").write_text(
+                "try:\n    import pg8000\nexcept ImportError:\n    pg8000 = None\n"
+            )
+            (pkg / "e.py").write_text(
+                "def connect():\n    import pg8000.dbapi as drv\n    return drv\n"
+            )
             imports = gate.scan_imports(d, ["app"])
             self.assertEqual(sorted(imports), ["boto3", "langsmith", "pg8000", "requests"])
             self.assertFalse(imports["boto3"][0]["guarded"])
             self.assertTrue(all(s["guarded"] for s in imports["pg8000"]))
             rep = gate.evaluate(self.m, imports)
             self.assertFalse(rep["ok"])
-            self.assertEqual(self._codes(rep),
-                             ["rejected_import", "undeclared_import", "unguarded_optional_import"])
+            self.assertEqual(
+                self._codes(rep),
+                ["rejected_import", "undeclared_import", "unguarded_optional_import"],
+            )
             by = {v["code"]: v for v in rep["violations"]}
             self.assertEqual(by["undeclared_import"]["component"], "requests")
             self.assertEqual(by["rejected_import"]["component"], "LangSmith")
@@ -180,7 +224,8 @@ class GateTests(unittest.TestCase):
     def test_requirements_file_must_match_manifest(self):
         with tempfile.TemporaryDirectory() as d:
             (pathlib.Path(d) / "requirements.txt").write_text(
-                "# pinned\nboto3==1.34.0\nlangfuse>=2\nsome-unknown-lib[extra]~=1.0\n-r other.txt\n")
+                "# pinned\nboto3==1.34.0\nlangfuse>=2\nsome-unknown-lib[extra]~=1.0\n-r other.txt\n"
+            )
             reqs = gate.scan_requirements(d, ["requirements.txt"])
             self.assertEqual(sorted(reqs), ["boto3", "langfuse", "some-unknown-lib"])
             rep = gate.evaluate(self.m, {}, reqs)
@@ -204,16 +249,33 @@ class GateTests(unittest.TestCase):
             with mock.patch("sys.stderr", StringIO()):
                 self.assertEqual(gate.main(["--repo", str(ROOT), "--manifest", str(bad)]), 2)
             with mock.patch("sys.stderr", StringIO()):
-                self.assertEqual(gate.main(["--manifest", str(pathlib.Path(d) / "missing.json")]), 2)
+                self.assertEqual(
+                    gate.main(["--manifest", str(pathlib.Path(d) / "missing.json")]), 2
+                )
 
     def test_docs_exist_and_state_the_decision(self):
         tech = (ROOT / "docs" / "TECH_STACK.md").read_text()
         dec = (ROOT / "docs" / "OBSERVABILITY_DECISION.md").read_text()
-        for needle in ("PSF-2.0", "AGPL", "MPL-2.0", "OpenTofu", "MinIO", "Grafana", "licence_gate"):
+        for needle in (
+            "PSF-2.0",
+            "AGPL",
+            "MPL-2.0",
+            "OpenTofu",
+            "MinIO",
+            "Grafana",
+            "licence_gate",
+        ):
             self.assertIn(needle, tech)
         self.assertIn("Decision: No.", dec)
-        for needle in ("LangSmith", "LangFuse", "Apache-2.0", "gen_ai.usage.input_tokens",
-                       "KF_OTLP_ENDPOINT", "savings_by_technique", "curation_queue"):
+        for needle in (
+            "LangSmith",
+            "LangFuse",
+            "Apache-2.0",
+            "gen_ai.usage.input_tokens",
+            "KF_OTLP_ENDPOINT",
+            "savings_by_technique",
+            "curation_queue",
+        ):
             self.assertIn(needle, dec)
 
 
@@ -222,20 +284,22 @@ class GateTests(unittest.TestCase):
 # ==========================================================================
 class _Receiver(BaseHTTPRequestHandler):
     """Minimal OTLP/HTTP receiver: records the request, answers with a configured status."""
+
     status = 200
     received: list = []
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(n)
-        type(self).received.append({"path": self.path, "headers": dict(self.headers),
-                                    "body": json.loads(body.decode())})
+        type(self).received.append(
+            {"path": self.path, "headers": dict(self.headers), "body": json.loads(body.decode())}
+        )
         self.send_response(type(self).status)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(b"{}")
 
-    def log_message(self, *a):   # keep test output quiet
+    def log_message(self, *a):  # keep test output quiet
         pass
 
 
@@ -248,7 +312,7 @@ class OtlpExportTests(unittest.TestCase):
         carl = demo.principal_for(cls.p, T, "curator")
         cls.a1 = cls.svc.ask(asha, "what must a release achieve before promotion?")
         cls.a2 = cls.svc.ask(carl, "what is the acceptance criteria for coverage?")
-        cls.a3 = cls.svc.ask(asha, "what must a release achieve before promotion?")   # cache path
+        cls.a3 = cls.svc.ask(asha, "what must a release achieve before promotion?")  # cache path
         cls.payload = ox.export(cls.p, T, None)
 
     def _spans(self, payload=None):
@@ -263,7 +327,7 @@ class OtlpExportTests(unittest.TestCase):
 
     def test_resource_spans_shape(self):
         rs = self.payload["resourceSpans"]
-        self.assertEqual(len(rs), 1)                       # one tenant → one resource
+        self.assertEqual(len(rs), 1)  # one tenant → one resource
         res = _attrs({"attributes": rs[0]["resource"]["attributes"]})
         self.assertEqual(res["service.name"], "knowledge-fabric")
         self.assertEqual(res["kf.tenant"], T)
@@ -279,8 +343,17 @@ class OtlpExportTests(unittest.TestCase):
             for kv in s["attributes"]:
                 self.assertEqual(set(kv), {"key", "value"})
                 self.assertEqual(len(kv["value"]), 1)
-                self.assertIn(next(iter(kv["value"])),
-                              {"stringValue", "boolValue", "intValue", "doubleValue", "arrayValue", "kvlistValue"})
+                self.assertIn(
+                    next(iter(kv["value"])),
+                    {
+                        "stringValue",
+                        "boolValue",
+                        "intValue",
+                        "doubleValue",
+                        "arrayValue",
+                        "kvlistValue",
+                    },
+                )
 
     def test_answer_trace_carries_the_leadership_fields(self):
         a = self.a1
@@ -307,13 +380,17 @@ class OtlpExportTests(unittest.TestCase):
         self.assertTrue(any(k.startswith("kf.grounding.signal.") for k in at))
         self.assertTrue(at["kf.trajectory.selected"])
         self.assertEqual(at["kf.trace_id"], a.trajectory_id)
-        self.assertEqual(root["traceId"], a.trajectory_id.split("_", 1)[1])   # joins back to /api/trace
+        self.assertEqual(
+            root["traceId"], a.trajectory_id.split("_", 1)[1]
+        )  # joins back to /api/trace
 
     def test_stage_spans_are_children_of_the_answer_span(self):
         root = self._root(self.a1)
         kids = [s for s in self._spans() if s.get("parentSpanId") == root["spanId"]]
-        self.assertEqual([k["name"] for k in kids],
-                         ["answer.retrieve", "answer.graph", "answer.ground", "answer.compose"])
+        self.assertEqual(
+            [k["name"] for k in kids],
+            ["answer.retrieve", "answer.graph", "answer.ground", "answer.compose"],
+        )
         self.assertNotIn("parentSpanId", root)
         for k in kids:
             self.assertEqual(k["traceId"], root["traceId"])
@@ -337,23 +414,32 @@ class OtlpExportTests(unittest.TestCase):
         one = ox.export_trace(self.p, T, self.a1.trajectory_id)
         self.assertEqual(len(one["resourceSpans"][0]["scopeSpans"][0]["spans"]), len(traced))
         self.assertEqual(ox.to_otlp(rows), ox.to_otlp(list(reversed(rows))))
-        self.assertEqual(json.dumps(ox.to_otlp(rows), sort_keys=True),
-                         json.dumps(ox.to_otlp(rows), sort_keys=True))
+        self.assertEqual(
+            json.dumps(ox.to_otlp(rows), sort_keys=True),
+            json.dumps(ox.to_otlp(rows), sort_keys=True),
+        )
 
     def test_tenant_isolation(self):
         other = ox.export(self.p, T2, None)
         names = {s["name"] for s in other["resourceSpans"][0]["scopeSpans"][0]["spans"]}
-        self.assertNotIn("answer", names)                 # isolation tenant asked nothing
-        tenants = {_attrs({"attributes": r["resource"]["attributes"]})["kf.tenant"]
-                   for r in other["resourceSpans"]}
+        self.assertNotIn("answer", names)  # isolation tenant asked nothing
+        tenants = {
+            _attrs({"attributes": r["resource"]["attributes"]})["kf.tenant"]
+            for r in other["resourceSpans"]
+        }
         self.assertEqual(tenants, {T2})
         with self.assertRaises(PermissionError):
             ox.export(self.p, "", None)
         with self.assertRaises(PermissionError):
             ox.read_spans(self.p, None)
         mixed = ox.to_otlp(ox.read_spans(self.p, T) + ox.read_spans(self.p, T2))
-        self.assertEqual([_attrs({"attributes": r["resource"]["attributes"]})["kf.tenant"]
-                          for r in mixed["resourceSpans"]], sorted([T, T2]))
+        self.assertEqual(
+            [
+                _attrs({"attributes": r["resource"]["attributes"]})["kf.tenant"]
+                for r in mixed["resourceSpans"]
+            ],
+            sorted([T, T2]),
+        )
 
     def test_empty_and_unknown_inputs(self):
         self.assertEqual(ox.to_otlp([]), {"resourceSpans": []})
@@ -368,7 +454,9 @@ class OtlpExportTests(unittest.TestCase):
         th.start()
         try:
             url = f"http://127.0.0.1:{srv.server_address[1]}"
-            with mock.patch.dict(os.environ, {ox.HEADERS_ENV: "Authorization=Bearer t0k,X-Tenant=qualizeal"}):
+            with mock.patch.dict(
+                os.environ, {ox.HEADERS_ENV: "Authorization=Bearer t0k,X-Tenant=qualizeal"}
+            ):
                 res = ox.export(self.p, T, url, headers={"X-Extra": "1"})
             self.assertTrue(res["ok"])
             self.assertEqual(res["http_status"], 200)
@@ -384,7 +472,7 @@ class OtlpExportTests(unittest.TestCase):
             # env var path: KF_OTLP_ENDPOINT drives export when no explicit endpoint is given
             with mock.patch.dict(os.environ, {ox.ENDPOINT_ENV: url}):
                 self.assertTrue(ox.export(self.p, T)["ok"])
-                self.assertIn("resourceSpans", ox.export(self.p, T, ""))   # "" forces a dry run
+                self.assertIn("resourceSpans", ox.export(self.p, T, ""))  # "" forces a dry run
             self.assertEqual(len(_Receiver.received), 2)
             _Receiver.status = 503
             with self.assertRaises(ox.OtlpExportError):

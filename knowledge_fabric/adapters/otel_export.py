@@ -51,6 +51,7 @@ Every read is tenant-filtered (invariant I5) through the store guard, and the
 output is deterministic for a given set of rows (ids are derived, never random),
 so exports are idempotent and testable.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -104,8 +105,16 @@ _COLUMN_ATTRS: tuple[tuple[str, str, str], ...] = (
 )
 # attrs-json keys that are either mapped explicitly or are plumbing, never echoed raw
 _KNOWN_ATTR_KEYS = {c for c, _, _ in _COLUMN_ATTRS} | {
-    "roles", "why", "sources", "reasoning", "kind", "signals", "trajectory",
-    "trace_id", "duration_ms", "error",
+    "roles",
+    "why",
+    "sources",
+    "reasoning",
+    "kind",
+    "signals",
+    "trajectory",
+    "trace_id",
+    "duration_ms",
+    "error",
 }
 
 
@@ -139,8 +148,11 @@ def _any_value(v) -> dict:
     if isinstance(v, (list, tuple)):
         return {"arrayValue": {"values": [_any_value(x) for x in v]}}
     if isinstance(v, dict):
-        return {"kvlistValue": {"values": [{"key": str(k), "value": _any_value(x)}
-                                           for k, x in v.items()]}}
+        return {
+            "kvlistValue": {
+                "values": [{"key": str(k), "value": _any_value(x)} for k, x in v.items()]
+            }
+        }
     return {"stringValue": str(v)}
 
 
@@ -225,8 +237,11 @@ def span_attributes(row: dict) -> list[dict]:
         out.append(_kv(key, v))
 
     roles_raw = row.get("roles")
-    roles = ([r for r in roles_raw.split(",") if r] if isinstance(roles_raw, str)
-             else [str(r) for r in (roles_raw or [])])
+    roles = (
+        [r for r in roles_raw.split(",") if r]
+        if isinstance(roles_raw, str)
+        else [str(r) for r in (roles_raw or [])]
+    )
     if roles:
         out.append(_kv("user.roles", roles))
 
@@ -236,8 +251,11 @@ def span_attributes(row: dict) -> list[dict]:
             out.append(_kv("kf.selector.level_name", str(why["level_name"])))
         if why.get("explain"):
             out.append(_kv("kf.selector.why.explain", str(why["explain"])))
-        codes = [str(r.get("code")) for r in (why.get("reasons") or [])
-                 if isinstance(r, dict) and r.get("code")]
+        codes = [
+            str(r.get("code"))
+            for r in (why.get("reasons") or [])
+            if isinstance(r, dict) and r.get("code")
+        ]
         if codes:
             out.append(_kv("kf.selector.why.reasons", codes))
         out.append(_kv("kf.selector.why", json.dumps(why, sort_keys=True, default=str)))
@@ -340,10 +358,12 @@ def _parents(rows: list[dict], ids: dict[int, str]) -> dict[int, str | None]:
 
 
 def _resource_attributes(tenant: str) -> list[dict]:
-    attrs = [_kv("service.name", SERVICE_NAME),
-             _kv("service.namespace", SERVICE_NAMESPACE),
-             _kv("service.version", SCOPE_VERSION),
-             _kv("kf.exporter", "knowledge_fabric.adapters.otel_export")]
+    attrs = [
+        _kv("service.name", SERVICE_NAME),
+        _kv("service.namespace", SERVICE_NAMESPACE),
+        _kv("service.version", SCOPE_VERSION),
+        _kv("kf.exporter", "knowledge_fabric.adapters.otel_export"),
+    ]
     if tenant:
         attrs.append(_kv("kf.tenant", tenant))
     return attrs
@@ -365,10 +385,14 @@ def to_otlp(spans: list[dict]) -> dict:
 
     resource_spans = []
     for tenant in sorted(by_tenant):
-        trows = sorted(by_tenant[tenant],
-                       key=lambda r: (str(r.get("trace_id") or ""),
-                                      float(r.get("started_at") or 0.0),
-                                      int(r.get("id") or 0)))
+        trows = sorted(
+            by_tenant[tenant],
+            key=lambda r: (
+                str(r.get("trace_id") or ""),
+                float(r.get("started_at") or 0.0),
+                int(r.get("id") or 0),
+            ),
+        )
         by_trace: dict[str, list[dict]] = {}
         for r in trows:
             by_trace.setdefault(str(r.get("trace_id") or ""), []).append(r)
@@ -384,29 +408,40 @@ def to_otlp(spans: list[dict]) -> dict:
                 span = {"traceId": thex, "spanId": ids[i]}
                 if parents[i]:
                     span["parentSpanId"] = parents[i]
-                span.update({
-                    "name": str(r.get("name") or "span"),
-                    "kind": SPAN_KIND_INTERNAL,
-                    "startTimeUnixNano": start,
-                    "endTimeUnixNano": end,
-                    "attributes": span_attributes(r),
-                    "status": _status(_load_json(r.get("attrs"))),
-                })
+                span.update(
+                    {
+                        "name": str(r.get("name") or "span"),
+                        "kind": SPAN_KIND_INTERNAL,
+                        "startTimeUnixNano": start,
+                        "endTimeUnixNano": end,
+                        "attributes": span_attributes(r),
+                        "status": _status(_load_json(r.get("attrs"))),
+                    }
+                )
                 otlp_spans.append(span)
 
-        resource_spans.append({
-            "resource": {"attributes": _resource_attributes(tenant)},
-            "scopeSpans": [{"scope": {"name": SCOPE_NAME, "version": SCOPE_VERSION},
-                            "spans": otlp_spans}],
-        })
+        resource_spans.append(
+            {
+                "resource": {"attributes": _resource_attributes(tenant)},
+                "scopeSpans": [
+                    {"scope": {"name": SCOPE_NAME, "version": SCOPE_VERSION}, "spans": otlp_spans}
+                ],
+            }
+        )
     return {"resourceSpans": resource_spans}
 
 
 # --------------------------------------------------------------------------
 # store read + export
 # --------------------------------------------------------------------------
-def read_spans(platform, tenant: str, *, since: float | None = None, limit: int = 5000,
-               trace_id: str | None = None) -> list[dict]:
+def read_spans(
+    platform,
+    tenant: str,
+    *,
+    since: float | None = None,
+    limit: int = 5000,
+    trace_id: str | None = None,
+) -> list[dict]:
     """Tenant-filtered span rows (oldest first). ``since`` is epoch seconds."""
     _guard(tenant)
     where, params = ["tenant=?"], [tenant]
@@ -423,9 +458,17 @@ def read_spans(platform, tenant: str, *, since: float | None = None, limit: int 
     return [dict(r) for r in platform.db.query(sql, tuple(params))]
 
 
-def export(platform, tenant: str, endpoint_url: str | None = None, *,
-           since: float | None = None, limit: int = 5000, timeout_s: float = 5.0,
-           headers: dict | None = None, trace_id: str | None = None) -> dict:
+def export(
+    platform,
+    tenant: str,
+    endpoint_url: str | None = None,
+    *,
+    since: float | None = None,
+    limit: int = 5000,
+    timeout_s: float = 5.0,
+    headers: dict | None = None,
+    trace_id: str | None = None,
+) -> dict:
     """Export a tenant's spans as OTLP/JSON.
 
     ``endpoint_url`` overrides ``KF_OTLP_ENDPOINT``; pass ``""`` to force a dry
@@ -448,8 +491,7 @@ def export(platform, tenant: str, endpoint_url: str | None = None, *,
 
     url = traces_url(endpoint)
     body = json.dumps(payload, separators=(",", ":")).encode()
-    hdrs = {"Content-Type": "application/json",
-            "User-Agent": f"{SCOPE_NAME}/{SCOPE_VERSION}"}
+    hdrs = {"Content-Type": "application/json", "User-Agent": f"{SCOPE_NAME}/{SCOPE_VERSION}"}
     hdrs.update(_env_headers())
     hdrs.update(headers or {})
     req = urllib.request.Request(url, data=body, headers=hdrs, method="POST")
@@ -461,9 +503,15 @@ def export(platform, tenant: str, endpoint_url: str | None = None, *,
         raise OtlpExportError(f"OTLP endpoint {url} returned HTTP {e.code}") from e
     except (urllib.error.URLError, OSError) as e:
         raise OtlpExportError(f"OTLP endpoint {url} unreachable: {e}") from e
-    return {"ok": 200 <= status < 300, "endpoint": url, "http_status": status,
-            "tenant": tenant, "spans": len(rows),
-            "traces": len({r.get("trace_id") for r in rows}), "bytes": len(body)}
+    return {
+        "ok": 200 <= status < 300,
+        "endpoint": url,
+        "http_status": status,
+        "tenant": tenant,
+        "spans": len(rows),
+        "traces": len({r.get("trace_id") for r in rows}),
+        "bytes": len(body),
+    }
 
 
 def export_trace(platform, tenant: str, trace_id: str, endpoint_url: str | None = None) -> dict:

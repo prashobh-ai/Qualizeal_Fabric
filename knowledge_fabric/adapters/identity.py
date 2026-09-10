@@ -9,6 +9,7 @@ Principal shape and every downstream check are unchanged (zero code change).
 
 A ``StubIdentity`` remains for the inner dev loop only.
 """
+
 from __future__ import annotations
 
 import base64
@@ -31,8 +32,13 @@ def _b64u_dec(s: str) -> bytes:
 class LocalIdP:
     """HS256 signer/verifier standing in for Keycloak/Dex locally."""
 
-    def __init__(self, secret: str, issuer: str = "kf-local", audience: str = "knowledge-fabric",
-                 ttl_s: int = 3600):
+    def __init__(
+        self,
+        secret: str,
+        issuer: str = "kf-local",
+        audience: str = "knowledge-fabric",
+        ttl_s: int = 3600,
+    ):
         self.secret = secret.encode()
         self.issuer = issuer
         self.audience = audience
@@ -42,10 +48,15 @@ class LocalIdP:
         now = int(time.time())
         header = {"alg": "HS256", "typ": "JWT"}
         payload = {
-            "sub": principal.subject, "tenant": principal.tenant,
-            "roles": principal.roles, "scopes": principal.scopes,
-            "agent": principal.agent, "iss": self.issuer, "aud": self.audience,
-            "iat": now, "exp": now + (ttl_s or self.ttl_s),
+            "sub": principal.subject,
+            "tenant": principal.tenant,
+            "roles": principal.roles,
+            "scopes": principal.scopes,
+            "agent": principal.agent,
+            "iss": self.issuer,
+            "aud": self.audience,
+            "iat": now,
+            "exp": now + (ttl_s or self.ttl_s),
         }
         seg = f"{_b64u(json.dumps(header).encode())}.{_b64u(json.dumps(payload).encode())}"
         sig = hmac.new(self.secret, seg.encode(), hashlib.sha256).digest()
@@ -55,7 +66,7 @@ class LocalIdP:
         try:
             h, p, s = token.split(".")
         except ValueError:
-            raise PermissionError("malformed token")
+            raise PermissionError("malformed token") from None
         seg = f"{h}.{p}"
         expected = hmac.new(self.secret, seg.encode(), hashlib.sha256).digest()
         if not hmac.compare_digest(expected, _b64u_dec(s)):
@@ -68,12 +79,19 @@ class LocalIdP:
         return payload
 
     def authenticate(self, credentials: dict) -> Principal:
-        token = credentials.get("token") or credentials.get("Authorization", "").replace("Bearer ", "")
+        token = credentials.get("token") or credentials.get("Authorization", "").replace(
+            "Bearer ", ""
+        )
         if not token:
             raise PermissionError("no bearer token")
         p = self._verify(token)
-        return Principal(subject=p["sub"], tenant=p["tenant"], roles=p.get("roles", []),
-                         scopes=p.get("scopes", []), agent=bool(p.get("agent", False)))
+        return Principal(
+            subject=p["sub"],
+            tenant=p["tenant"],
+            roles=p.get("roles", []),
+            scopes=p.get("scopes", []),
+            agent=bool(p.get("agent", False)),
+        )
 
 
 class StubIdentity:
@@ -101,28 +119,39 @@ class StubIdentity:
 # Selected by KF_IDENTITY=oidc (see build_identity); the Principal shape and
 # every downstream check are unchanged — swapping IdPs is config only.
 # ---------------------------------------------------------------------------
-class OIDCNotReady(RuntimeError):
+class OIDCNotReadyError(RuntimeError):
     pass
 
 
 class OIDCIdentity:
-    def __init__(self, issuer: str, audience: str, jwks_url: str | None = None,
-                 roles_claim: str = "roles", scopes_claim: str = "scopes",
-                 tenant_claim: str = "tenant"):
+    def __init__(
+        self,
+        issuer: str,
+        audience: str,
+        jwks_url: str | None = None,
+        roles_claim: str = "roles",
+        scopes_claim: str = "scopes",
+        tenant_claim: str = "tenant",
+    ):
         if not issuer or not audience:
             raise ValueError("OIDC identity requires KF_OIDC_ISSUER and KF_OIDC_AUDIENCE")
         self.issuer = issuer.rstrip("/")
         self.audience = audience
         self.jwks_url = jwks_url or f"{self.issuer}/.well-known/jwks.json"
-        self.roles_claim, self.scopes_claim, self.tenant_claim = roles_claim, scopes_claim, tenant_claim
+        self.roles_claim, self.scopes_claim, self.tenant_claim = (
+            roles_claim,
+            scopes_claim,
+            tenant_claim,
+        )
         self._jwks: dict | None = None
 
     def mint(self, principal: Principal, ttl_s: int | None = None) -> str:
-        raise OIDCNotReady("tokens are minted by the external IdP, not by the application")
+        raise OIDCNotReadyError("tokens are minted by the external IdP, not by the application")
 
     def _load_jwks(self) -> dict:
         if self._jwks is None:
             import urllib.request
+
             with urllib.request.urlopen(self.jwks_url, timeout=10) as r:
                 self._jwks = json.loads(r.read())
         return self._jwks
@@ -131,19 +160,26 @@ class OIDCIdentity:
         try:
             import jwt  # PyJWT (MIT) + cryptography (Apache-2.0/BSD) — cloud image extras
             from jwt import PyJWKClient
-        except BaseException as e:  # a broken native build panics with a BaseException — still fail closed
+        except (
+            BaseException
+        ) as e:  # a broken native build panics with a BaseException — still fail closed
             if isinstance(e, (KeyboardInterrupt, SystemExit)):
                 raise
-            raise OIDCNotReady(f"OIDC verification needs PyJWT+cryptography in the image: {type(e).__name__}")
+            raise OIDCNotReadyError(
+                f"OIDC verification needs PyJWT+cryptography in the image: {type(e).__name__}"
+            ) from e
         key = PyJWKClient(self.jwks_url).get_signing_key_from_jwt(token).key
-        return jwt.decode(token, key, algorithms=["RS256", "ES256"], audience=self.audience,
-                          issuer=self.issuer)
+        return jwt.decode(
+            token, key, algorithms=["RS256", "ES256"], audience=self.audience, issuer=self.issuer
+        )
 
     def authenticate(self, credentials: dict) -> Principal:
-        token = credentials.get("token") or credentials.get("Authorization", "").replace("Bearer ", "")
+        token = credentials.get("token") or credentials.get("Authorization", "").replace(
+            "Bearer ", ""
+        )
         if not token:
             raise PermissionError("no bearer token")
-        claims = self._decode(token)          # signature, exp, aud, iss all verified by the library
+        claims = self._decode(token)  # signature, exp, aud, iss all verified by the library
         roles = claims.get(self.roles_claim) or claims.get("cognito:groups") or []
         scopes = claims.get(self.scopes_claim) or []
         if isinstance(scopes, str):
@@ -151,14 +187,22 @@ class OIDCIdentity:
         tenant = claims.get(self.tenant_claim) or claims.get("custom:tenant") or ""
         if not tenant:
             raise PermissionError("token carries no tenant claim (I5)")
-        return Principal(subject=claims.get("sub", ""), tenant=tenant, roles=list(roles),
-                         scopes=list(scopes), agent=bool(claims.get("agent", False)))
+        return Principal(
+            subject=claims.get("sub", ""),
+            tenant=tenant,
+            roles=list(roles),
+            scopes=list(scopes),
+            agent=bool(claims.get("agent", False)),
+        )
 
 
 def build_identity(env: dict, secret: str):
     """KF_IDENTITY=local (default) -> LocalIdP(HS256); oidc -> OIDCIdentity(issuer, audience)."""
     mode = (env.get("KF_IDENTITY") or "local").lower()
     if mode == "oidc":
-        return OIDCIdentity(env.get("KF_OIDC_ISSUER", ""), env.get("KF_OIDC_AUDIENCE", ""),
-                            env.get("KF_OIDC_JWKS_URL") or None)
+        return OIDCIdentity(
+            env.get("KF_OIDC_ISSUER", ""),
+            env.get("KF_OIDC_AUDIENCE", ""),
+            env.get("KF_OIDC_JWKS_URL") or None,
+        )
     return LocalIdP(secret)
