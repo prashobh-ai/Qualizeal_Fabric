@@ -270,9 +270,7 @@ def _bake(client) -> dict:
             if _re.search(r"[a-z][A-Z]", tok):
                 subjects.setdefault(tok.lower(), tok)
     snap["subjects"] = subjects
-    snap["related"] = {
-        key: [q for q in snap["bank"] if key in q.lower()][:6] for key in subjects
-    }
+    snap["related"] = {key: [q for q in snap["bank"] if key in q.lower()][:6] for key in subjects}
 
     # per-subject usage
     for subject in ROLES:
