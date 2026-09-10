@@ -136,6 +136,12 @@
   }
   function norm(q) { return String(q || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim(); }
   function toks(q) { return norm(q).split(" ").filter(Boolean); }
+  // question-word stopwords: a fuzzy match must share a real content token, not
+  // just "what/is/does" — otherwise "what is validate" wrongly matches "what is
+  // QMentisAI" and serves an answer to a different question.
+  var STOP = { what: 1, is: 1, are: 1, a: 1, an: 1, the: 1, of: 1, to: 1, do: 1, does: 1,
+    did: 1, how: 1, who: 1, when: 1, where: 1, which: 1, and: 1, or: 1, for: 1, "in": 1, on: 1, me: 1, tell: 1, about: 1 };
+  function content(ts) { return ts.filter(function (t) { return !STOP[t]; }); }
 
   // ---- answer selection (exact, then nearest bank question) -------------
   // Exact key, else nearest baked question by token overlap (Jaccard). Returns
@@ -144,12 +150,15 @@
     var answers = SNAP.answers || {};
     var a = answers[norm(question)];
     if (!a) {
-      var qt = toks(question), best = null, bestScore = 0;
+      var qt = toks(question), qc = content(qt), best = null, bestScore = 0;
       Object.keys(answers).forEach(function (k) {
         var kt = k.split(" "), setk = {}; kt.forEach(function (t) { setk[t] = 1; });
         var inter = 0; qt.forEach(function (t) { if (setk[t]) inter++; });
+        // require at least one shared CONTENT token, so stopword-only overlap
+        // ("what is") can never carry a match to an unrelated question.
+        var shareContent = qc.some(function (t) { return setk[t]; });
         var uni = kt.length + qt.length - inter || 1, sc = inter / uni;
-        if (sc > bestScore) { bestScore = sc; best = k; }
+        if (shareContent && sc > bestScore) { bestScore = sc; best = k; }
       });
       if (best && bestScore >= 0.34) a = answers[best];
     }
