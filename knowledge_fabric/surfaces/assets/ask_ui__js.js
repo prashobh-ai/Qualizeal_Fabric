@@ -37,7 +37,10 @@ function renderMessages(){const box=$('#messages');const t=curThread();
    '<p class="muted">Every answer is grounded in your documents, routed to the right level, and fully explained on the right.</p>'+
    '<div class="samples" id="samples"></div></div>';samples();return}
  box.innerHTML=t.turns.map((tn,i)=>'<div class="turn" data-i="'+i+'">'+
-   '<div class="msg user">'+esc(tn.q)+'</div>'+aiBlock(tn.a,i)+'</div>').join('');
+   '<div class="msg user">'+esc(tn.q)+'</div>'+
+   (tn.a&&tn.a.understood_as&&norm(tn.a.understood_as)!==norm(tn.q)
+     ?'<div class="understood">understood as: '+esc(tn.a.understood_as)+'</div>':'')+
+   aiBlock(tn.a,i)+'</div>').join('');
  $$('#messages .msg.ai').forEach(el=>el.onclick=()=>selectAnswer(t.turns[+el.dataset.i]));
  wireCites();wireFeedback();wireClarify();box.scrollTop=box.scrollHeight}
 // a reader clicks one of the clarify's offered questions -> ask it straight away.
@@ -250,7 +253,14 @@ async function ask(){const q=$('#question').value.trim();if(!q)return;
  if(!curThread())newThread();
  // conversation context so follow-ups ("when was it made?") resolve the pronoun
  // to the topic in view instead of dropping to "outside the knowledge base".
- const th=curThread();const ctx={history:(th?th.turns:[]).map(tn=>tn.q).slice(-8)};
+ // rich two-turn context (T26): each turn carries its subject/kind/cited docs
+ // and any clarify options, so a follow-up ("what about its pricing", "and for
+ // testers?", "the second one") resolves — or asks back — server- and client-side.
+ const th=curThread();const turns=(th?th.turns:[]).slice(-2).map(tn=>({
+   question:tn.q,kind:(tn.a&&tn.a.kind)||'answer',
+   answer_docs:((tn.a&&tn.a.citations)||[]).map(c=>c.document_title).filter(Boolean),
+   options:(tn.a&&tn.a.suggestions)||[]}));
+ const ctx={turns,history:turns.map(t=>t.question)};
  const btn=$('#ask-btn');btn.disabled=true;$('#ask-status').textContent='thinking…';const t0=performance.now();
  try{const a=await api('/ask',{method:'POST',body:{question:q,context:ctx}});gate(null);
   a._ms=performance.now()-t0;

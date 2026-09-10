@@ -169,17 +169,143 @@
   // "When was it made?" after "What is QMentisAI?" must not fall straight to a
   // gap. Resolve the pronoun to the conversation's sticky subject, retry, and
   // if there's still no baked answer, ASK BACK (clarify) instead of declining.
-  var PRONOUN = /\b(it'?s?|its|this|that|these|those|they|them|their|theirs|one|the (?:product|tool|platform|service|solution|offering))\b/i;
+  // ---- T26: two-turn context window + coreference resolution ------------
+  // A deterministic, model-free mirror of answer/context.py. A follow-up rarely
+  // repeats its subject ("what about its pricing", "and for testers?", "the
+  // second one"); this rewrites it from the last one or two turns before
+  // retrieval, or asks back when the reference is genuinely ambiguous. The
+  // server and this browser engine resolve identically, so the static showcase
+  // and the live product behave the same.
+  var CX_TOKEN = /[a-z0-9]+/g;
+  var CX_STOP = { the:1,a:1,an:1,of:1,to:1,"in":1,on:1,"for":1,and:1,or:1,is:1,are:1,
+    what:1,which:1,how:1,who:1,when:1,where:1,does:1,do:1,did:1,was:1,with:1,that:1,
+    "this":1,it:1,as:1,by:1,at:1,from:1,about:1,me:1,my:1 };
+  var PRONOUN = /\b(it'?s?|its|they|them|their|theirs|the same|there|this|that|these|those|one|the (?:product|tool|platform|service|solution|offering))\b/i;
+  var CX_ORDINAL = { first:0,"1st":0,second:1,"2nd":1,third:2,"3rd":2,last:-1 };
+  var CX_INTENT_NO_ENTITY = /\b(compare|comparison|difference|differ|integrate|migrate)\b/i;
+  var CX_HAS_VERB = /\b(is|are|was|were|do|does|did|has|have|can|will|should|use|uses|work|works|cost|costs|support|supports|provide|provides|run|runs|make|made|help|helps|handle|handles|mean|means|need|needs)\b/i;
+  function cxToks(s) { return (String(s || "").toLowerCase().match(CX_TOKEN) || []); }
+  function cxContent(s) { return cxToks(s).filter(function (t) { return !CX_STOP[t]; }); }
+  function reEsc(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+  // The distinctive subject the text names (a product/entity token titling one
+  // document), or "". Whole-token match — never a substring, so "testers" does
+  // not match a "test" subject — latest mention wins.
   function subjectInText(text) {
-    var subs = SNAP.subjects || {}, low = String(text || "").toLowerCase(), found = "", at = -1;
-    Object.keys(subs).forEach(function (k) { var i = low.indexOf(k); if (i >= 0 && i > at) { at = i; found = k; } });
+    var subs = SNAP.subjects || {}, pos = {}, found = "", at = -1;
+    cxToks(text).forEach(function (t, i) { pos[t] = i; });
+    Object.keys(subs).forEach(function (k) {
+      var i = (k in pos) ? pos[k] : -1; if (i > at) { at = i; found = k; }
+    });
     return found;
   }
-  function stickySubject(history) {
-    for (var i = (history || []).length - 1; i >= 0; i--) {
-      var s = subjectInText(history[i]); if (s) return s;
+  function cxSticky(turns) {
+    var win = (turns || []).slice(-2);
+    for (var d = 0; d < win.length; d++) {
+      var t = win[win.length - 1 - d], s = t.subject || subjectInText(t.question);
+      if (s) return s;
     }
     return "";
+  }
+  function cxRecent(turns, n) {
+    n = n || 3; var seen = {}, out = [], subs = SNAP.subjects || {};
+    for (var i = (turns || []).length - 1; i >= 0; i--) {
+      var t = turns[i], s = t.subject || subjectInText(t.question);
+      if (s && !seen[s]) { seen[s] = 1; out.push(subs[s] || s); }
+      if (out.length >= n) break;
+    }
+    return out;
+  }
+  // Rewrite `question` from the two-turn window, or ask back. Returns
+  // {question, understood_as, clarify:{chips,reason}|null}.
+  function resolveCtx(question, turns) {
+    var subs = SNAP.subjects || {}, bank = Object.keys(subs).map(function (k) { return subs[k]; });
+    var q = String(question || "").trim();
+    turns = (turns || []).slice(-2);
+    var here = subjectInText(q), lastT = turns[turns.length - 1];
+
+    // 1) clarify option — the previous turn asked back and this answers it.
+    if (lastT && lastT.kind === "clarify" && (lastT.options || []).length) {
+      var qc = {}; cxContent(q).forEach(function (t) { qc[t] = 1; });
+      for (var oi = 0; oi < lastT.options.length; oi++) {
+        var opt = lastT.options[oi], oc = cxContent(opt), inter = 0;
+        oc.forEach(function (t) { if (qc[t]) inter++; });
+        var overlap = inter / (oc.length || 1);
+        if (q.toLowerCase() === opt.toLowerCase() || (oc.length && overlap >= 0.6)) {
+          var orig = lastT.question || opt;
+          var rw0 = PRONOUN.test(orig) ? orig.replace(PRONOUN, opt) : opt;
+          return { question: rw0, understood_as: rw0, clarify: null };
+        }
+      }
+    }
+
+    // 5) comparative continuation — "what about <entity>": swap the new entity
+    // into the previous question. Checked before the self-contained short-circuit.
+    if (lastT && /^(what about|how about|and)\b/i.test(q) && here) {
+      var prevSub = subjectInText(lastT.question);
+      if (prevSub && prevSub !== here) {
+        var rwc = lastT.question.replace(new RegExp(reEsc(subs[prevSub]), "i"), subs[here]);
+        if (rwc.toLowerCase() !== lastT.question.toLowerCase())
+          return { question: rwc, understood_as: rwc, clarify: null };
+      }
+    }
+
+    // A question that already names its own subject is self-contained.
+    if (here) return { question: q, understood_as: null, clarify: null };
+
+    var hasPronoun = PRONOUN.test(q);
+    var isEllipsis = !CX_HAS_VERB.test(q) &&
+      (/^(and|what about|how about|in |for |with |on )\b/i.test(q) || cxContent(q).length <= 3);
+    var ordinalKey = null;
+    Object.keys(CX_ORDINAL).forEach(function (k) {
+      if (ordinalKey === null && new RegExp("\\b" + k + "\\b", "i").test(q)) ordinalKey = k;
+    });
+    var subjectKey = cxSticky(turns), subject = subs[subjectKey] || subjectKey;
+
+    // 4) ordinal — resolve to the matching document of the last answer.
+    if (ordinalKey !== null && lastT && (lastT.answer_docs || []).length) {
+      var docs = lastT.answer_docs, idx = CX_ORDINAL[ordinalKey];
+      if (-docs.length <= idx && idx < docs.length) {
+        var doc = docs[(idx + docs.length) % docs.length], rwo = q + " (" + doc + ")";
+        return { question: rwo, understood_as: rwo, clarify: null };
+      }
+    }
+
+    // 2/3) pronoun or ellipsis — need a subject to resolve to.
+    if (hasPronoun || isEllipsis) {
+      if (subject) {
+        var rwp;
+        if (hasPronoun) rwp = q.replace(PRONOUN, subject);
+        else {
+          var tail = q.replace(/^(and|what about|how about)\b/i, "").replace(/^[\s?]+|[\s?]+$/g, "");
+          rwp = (subject + " " + tail).trim();
+        }
+        return { question: rwp, understood_as: rwp, clarify: null };
+      }
+      var chips = cxRecent(turns); if (!chips.length) chips = bank.slice(0, 3);
+      if (chips.length)
+        return { question: q, understood_as: null, clarify: { chips: chips.slice(0, 3), reason: "Which one do you mean?" } };
+    }
+
+    // intent with no entity ("compare", "difference") and no subject → ask back.
+    if (CX_INTENT_NO_ENTITY.test(q) && !subject) {
+      var chips2 = cxRecent(turns); if (!chips2.length) chips2 = bank.slice(0, 3);
+      if (chips2.length)
+        return { question: q, understood_as: null, clarify: { chips: chips2.slice(0, 3), reason: "Compare which two?" } };
+    }
+
+    return { question: q, understood_as: null, clarify: null };
+  }
+  // Ambiguous reference → ask back with 2–3 subject chips (T26).
+  function clarifyChips(chips, reason) {
+    return {
+      kind: "clarify", answer_text: "", clarify_back: reason, citations: [], confidence: 0,
+      grounding_score: 0, trajectory_id: "traj_demo_clarify", cost: 0, tokens: 0, tier: "none",
+      level: 0, lang: "en", cache_hit: false, cost_saved: 0, tokens_in: 0, tokens_out: 0,
+      model_name: "demo model", complexity: "simple", authoritative_source: null,
+      dataset_version: 1, reasoning: null, suggestions: chips || [],
+      why: { level_name: "clarify", explain: reason, reasons: [],
+             signals: { retrieval: 0, semantic: 0.4, coverage: 0, agreement: 0, resolvable: 1 }, retrieved: 0 }
+    };
   }
   function clarifyAnswer(subKey, question, history) {
     var disp = (SNAP.subjects || {})[subKey] || subKey;
@@ -319,23 +445,25 @@
   }
 
   function answerFor(subject, question, context) {
-    var history = (context && context.history) || [];
-    var a = lookup(question);
-    if (!a) {
-      // topic in the current question, else the one carried by the thread
-      var here = subjectInText(question), followup = !here && PRONOUN.test(question);
-      var sub = here || (followup ? stickySubject(history) : "");
-      if (followup && sub) {
-        var rewritten = question.replace(PRONOUN, (SNAP.subjects || {})[sub] || sub);
-        a = lookup(rewritten) || retrieve(rewritten) || clarifyAnswer(sub, question, history);
-      }
+    // Rich two-turn context from the client, else a legacy history of strings.
+    var turns = (context && context.turns) ||
+      ((context && context.history) || []).map(function (q) {
+        return { question: q, subject: "", answer_docs: [], kind: "answer", options: [] };
+      });
+    var res = resolveCtx(question, turns);
+    if (res.clarify) {
+      var ca = clarifyChips(res.clarify.chips, res.clarify.reason);
+      bumpUsage(subject, ca);
+      return ca;
     }
-    if (!a) a = retrieve(question);  // real BM25 retrieval over the exported index
+    var rq = res.question;  // the (possibly rewritten) question to retrieve on
+    var a = lookup(rq) || retrieve(rq);  // Level-0 cache, else real BM25 retrieval
     if (!a) {
-      var s2 = subjectInText(question);
-      if (s2) a = clarifyAnswer(s2, question, history);
+      var s2 = subjectInText(rq);
+      if (s2) a = clarifyAnswer(s2, question, turns.map(function (t) { return t.question; }));
     }
     if (!a) a = gapAnswer(question);
+    if (res.understood_as) a.understood_as = res.understood_as;  // shown under the bubble
     bumpUsage(subject, a);
     return a;
   }
