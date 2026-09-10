@@ -22,6 +22,9 @@ class TestShowcaseBuilder(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = tempfile.mkdtemp(prefix="kf-showcase-")
         cls.out = os.path.join(cls.tmp, "showcase")
+        # A small corpus slice keeps this build-in-a-test fast; the real Pages
+        # build ingests the full corpus (verified separately).
+        os.environ.setdefault("KF_SHOWCASE_CORPUS_LIMIT", "8")
         build_showcase.build(cls.out)
 
     @classmethod
