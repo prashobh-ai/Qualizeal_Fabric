@@ -246,6 +246,18 @@ class SqlTelemetry:
         for r in rows:
             by_lang[r["lang"] or "en"] = by_lang.get(r["lang"] or "en", 0) + 1
 
+        # T30 — persona spread and context-resolution rate, parsed from the span
+        # attrs (persona/context_resolved were stamped on the answer span).
+        by_persona, context_resolved = {}, 0
+        for r in rows:
+            try:
+                aa = json.loads(r["attrs"]) if r["attrs"] else {}
+            except Exception:
+                aa = {}
+            persona = aa.get("persona") or "general"
+            by_persona[persona] = by_persona.get(persona, 0) + 1
+            context_resolved += 1 if aa.get("context_resolved") else 0
+
         [r for r in rows if r["level"] not in ("clarify", "gap", "")]
         return {
             "tenant": tenant,
@@ -271,15 +283,18 @@ class SqlTelemetry:
             "per_user": per_user,
             "per_role": per_role,
             "by_language": by_lang,
+            "answers_by_persona": by_persona,  # T30
+            "context_resolution_rate": round(context_resolved / n, 4),  # T30 (T26 follow-ups)
             "timeseries": timeseries,
             "bucket_seconds": bucket,
         }
 
     def events(self, tenant: str) -> list[dict]:
         """Flat one-row-per-answer telemetry for the self-serve Explorer (T29):
-        every dimension (role, level, model, language, complexity, kind) beside
-        every metric (tokens, cost, cost saved, latency, trust, cited), so any
-        permutation can be filtered and grouped in one table."""
+        every dimension (role, persona, designation, scope, context, level, model,
+        language, complexity, kind — T30 adds the middle four) beside every metric
+        (tokens, cost, cost saved, latency, trust, cited), so any permutation can
+        be filtered and grouped in one table."""
         out = []
         for r in self.db.query(
             "SELECT * FROM spans WHERE tenant=? AND name='answer' ORDER BY started_at", (tenant,)
@@ -296,6 +311,13 @@ class SqlTelemetry:
                 {
                     "subject": r["subject"] or "",
                     "role": role,
+                    # T30 — persona/designation (T27), access scope, and whether a
+                    # follow-up was resolved from context (T26), as first-class
+                    # Explorer dimensions beside role/level/model/lang.
+                    "persona": a.get("persona") or "general",
+                    "designation": a.get("designation") or "—",
+                    "scope": a.get("scope") or "public",
+                    "context": "resolved" if a.get("context_resolved") else "direct",
                     "level": why.get("level_name") or r["level"] or "—",
                     "model": r["model_name"] or "demo model",
                     "lang": (r["lang"] or "en").upper(),

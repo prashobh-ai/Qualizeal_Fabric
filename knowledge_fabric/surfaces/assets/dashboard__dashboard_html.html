@@ -162,7 +162,7 @@ function line(series,key,color){if(!series||!series.length)return '<div class="l
  return `<svg width="100%" viewBox="0 0 ${w} ${h}"><path d="${path}" fill="none" stroke="${color}" stroke-width="2"/>${dots}<text x="${pad}" y="14" fill="var(--mut)" font-size="11">max ${maxy}</text></svg>`}
 
 // ---- Explorer: one table, filter any dimensions, group by any two --------
-const DIMS=[["role","Role"],["level","Level"],["model","Model"],["lang","Language"],["complexity","Complexity"],["kind","Kind"]];
+const DIMS=[["role","Role"],["persona","Persona"],["designation","Designation"],["scope","Scope"],["context","Context"],["level","Level"],["model","Model"],["lang","Language"],["complexity","Complexity"],["kind","Kind"]];
 const METRICS=[["count","Questions",fmt],["answered","Answered",fmt],["declined","Declined",fmt],
  ["citedpct","Cited %",v=>(v*100).toFixed(0)+'%'],["trust","Trust",v=>(v*100).toFixed(0)+'%'],
  ["tin","Tokens in",fmt],["tout","Tokens out",fmt],["cost","Cost",money],["saved","Saved",money],
