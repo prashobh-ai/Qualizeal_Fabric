@@ -93,13 +93,14 @@ async function bulkDelete(){const ids=$('#delete-ids').value.split(/[\s,]+/).map
 async function setBudget(){try{const out=await api('/admin/budget',{method:'POST',body:{cap:+$('#budget-cap').value}});
  $('#budget-spent').textContent=KF.money(out.spent);$('#budget-note').textContent='cap $'+Number(out.cap).toFixed(2)+' for '+out.tenant;toast('Budget cap set to $'+out.cap,'good')}catch(e){toast(e.message,'bad')}}
 function renderUsers(users){
- $('#users-rows').innerHTML=(users||[]).map(u=>'<tr><td><b>'+esc(u.subject)+'</b></td><td>'+(u.roles||[]).map(r=>'<span class="pill '+({admin:'violet',curator:'info',asker:'good',agent:'warn'}[r]||'')+'">'+esc(r)+'</span>').join(' ')+'</td><td class="mono">'+esc((u.scopes||[]).join(', '))+'</td><td>'+(u.subject==='admin'?'':'<button class="btn sm danger del-user" data-s="'+esc(u.subject)+'">Remove</button>')+'</td></tr>').join('')||'<tr><td colspan="4" class="empty">no users</td></tr>';
+ $('#users-rows').innerHTML=(users||[]).map(u=>'<tr><td><b>'+esc(u.subject)+'</b></td><td class="small">'+(u.designation?esc(u.designation):'<span class="muted">—</span>')+'</td><td>'+(u.roles||[]).map(r=>'<span class="pill '+({admin:'violet',curator:'info',asker:'good',agent:'warn'}[r]||'')+'">'+esc(r)+'</span>').join(' ')+'</td><td class="mono">'+esc((u.scopes||[]).join(', '))+'</td><td>'+(u.subject==='admin'?'':'<button class="btn sm danger del-user" data-s="'+esc(u.subject)+'">Remove</button>')+'</td></tr>').join('')||'<tr><td colspan="5" class="empty">no users</td></tr>';
  KF.$$('#users-rows .del-user').forEach(b=>b.onclick=()=>delUser(b.dataset.s))}
 async function loadUsers(){try{const d=await api('/admin/users');renderUsers(d.users)}catch(e){}}
 async function addUser(){const subject=$('#nu-subject').value.trim();if(!subject){toast('Enter a user id','warn');return}
  const role=$('#nu-role').value;const scopes=($('#nu-restricted').checked||role!=='asker')?['public','restricted']:['public'];
- try{const d=await api('/admin/users',{method:'POST',body:{subject,roles:[role],scopes}});renderUsers(d.users);
-  $('#nu-subject').value='';toast('Added '+subject,'good');loadAudit()}catch(e){toast(e.message,'bad')}}
+ const designation=$('#nu-designation').value.trim();
+ try{const d=await api('/admin/users',{method:'POST',body:{subject,roles:[role],scopes,designation}});renderUsers(d.users);
+  $('#nu-subject').value='';$('#nu-designation').value='';toast('Added '+subject,'good');loadAudit()}catch(e){toast(e.message,'bad')}}
 async function delUser(subject){if(!confirm('Remove user '+subject+'?'))return;
  try{const d=await api('/admin/users',{method:'POST',body:{subject,action:'delete'}});renderUsers(d.users);
   toast('Removed '+subject,'good');loadAudit()}catch(e){toast(e.message,'bad')}}

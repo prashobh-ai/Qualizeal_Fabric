@@ -49,6 +49,22 @@ main{max-width:none;padding:0;display:flex;flex-direction:column}
 .decline{border-left:3px solid var(--qz-amber);background:#FCF7EC;border-radius:0 8px 8px 0;padding:10px 12px;font-size:14px;color:var(--qz-ink)}
 .decline .why{color:var(--mut);font-size:13px;margin-top:6px}
 .clarify-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+/* T27 — role-conditioned lens strip (curator/admin/agent; askers see none) */
+.rlens{margin-top:10px;border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--fg);
+ border:1px solid var(--line);border-left-width:3px;background:var(--panel)}
+.rlens.curation{border-left-color:var(--qz-purple);background:#F6F3FE}
+.rlens.operations{border-left-color:var(--qz-blue);background:var(--qz-blue-tint)}
+.rlens.builder{border-left-color:var(--qz-blue-deep);background:var(--qz-blue-tint)}
+.rlens.quality{border-left-color:var(--qz-green);background:#EEFaF6}
+.rlens.delivery{border-left-color:var(--qz-amber);background:#FCF7EC}
+.rlens.executive{border-left-color:var(--qz-coral);background:var(--qz-coral-tint)}
+.rlens .rtag{display:inline-block;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.4px;
+ color:var(--mut);margin-right:6px}
+.rlens .rnote{color:var(--ink)}
+.rlens .rmeta{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}
+.rlens .rm{color:var(--mut);white-space:nowrap}
+.rlens .rm i{font-style:normal;font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--soft);margin-right:3px}
+.rlens .rgap{margin-top:6px;color:var(--qz-coral);font-size:12px}
 .fbbar{display:flex;align-items:center;gap:6px;margin-top:10px}
 .fbbtn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:2px 8px;cursor:pointer;font-size:13px}
 .fbbtn:hover{border-color:var(--qz-blue)}.fbbtn:disabled{opacity:.45;cursor:default}

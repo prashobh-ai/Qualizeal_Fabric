@@ -226,6 +226,7 @@ class Answer:
     reasoning: dict | None = None  # multistep/conditional trace (Section A)
     understood_as: str | None = None  # T26 — the rewritten question, when context resolved one
     suggestions: list[str] | None = None  # T26 — clarify-back chips
+    role_view: dict | None = None  # T27 — role-conditioned lens (asker/curator/admin/agent)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -233,6 +234,7 @@ class Answer:
             "answer_text": self.answer_text,
             "understood_as": self.understood_as,
             "suggestions": self.suggestions or [],
+            "role_view": self.role_view,
             "level": self.level,
             "why": self.why,
             "lang": self.lang,
@@ -279,6 +281,11 @@ class Principal:
     roles: list[str] = field(default_factory=list)
     scopes: list[str] = field(default_factory=list)  # accessible ACL labels
     agent: bool = False
+    # T27 — the user's organisational designation (developer, tester, delivery
+    # head, CTO, …), captured by the admin at access-grant time. It conditions
+    # how an answer is framed and pitched; it never widens what is retrievable
+    # (that is `scopes`/ACL, enforced before ranking).
+    designation: str = ""
 
     def accessible_acls(self) -> list[str]:
         acls = set(self.scopes) | {"public"}

@@ -152,7 +152,20 @@ EXTRA_Q = [
     "what does the test automation playbook say",
 ]
 
-ROLES = ["asker.public", "asker.restricted", "curator", "admin", "qa-agent"]
+# Access tiers plus the designation demo accounts (T27), so the telemetry spread
+# and the baked directory cover every persona the showcase can sign in as.
+ROLES = [
+    "asker.public",
+    "asker.restricted",
+    "curator",
+    "admin",
+    "qa-agent",
+    "developer",
+    "tester",
+    "architect",
+    "delivery",
+    "cto",
+]
 # GET endpoints to capture per bucket (askers use only the /api/* set).
 ASKER_GETS = ["/api/corpus"]
 CURATOR_GETS = ["/curator/quality", "/curator/gaps", "/curator/documents", "/admin/sources"]

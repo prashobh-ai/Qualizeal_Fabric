@@ -622,7 +622,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
             rows = demo.DEMO_USERS.get(prin.tenant) or demo._ROLE_USERS
             return self._send(
-                200, {"users": [{"subject": s, "roles": r, "scopes": sc} for s, r, sc in rows]}
+                200,
+                {
+                    "users": [
+                        {"subject": s, "roles": r, "scopes": sc, "designation": dg}
+                        for s, r, sc, dg in map(demo.user_fields, rows)
+                    ]
+                },
             )
         if u.path == "/admin/authority":
             prin = self._require("admin")
@@ -917,7 +923,7 @@ class Handler(BaseHTTPRequestHandler):
             if not subject:
                 return self._send(400, {"error": "subject required"})
             rows = demo.DEMO_USERS.setdefault(prin.tenant, list(demo._ROLE_USERS))
-            existing = {s for s, _, _ in rows}
+            existing = {r[0] for r in rows}
             if b.get("action") == "delete":
                 if subject in ("admin",):
                     return self._send(400, {"error": "cannot remove the built-in admin"})
@@ -928,8 +934,11 @@ class Handler(BaseHTTPRequestHandler):
                 scopes = b.get("scopes") or (
                     ["public", "restricted"] if ({"admin", "curator"} & set(roles)) else ["public"]
                 )
+                # T27 — the admin captures the user's designation here, at
+                # access-grant time. It conditions answer framing, not access.
+                designation = (b.get("designation") or "").strip()
                 if subject not in existing:
-                    rows.append((subject, list(roles), list(scopes)))
+                    rows.append((subject, list(roles), list(scopes), designation))
                     self._audit(prin, "add_user", subject, ",".join(roles))
                 demo.DEMO_USERS[prin.tenant] = rows
             out = demo.DEMO_USERS.get(prin.tenant, demo._ROLE_USERS)
@@ -937,7 +946,10 @@ class Handler(BaseHTTPRequestHandler):
                 200,
                 {
                     "ok": True,
-                    "users": [{"subject": s, "roles": r, "scopes": sc} for s, r, sc in out],
+                    "users": [
+                        {"subject": s, "roles": r, "scopes": sc, "designation": dg}
+                        for s, r, sc, dg in map(demo.user_fields, out)
+                    ],
                 },
             )
         return self._send(404, {"error": "not found"})

@@ -53,6 +53,7 @@ class LocalIdP:
             "roles": principal.roles,
             "scopes": principal.scopes,
             "agent": principal.agent,
+            "designation": principal.designation,
             "iss": self.issuer,
             "aud": self.audience,
             "iat": now,
@@ -91,6 +92,7 @@ class LocalIdP:
             roles=p.get("roles", []),
             scopes=p.get("scopes", []),
             agent=bool(p.get("agent", False)),
+            designation=p.get("designation", ""),
         )
 
 
@@ -107,6 +109,7 @@ class StubIdentity:
             roles=[r for r in credentials.get("x-roles", "").split(",") if r],
             scopes=[s for s in credentials.get("x-scopes", "").split(",") if s],
             agent=credentials.get("x-agent", "false").lower() == "true",
+            designation=credentials.get("x-designation", ""),
         )
 
 
@@ -193,6 +196,7 @@ class OIDCIdentity:
             roles=list(roles),
             scopes=list(scopes),
             agent=bool(claims.get("agent", False)),
+            designation=claims.get("designation") or claims.get("custom:designation") or "",
         )
 
 
