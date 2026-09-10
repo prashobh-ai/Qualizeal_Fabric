@@ -60,6 +60,25 @@ CORPUS_SOURCE = "github"
 CORPUS_REPO = "prashobh-ai/Knowledge-Fabric"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
+# T25 — code into the fabric. The showcase ingests this repository's OWN source
+# (the checkout is already present in the Pages build), so code questions answer
+# with the real function and a line-anchored GitHub link, no external token
+# needed. A curated, representative set keeps the build fast; the repository card
+# answers "what does this repo do".
+CODE_REPO = "prashobh-ai/Qualizeal_Fabric"
+CODE_MIME = "text/x-python;code"
+CODE_FILES = [
+    "knowledge_fabric/answer/service.py",
+    "knowledge_fabric/adapters/converter.py",
+    "knowledge_fabric/adapters/model.py",
+    "knowledge_fabric/adapters/lexicalindex.py",
+    "knowledge_fabric/ingestion/pipeline.py",
+    "knowledge_fabric/ingestion/intake.py",
+    "knowledge_fabric/connectors/github.py",
+    "knowledge_fabric/answer/selector.py",
+    "scripts/build_showcase.py",
+]
+
 # A realistic run over the real corpus so analytics / usage / cache have
 # something to show — QualiZeal products, services and company knowledge.
 SCRIPT = [
@@ -79,6 +98,8 @@ SCRIPT = [
     ("qa-agent", "what does QualiZeal offer for AI and ML model testing?"),
     ("asker.public", "what is the capital of France?"),  # gap (out of corpus)
     ("curator", "what is QualiCentral?"),
+    ("qa-agent", "how does subject boost work"),  # code answer (identifier tier)
+    ("asker.restricted", "where is the docx converter"),  # code answer
 ]
 
 # Extra questions to bake answers for (so the chatbot / Workspace answer freely).
@@ -92,6 +113,15 @@ EXTRA_Q = [
     "what does QualiZeal offer for test automation?",
     "what does QualiZeal offer for AI and ML model testing?",
     "what is QMentisAI and how does it use generative AI for quality engineering?",
+    # T25 — code questions, answered from this repository's own source with
+    # line-anchored GitHub citations (the identifier tier).
+    "how does subject boost work",
+    "where is the docx converter",
+    "what does the ingestion pipeline do",
+    "how does the answer cache work",
+    "where is the github connector",
+    "how does the model client pick a tier",
+    "what does this repository do",
 ]
 
 ROLES = ["asker.public", "asker.restricted", "curator", "admin", "qa-agent"]
@@ -162,6 +192,103 @@ def _load_corpus(p):
     return len(paths)
 
 
+def _repo_card() -> str:
+    """A deterministic repository-overview document (no model): README opening,
+    the package map, entry points and CI — what answers 'what does this repo
+    do'."""
+    parts = ["QualiZeal_Fabric — repository overview."]
+    try:
+        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as fh:
+            head = fh.read()
+        intro = " ".join(
+            ln.strip() for ln in head.splitlines()[:12] if ln.strip() and not ln.startswith("#")
+        )
+        if intro:
+            parts.append(intro)
+    except OSError:
+        pass
+    pkgs = sorted(
+        d
+        for d in os.listdir(os.path.join(ROOT, "knowledge_fabric"))
+        if os.path.isdir(os.path.join(ROOT, "knowledge_fabric", d)) and not d.startswith("__")
+    )
+    parts.append("The knowledge_fabric package is organised into: " + ", ".join(pkgs) + ".")
+    parts.append(
+        "The answer service is the single governed path: it retrieves hybrid "
+        "evidence, grounds it, routes across model levels, and composes a cited "
+        "answer. The ingestion pipeline chunks documents and code with "
+        "provenance. Connectors pull from GitHub and other sources. The scripts "
+        "package builds the static showcase deployed to GitHub Pages."
+    )
+    wf = os.path.join(ROOT, ".github", "workflows")
+    if os.path.isdir(wf):
+        parts.append(
+            "Continuous integration workflows: "
+            + ", ".join(
+                sorted(os.path.splitext(f)[0] for f in os.listdir(wf) if f.endswith(".yml"))
+            )
+            + "."
+        )
+    parts.append(
+        "It runs on the Python standard library only, with a full test suite "
+        "under tests and a Makefile for lint and test."
+    )
+    return "\n\n".join(parts)
+
+
+def _load_code(p):
+    """Ingest this repository's own source through the real pipeline so code
+    questions answer with the actual function and a line-anchored GitHub link.
+    Adds one synthetic repository-overview document for 'what does this repo do'.
+    """
+    import time as _time
+
+    from knowledge_fabric.ingestion.intake import IngestWorker, Intake
+
+    intake, worker = Intake(p), IngestWorker(p, None)
+    worker.intake = intake
+    n = 0
+    limit = os.environ.get("KF_SHOWCASE_CODE_LIMIT")
+    files = CODE_FILES[: int(limit)] if limit else CODE_FILES
+    for rel in files:
+        path = os.path.join(ROOT, rel)
+        if not os.path.exists(path):
+            continue
+        with open(path, "rb") as fh:
+            data = fh.read()
+        raw = intake.canonical(
+            TENANT,
+            CORPUS_SOURCE,
+            f"github://{CODE_REPO}/{rel}",
+            os.path.basename(rel),
+            data,
+            mime=CODE_MIME,
+            acl=["public"],
+        )
+        intake.submit(raw)
+        n += 1
+    card = _repo_card().encode()
+    intake.submit(
+        intake.canonical(
+            TENANT,
+            CORPUS_SOURCE,
+            f"github://{CODE_REPO}/README.md",
+            "QualiZeal_Fabric — repository overview",
+            card,
+            mime="text/markdown",
+            acl=["public"],
+        )
+    )
+    worker.drain()
+    p.db.execute(
+        "INSERT INTO connector_cursors(tenant,source,cursor,last_sync,items) "
+        "VALUES(?,?,?,?,?) ON CONFLICT(tenant,source) DO UPDATE SET "
+        "cursor=excluded.cursor, last_sync=excluded.last_sync, items=items+excluded.items",
+        (TENANT, "github-code", str(n + 1), int(_time.time() * 1000), n + 1),
+    )
+    return n + 1
+
+
 def _seed():
     p = http_api.Platform(
         db_path=":memory:", blob_root=os.path.join(ROOT, "data", "showcase-blobs")
@@ -169,6 +296,7 @@ def _seed():
     demo.seed(p, [TENANT])
     p.policy.set_budget(TENANT, 20.0)
     _load_corpus(p)  # real QualiZeal knowledge, ingested through the live pipeline
+    _load_code(p)  # this repository's own source, so code questions cite real functions
     qbank.generate(p, TENANT)  # bank from the loaded corpus
     svc = AnswerService(p)
     for subject, q in SCRIPT:

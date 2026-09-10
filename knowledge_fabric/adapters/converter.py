@@ -23,7 +23,55 @@ from ..contracts.types import ConvertedDocument, Coordinate, CoordinateKind, Raw
 
 _PARAS_PER_PAGE = 4
 _TS = re.compile(r"^\[(\d{1,2}):(\d{2})\]\s*(.*)$")
-_DEF = re.compile(r"^\s*(?:def|function|func|class)\s+([A-Za-z_][\w]*)")
+_DEF = re.compile(
+    r"^\s*(?:export\s+)?(?:public\s+|private\s+|static\s+|async\s+|func\s+|"
+    r"def\s+|function\s+|class\s+)+([A-Za-z_][\w]*)"
+)
+_CODE_LANG = {
+    "py": "python",
+    "js": "javascript",
+    "ts": "typescript",
+    "tsx": "typescript",
+    "go": "go",
+    "java": "java",
+    "rb": "ruby",
+    "cs": "csharp",
+    "sh": "bash",
+    "sql": "sql",
+    "yaml": "yaml",
+    "yml": "yaml",
+    "tf": "hcl",
+}
+
+
+def _parse_code_uri(uri: str):
+    """``github://owner/repo/a/b/c.py`` -> (owner, repo, 'a/b/c.py'). Any other
+    scheme yields ('', '', basename) so a code answer still cites a path."""
+    body = re.sub(r"^[a-z]+://", "", uri or "")
+    parts = [p for p in body.split("/") if p]
+    if len(parts) >= 3 and "://" in (uri or "github://"):
+        return parts[0], parts[1], "/".join(parts[2:])
+    return "", "", (parts[-1] if parts else "")
+
+
+def _code_language(path: str) -> str:
+    return _CODE_LANG.get(path.rsplit(".", 1)[-1].lower() if "." in path else "", "text")
+
+
+def _module_name(path: str) -> str:
+    """'knowledge_fabric/answer/service.py' -> 'knowledge_fabric.answer.service'."""
+    stem = re.sub(r"\.[A-Za-z0-9]+$", "", path or "")
+    return stem.strip("/").replace("/", ".")
+
+
+def _sentences_head(text: str) -> str:
+    """First sentence of a docstring, collapsed to one line (deterministic
+    summary input — no model)."""
+    one = re.sub(r"\s+", " ", (text or "").strip())
+    if not one:
+        return ""
+    m = re.match(r"(.+?[.!?])(\s|$)", one)
+    return (m.group(1) if m else one)[:160]
 
 
 class DoclingLite:
@@ -44,8 +92,11 @@ class DoclingLite:
             or uri.endswith(".transcript")
         ):
             return self._transcript(text, raw.language)
-        if uri.endswith((".py", ".js", ".ts", ".go", ".java", ".rb")) or "code" in mime:
-            return self._code(text, raw.language)
+        if (
+            uri.endswith((".py", ".js", ".ts", ".tsx", ".go", ".java", ".rb", ".cs", ".sh"))
+            or "code" in mime
+        ):
+            return self._code(text, raw)
         if uri.endswith(".ocr.txt") or "scan" in mime or "image" in mime:
             return self._scan(text, raw.language)
         if uri.endswith(".docx") or "wordprocessingml" in mime:
@@ -130,34 +181,144 @@ class DoclingLite:
             )
         return ConvertedDocument(language=lang, regions=regions)
 
-    def _code(self, text: str, lang: str) -> ConvertedDocument:
+    def _code(self, text: str, raw: RawItem) -> ConvertedDocument:
+        """Chunk source by SYMBOL (function / method / class), not by line
+        window, so a code passage is a whole, citeable unit. Python is parsed
+        with ``ast`` for exact symbol boundaries; other languages use a
+        brace/indent scanner; both fall back to fixed windows when parsing
+        fails. Every passage carries a rich SYMBOL_LINE locator — ``symbol`` and
+        ``line`` (kept for back-compat) plus ``qualified``, ``start_line``,
+        ``end_line``, ``path``, ``repo``, ``language``, a GitHub line-anchored
+        ``url`` and a deterministic ``summary_line`` — so a code answer can cite
+        ``path#L<start>-L<end>`` and open the exact function on GitHub."""
+        owner, repo, path = _parse_code_uri(raw.uri)
+        language = _code_language(path)
+        module = _module_name(path)
+        blob = f"https://github.com/{owner}/{repo}/blob/main/{path}" if owner and repo else ""
+
+        def loc(symbol, qualified, start, end, summary):
+            d = {
+                "symbol": symbol,
+                "line": start,  # back-compat: existing SYMBOL_LINE render shows symbol:line
+                "qualified": qualified,
+                "start_line": start,
+                "end_line": end,
+                "path": path,
+                "repo": f"{owner}/{repo}" if owner and repo else repo,
+                "language": language,
+                "summary_line": summary,
+            }
+            if blob:
+                d["url"] = f"{blob}#L{start}-L{end}"
+            return d
+
+        regions: list = []
+        if language == "python":
+            regions = self._python_symbols(text, module, loc)
+        if not regions:
+            regions = self._code_windows(text, module, language, loc)
+        return ConvertedDocument(language=raw.language, regions=regions)
+
+    def _python_symbols(self, text, module, loc):
+        """One passage per top-level function and per class (its docstring +
+        each method), via ``ast``. Returns [] on a syntax error so the caller
+        falls back to windows."""
+        import ast
+
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return []
         lines = text.splitlines()
+
+        def body(start, end):
+            return "\n".join(lines[start - 1 : end]).rstrip()
+
+        def signature(node):
+            first = lines[node.lineno - 1].strip()
+            return re.sub(r"^\s*(?:async\s+)?(?:def|class)\s+", "", first).rstrip(":")
+
+        def summary(qualified, node):
+            args = re.search(r"\(.*", signature(node))
+            base = qualified + (args.group(0) if args else "")
+            first = _sentences_head(ast.get_docstring(node) or "")
+            return f"{base} — {first}" if first else base
+
         regions = []
-        current_symbol, buf, start_line = "module", [], 1
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                q = f"{module}.{node.name}" if module else node.name
+                regions.append(
+                    _region(
+                        body(node.lineno, node.end_lineno),
+                        CoordinateKind.SYMBOL_LINE,
+                        loc(node.name, q, node.lineno, node.end_lineno, summary(q, node)),
+                    )
+                )
+            elif isinstance(node, ast.ClassDef):
+                methods = [
+                    m for m in node.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
+                ]
+                head_end = methods[0].lineno - 1 if methods else node.end_lineno
+                cq = f"{module}.{node.name}" if module else node.name
+                regions.append(
+                    _region(
+                        body(node.lineno, head_end),
+                        CoordinateKind.SYMBOL_LINE,
+                        loc(node.name, cq, node.lineno, head_end, summary(cq, node)),
+                    )
+                )
+                for m in methods:
+                    mq = f"{cq}.{m.name}"
+                    regions.append(
+                        _region(
+                            body(m.lineno, m.end_lineno),
+                            CoordinateKind.SYMBOL_LINE,
+                            loc(m.name, mq, m.lineno, m.end_lineno, summary(mq, m)),
+                        )
+                    )
+        return regions
+
+    def _code_windows(self, text, module, language, loc):
+        """Non-Python / unparseable source: split on brace-or-keyword symbol
+        starts, else fixed 40-line windows. Keeps SYMBOL_LINE coordinates."""
+        lines = text.splitlines()
+        regions, buf, symbol, start = [], [], "module", 1
         for i, line in enumerate(lines, start=1):
             m = _DEF.match(line)
             if m and buf:
+                q = f"{module}.{symbol}" if module else symbol
                 regions.append(
                     _region(
-                        "\n".join(buf),
+                        "\n".join(buf).rstrip(),
                         CoordinateKind.SYMBOL_LINE,
-                        {"symbol": current_symbol, "line": start_line},
+                        loc(symbol, q, start, i - 1, q),
                     )
                 )
-                buf, start_line = [], i
-                current_symbol = m.group(1)
+                buf, start, symbol = [], i, m.group(1)
             elif m:
-                current_symbol, start_line = m.group(1), i
+                symbol, start = m.group(1), i
             buf.append(line)
+            if len(buf) >= 40 and not _DEF.match(line):  # bound very long spans
+                q = f"{module}.{symbol}" if module else symbol
+                regions.append(
+                    _region(
+                        "\n".join(buf).rstrip(),
+                        CoordinateKind.SYMBOL_LINE,
+                        loc(symbol, q, start, i, q),
+                    )
+                )
+                buf, start, symbol = [], i + 1, "block"
         if buf:
+            q = f"{module}.{symbol}" if module else symbol
             regions.append(
                 _region(
-                    "\n".join(buf),
+                    "\n".join(buf).rstrip(),
                     CoordinateKind.SYMBOL_LINE,
-                    {"symbol": current_symbol, "line": start_line},
+                    loc(symbol, q, start, len(lines), q),
                 )
             )
-        return ConvertedDocument(language=lang, regions=regions)
+        return regions
 
     def _scan(self, text: str, lang: str) -> ConvertedDocument:
         paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]

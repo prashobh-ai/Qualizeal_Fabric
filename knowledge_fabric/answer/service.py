@@ -46,6 +46,7 @@ from . import reasoning
 from . import selector as sel
 
 _TOKEN = re.compile(r"[a-z0-9]+")
+_URL = re.compile(r"https?://\S+")
 _STOP = {
     "the",
     "a",
@@ -210,6 +211,15 @@ class AnswerService:
                     principal, question, plan, trace_id, span, qlang, k, allow_model
                 )
 
+            # C2. identifier tier (T25): a code question that names a symbol
+            # answers directly from that function, before the prose machinery.
+            if not _nested:
+                coded = self._code_answer(
+                    principal, question, rq, accessible, trace_id, span, qlang, dsv=0
+                )
+                if coded is not None:
+                    return coded
+
             qvec = p.cache.get_embedding(rq)
             if qvec is None:
                 qvec = p.embedder.embed([rq])[0]
@@ -226,6 +236,7 @@ class AnswerService:
                     fused = self._rrf(vec_hits, lex_hits)
                     p.cache.put_retrieval(tenant, rq, accessible, fused)
                 fused = self._authority_boost(tenant, fused)
+                fused = self._subject_boost(tenant, rq, fused, accessible)
 
             candidates: list[Candidate] = []
             for pid, fscore in fused[: k * 3]:
@@ -260,6 +271,7 @@ class AnswerService:
                 )
 
             selected = self._mmr(qvec, candidates, k)
+            selected = self._ensure_subject(tenant, rq, candidates, selected)
             traj["selected"] = [c.passage.id for c in selected]
 
             # F. grounding gate ------------------------------------------
@@ -268,6 +280,13 @@ class AnswerService:
             ):
                 signals, g = self._grounding(rq, qvec, selected)
             threshold = p.grounding_threshold
+            # An EXACT signal the semantics-free embedder misses is still
+            # high-confidence: a code identifier match (symbol/path) or a passage
+            # from the document whose distinctive title the query names. Floor the
+            # grounding score so such an answer is not wrongly declined (T25).
+            if g < threshold and self._exact_signal(tenant, rq, selected):
+                g = threshold + 0.05
+                signals = {**signals, "resolvable": max(signals.get("resolvable", 0.0), 0.9)}
             span.set(grounding=g, signals=signals, dataset_version=dsv)
 
             # G. clarify-back / declared gap -----------------------------
@@ -783,6 +802,20 @@ class AnswerService:
             pool.remove(best)
         return selected
 
+    def _ensure_subject(self, tenant, question, candidates, selected):
+        """MMR ranks by embedding similarity, which the semantics-free embedder
+        gives poorly for a weakly-worded title. When the query names a
+        distinctive subject document that IS a candidate but MMR did not select,
+        swap it in (dropping the least relevant), so the answer is built from the
+        document the question is about."""
+        subj_docs = set(self._subject_of(tenant, question).values())
+        if not subj_docs or any(c.passage.document_id in subj_docs for c in selected):
+            return selected
+        subj_cands = [c for c in candidates if c.passage.document_id in subj_docs]
+        if not subj_cands:
+            return selected
+        return [subj_cands[0]] + (selected[:-1] if selected else [])
+
     def _grounding(self, question, qvec, selected):
         qtok = set(_qtokens(question))
         ceiling = 2.0 / (_RRF_K + 1)
@@ -838,34 +871,367 @@ class AnswerService:
     def _confidence(self, g, citations, selected):
         return round(min(0.99, g * 0.9 + 0.05 * len(citations) / max(1, len(selected))), 3)
 
-    def _compose(self, principal, question, selected, tier):
+    def _title_index(self, tenant):
+        """Per-document title tokens, plus the DISTINCTIVE ones — title tokens
+        that name exactly one document (a product/brand entity like "qmentisai",
+        never a generic word like "testing" shared across many titles). Returns
+        (title_of: doc_id -> token set, distinctive: token -> owning doc_id)."""
+        title_of, df, owner = {}, {}, {}
+        for d in self.p.documents.list(tenant):
+            tt = set(_TOKEN.findall((d.get("title") or "").lower()))
+            title_of[d["id"]] = tt
+            for t in tt:
+                df[t] = df.get(t, 0) + 1
+                owner.setdefault(t, d["id"])
+        distinctive = {t: owner[t] for t in df if df[t] == 1}
+        return title_of, distinctive
+
+    def _subject_of(self, tenant, question):
+        """The distinctive title tokens the question names, and the documents
+        they own — the entity the question is ABOUT, when it names one."""
         qtok = set(_qtokens(question))
+        _title_of, distinctive = self._title_index(tenant)
+        subj = {t: distinctive[t] for t in qtok if t in distinctive}
+        return subj  # token -> owning doc_id (empty for a non-entity query)
+
+    @staticmethod
+    def _ident_score(loc: dict, qtok) -> int:
+        """How strongly a code passage's identifiers match the query: a hit on
+        the symbol name outweighs the qualified name, which outweighs the file
+        path — so the exact function ranks above others that merely share a
+        common word."""
+        sym = str(loc.get("symbol", "")).lower()
+        qual = str(loc.get("qualified", "")).lower()
+        path = str(loc.get("path", "")).lower()
+        score = 0
+        for t in qtok:
+            if t in sym:
+                score += 3
+            elif t in qual:
+                score += 2
+            elif t in path:
+                score += 1
+        return score
+
+    def _is_code_doc(self, tenant, doc_id) -> bool:
+        d = self.p.documents.get(tenant, doc_id)
+        if not d:
+            return False
+        if "code" in (d.get("type") or "").lower():
+            return True
+        ext = (d.get("uri") or "").rsplit(".", 1)[-1].lower()
+        return ext in ("py", "js", "ts", "tsx", "go", "java", "rb", "cs", "sh")
+
+    def _code_answer(self, principal, question, rq, accessible, trace_id, span, qlang, dsv):
+        """Identifier tier (T25) as an EARLY, decisive path. A code question
+        names a symbol, which the semantics-free embedder and text-lexical index
+        routinely miss; when a code passage's symbol/path matches the query
+        strongly (a symbol-name hit), answer directly from that function at
+        Level 1 — the exact code, line-anchored — before the prose grounding and
+        clarify machinery, which is tuned for prose and would wrongly decline or
+        ask back. Returns None when no symbol matches, so prose composition runs.
+        (A production build maintains an inverted symbol index; scanning the code
+        passages suffices at showcase scale.)"""
+        tenant = principal.tenant
+        qtok = [t for t in _qtokens(rq) if len(t) >= 3]
+        if not qtok:
+            return None
+        # A question that names a distinctive PROSE subject (a product/company
+        # document) is prose, not code — bail so it answers as prose. A code-file
+        # title ("converter.py") is not such a subject; those questions stay here.
+        subj = self._subject_of(tenant, rq)
+        if any(not self._is_code_doc(tenant, did) for did in subj.values()):
+            return None
+        scored = []
+        for pas in self.p.passages.for_tenant(tenant):
+            if pas.coordinate.kind.value != "symbol_line":
+                continue
+            if not (set(self.p.passages.acl_of(tenant, pas.id)) & set(accessible)):
+                continue
+            s = self._ident_score(pas.coordinate.locator or {}, qtok)
+            if s > 0:
+                scored.append((s, pas))
+        if not scored or max(s for s, _ in scored) < 3:  # need a symbol-name hit
+            return None
+        scored.sort(key=lambda x: x[0], reverse=True)
+        sel = [
+            Candidate(passage=pas, vector_score=float(s), fused_score=float(s))
+            for s, pas in scored[:4]
+        ]
+        text, citations, *_ = self._compose_code(rq, sel)
+        if not citations:
+            return None
+        text = self._localize(text, qlang, principal, "none")
+        why = {
+            "level_name": "lookup",
+            "explain": "Matched a code symbol; cited the function directly.",
+            "reasons": [{"code": "identifier_hit", "detail": "exact symbol match", "signal": True}],
+            "signals": {
+                "retrieval": 1.0,
+                "semantic": 0.9,
+                "coverage": 0.8,
+                "agreement": 1.0,
+                "resolvable": 1.0,
+            },
+            "retrieved": len(sel),
+            "complexity": "simple",
+            "model_name": model_for_tier("none"),
+        }
+        self._audit(principal, "ask", "answered:code", trace_id)
+        span.set(
+            kind="answer",
+            level="lookup",
+            tier="none",
+            citations_count=len(citations),
+            code_answer=True,
+            complexity="simple",
+            dataset_version=dsv,
+        )
+        return Answer(
+            AnswerKind.ANSWER,
+            text,
+            citations,
+            0.9,
+            trace_id,
+            0.0,
+            0,
+            "none",
+            grounding_score=0.9,
+            tenant=tenant,
+            level=1,
+            why=why,
+            lang=qlang,
+            model_name=model_for_tier("none"),
+            complexity="simple",
+            authoritative_source=self._authority_card(tenant, citations),
+            dataset_version=dsv,
+        )
+
+    def _exact_signal(self, tenant, question, selected) -> bool:
+        """True when a selected passage carries an EXACT match the grounding
+        embedder cannot see: a code symbol/path identifier the query names, or a
+        document whose distinctive title token the query names."""
+        qtok = [t for t in _qtokens(question) if len(t) >= 3]
+        if not qtok:
+            return False
+        for c in selected:
+            if c.passage.coordinate.kind.value == "symbol_line" and self._ident_score(
+                c.passage.coordinate.locator or {}, qtok
+            ):
+                return True
+        subj_docs = set(self._subject_of(tenant, question).values())
+        return any(c.passage.document_id in subj_docs for c in selected)
+
+    def _subject_boost(self, tenant, question, fused, accessible=None):
+        """Lift passages from the document the question is actually ABOUT.
+
+        The hashing embedder has no semantics, so a short "what is QMentisAI?"
+        can retrieve co-occurrence noise (company history, mission) above the
+        product's own brief. Deterministic, model-free correction: when the query
+        names a distinctive entity, lift that document's passages to the top so
+        the compose leads from it — and INJECT the subject document's passages
+        when retrieval missed them entirely (a weakly-worded title the embedder
+        never surfaced). Generic queries are left untouched, so an analytical
+        question still draws connected cross-document evidence."""
+        subj_docs = set(self._subject_of(tenant, question).values())
+        if not subj_docs:
+            return fused
+        mx = max((s for _, s in fused), default=0.0) or 1.0
+        scores = dict(fused)
+        for pid in list(scores):
+            pas = self.p.passages.get(tenant, pid)
+            if pas and pas.document_id in subj_docs:
+                scores[pid] += mx
+        present = {
+            self.p.passages.get(tenant, pid).document_id
+            for pid in scores
+            if self.p.passages.get(tenant, pid)
+        }
+        for did in subj_docs - present:  # retrieval missed this subject doc — inject it
+            for pas in self.p.passages.by_document(tenant, did)[:3]:
+                if accessible is None or (
+                    set(self.p.passages.acl_of(tenant, pas.id)) & set(accessible)
+                ):
+                    scores[pas.id] = mx
+        return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    @staticmethod
+    def _is_heading(s: str) -> bool:
+        """A section label / list header / URL line, not a descriptive sentence —
+        the kind of fragment ("The Five Pillars of ValidAIte", "QMentisAI Product
+        Page: https://…") that reads as gibberish when stitched into an answer."""
+        st = s.strip()
+        if len(st) < 25 or "http" in st.lower() or "://" in st:
+            return True
+        if st.endswith(":"):  # a lead-in label introducing a list, not a statement
+            return True
+        return st[-1] not in ".!?" and len(st.split()) <= 6
+
+    @classmethod
+    def _clean_sentence(cls, s: str) -> str:
+        """Strip a leading section label ("QualiSec Module Page:") and any inline
+        URL so a chosen sentence reads as prose, not a link dump."""
+        s = _URL.sub("", s).strip()
+        s = re.sub(r"^[A-Z][A-Za-z0-9 .&/'’-]{0,40}:\s+", "", s).strip()
+        return re.sub(r"\s{2,}", " ", s)
+
+    @classmethod
+    def _sentence_score(cls, s: str, qtok: set) -> float:
+        """Score a passage sentence for use as answer text: it must share query
+        content-tokens, and a real sentence (ends in punctuation, enough words)
+        outranks a heading fragment."""
+        ov = len(qtok & (set(_TOKEN.findall(s.lower())) - _STOP))
+        if ov == 0:
+            return 0.0
+        substantive = 1.0 if (s.strip()[-1:] in ".!?" and len(s.split()) >= 6) else 0.35
+        return ov * substantive
+
+    def _doc_lead(self, tenant, doc_id, qtok, n):
+        """Up to ``n`` (passage, sentence) pairs from a document's OWN opening
+        prose, in document order — reliably a product/service definition,
+        regardless of what the noisy hashing retrieval surfaced for the query.
+        Sentences that name the subject are preferred, then the earliest
+        substantive lines."""
+        passes = self.p.passages.by_document(tenant, doc_id)
+
+        def order(p):
+            loc = getattr(p.coordinate, "locator", None)
+            return (
+                loc if isinstance(loc, list) and all(isinstance(x, int) for x in loc) else [1 << 30]
+            )
+
+        passes.sort(key=order)
+        sents = []
+        for p in passes:
+            for raw in _sentences(p.text):
+                s = self._clean_sentence(raw)
+                if not self._is_heading(s):
+                    sents.append((p, s))
+        named = [(p, s) for p, s in sents if qtok & (set(_TOKEN.findall(s.lower())) - _STOP)]
+
+        def defn_rank(ps):
+            low = ps[1].lower()
+            starts = any(low.startswith(t) for t in qtok)  # "QualiCentral is …"
+            copula = bool(re.search(r"\b(is|are|provides|enables|delivers|helps)\b", low))
+            return (starts and copula, copula)  # a copula definition should lead
+
+        named = [
+            ps
+            for _, ps in sorted(
+                enumerate(named), key=lambda ip: (defn_rank(ip[1]), -ip[0]), reverse=True
+            )
+        ]
+        return (named or sents)[:n]
+
+    def _compose_code(self, question, selected):
+        """Code answer shape (T25): a one-line deterministic summary then the
+        cited function verbatim in a fenced block, GitHub line-anchored. Never
+        paraphrases code, so the model is bypassed entirely. Returns None when
+        this is not a code question (no code passage carries a query identifier),
+        so the caller falls back to prose composition."""
+        qtok = [t for t in _qtokens(question) if len(t) >= 3]
         ranked = []
         for c in selected:
-            best_sent, best_ov = c.passage.abstract, 0.0
-            for s in _sentences(c.passage.text) or [c.passage.text]:
-                ov = len(qtok & set(_TOKEN.findall(s.lower())))
-                if ov >= best_ov:
-                    best_ov, best_sent = ov, s
-            ranked.append((c, best_sent, best_ov))
-        ranked.sort(key=lambda x: x[0].vector_score + x[2], reverse=True)
+            if c.passage.coordinate.kind.value != "symbol_line":
+                continue
+            loc = c.passage.coordinate.locator or {}
+            ranked.append((self._ident_score(loc, qtok), c, loc))
+        ranked.sort(reverse=True, key=lambda x: (x[0], x[1].vector_score))
+        if not ranked or ranked[0][0] <= 0:
+            return None  # no identifier hit → let prose compose handle it
+
+        citations, parts = [], []
+        for hits, c, loc in ranked[:2]:  # at most two code blocks
+            if hits <= 0:
+                break
+            pas = c.passage
+            d = self.p.documents.get(pas.tenant, pas.document_id)
+            title = d["title"] if d else (loc.get("path") or "code")
+            n = len(citations) + 1
+            citations.append(
+                Citation(
+                    document_id=pas.document_id,
+                    document_title=title,
+                    coordinate=pas.coordinate,
+                    passage_id=pas.id,
+                    snippet=(loc.get("summary_line") or "")[:200],
+                )
+            )
+            summary = loc.get("summary_line") or loc.get("qualified") or ""
+            body = pas.text
+            if len(body) > 1800:  # keep the bubble readable; link goes to the full source
+                body = body[:1800].rstrip() + "\n# … (truncated — open on GitHub)"
+            parts.append(f"{summary} [{n}]\n\n```{loc.get('language', '')}\n{body}\n```")
+        return "\n\n".join(parts), citations, 0, 0, 0, 0.0, model_for_tier("none")
+
+    def _compose(self, principal, question, selected, tier):
+        code = self._compose_code(question, selected)
+        if code is not None:
+            return code
+        qtok = set(_qtokens(question))
+        subj_docs = set(self._subject_of(principal.tenant, question).values())
+
+        chosen: list = []  # (passage, sentence) — up to three distinct sentences
+        seen_txt: set = set()
+
+        # 1) Definition lead. When the question names a distinctive entity, open
+        #    with that document's own first substantive sentences — its
+        #    definition — rather than whatever co-occurrence the embedder ranked.
+        for did in subj_docs:
+            for pas, s in self._doc_lead(principal.tenant, did, qtok, 2):
+                if len(chosen) < 2 and s not in seen_txt:
+                    chosen.append((pas, s))
+                    seen_txt.add(s)
+            if chosen:
+                break
+
+        # 2) Supporting / synthesis evidence pooled from the retrieved passages,
+        #    each cleaned of URLs and heading labels. A subject-document sentence
+        #    counts even without query overlap (a brief rarely repeats its own
+        #    name); an unrelated document must actually share a query token.
+        pool = []  # (score, sentence, passage, is_subject_doc)
+        for c in selected:
+            is_subj = c.passage.document_id in subj_docs
+            for raw in _sentences(c.passage.text):
+                s = self._clean_sentence(raw)
+                if self._is_heading(s):
+                    continue
+                base = self._sentence_score(s, qtok)
+                if base <= 0 and not is_subj:
+                    continue
+                pool.append((base + 1.5 * is_subj + 1e-4 * c.vector_score, s, c.passage, is_subj))
+        pool.sort(reverse=True, key=lambda x: x[0])
+
+        per_doc: dict = {}
+        for pas, _s in chosen:
+            per_doc[pas.document_id] = per_doc.get(pas.document_id, 0) + 1
+        for _score, s, pas, is_subj in pool:
+            if len(chosen) >= 3:
+                break
+            did = pas.document_id
+            cap = 2 if (is_subj and subj_docs) else 1  # breadth unless it's the subject doc
+            if s in seen_txt or per_doc.get(did, 0) >= cap:
+                continue
+            chosen.append((pas, s))
+            seen_txt.add(s)
+            per_doc[did] = per_doc.get(did, 0) + 1
 
         cite_map, citations, parts = {}, [], []
-        for c, sent, _ in ranked[:3]:
-            d = self.p.documents.get(c.passage.tenant, c.passage.document_id)
+        for pas, sent in chosen:
+            d = self.p.documents.get(pas.tenant, pas.document_id)
             title = d["title"] if d else "document"
-            if c.passage.id not in cite_map:
-                cite_map[c.passage.id] = len(citations) + 1
+            if pas.id not in cite_map:
+                cite_map[pas.id] = len(citations) + 1
                 citations.append(
                     Citation(
-                        document_id=c.passage.document_id,
+                        document_id=pas.document_id,
                         document_title=title,
-                        coordinate=c.passage.coordinate,
-                        passage_id=c.passage.id,
+                        coordinate=pas.coordinate,
+                        passage_id=pas.id,
                         snippet=sent[:200],
                     )
                 )
-            parts.append(f"{sent} [{cite_map[c.passage.id]}]")
+            parts.append(f"{sent} [{cite_map[pas.id]}]")
         extractive = " ".join(parts)
 
         cost = tin = tout = 0
