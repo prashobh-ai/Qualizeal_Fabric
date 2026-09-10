@@ -111,7 +111,7 @@ class TestAnthropicModelClient(unittest.TestCase):
         self.assertEqual(captured["body"]["messages"], [{"role": "user", "content": "hi"}])
         # Model selection follows KF_MODEL_LARGE for the escalation tier.
         self.assertEqual(
-            captured["body"]["model"], os.environ.get("KF_MODEL_LARGE", "claude-opus-5")
+            captured["body"]["model"], os.environ.get("KF_MODEL_LARGE", "claude-sonnet-4-6")
         )
         # Response shape flows through to the platform's expected dict.
         self.assertEqual(out["text"], "OK.")
