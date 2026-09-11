@@ -10,6 +10,13 @@ hard must-hold assertion over the REAL governed answer path with the model
 disabled, so a regression in any of those behaviours fails the gate — locally
 (``make quality``) and in CI.
 
+Beyond the happy paths, the suite also pins the failures that actually hurt an
+enterprise deployment (T28.1) — the system must **refuse, never leak, never
+drift**: it declines a plausible-but-absent subject, never fabricates a code
+answer for a symbol that does not exist, never lets a public asker retrieve or
+echo a restricted fact (permission-before-ranking, I6), and never lets persona
+framing change the underlying evidence.
+
 Deterministic and self-contained: the suite ingests its own tiny corpus through
 the live pipeline, so it needs no external corpus and runs in the SQLite CI job.
 """
@@ -67,19 +74,45 @@ _SSO_POLICY = (
     "application. Reuse the shared authentication building blocks rather than "
     "writing your own login flow.\n"
 )
+# A RESTRICTED document, unreachable by the public eval principal. Its unique
+# facts (the "Zephyr" subject and the "BLUEHERON" token) let the isolation case
+# prove a public asker can never retrieve or leak a restricted fact (I6).
+_ZEPHYR_SECRET = (
+    "# Zephyr Rollout Secret\n\n"
+    "Project Zephyr ships on the 14th under embargo. The Zephyr launch code is "
+    "BLUEHERON. Only release management may see this.\n"
+)
 
+# Each row: (source, uri, title, body, mime, acl). ACL defaults to public; the
+# restricted row exercises permission-before-ranking in the golden suite itself.
 _DOCS = [
-    ("internal", "internal://q/qmentis.md", "QMentisAI", _QMENTIS, "text/markdown"),
-    ("github", "github://acme/app/retry.py", "retry.py", _RETRY, "text/x-python;code"),
+    ("internal", "internal://q/qmentis.md", "QMentisAI", _QMENTIS, "text/markdown", ["public"]),
+    ("github", "github://acme/app/retry.py", "retry.py", _RETRY, "text/x-python;code", ["public"]),
     (
         "github",
         "github://acme/app/test_retry.py",
         "test_retry.py",
         _RETRY_TEST,
         "text/x-python;code",
+        ["public"],
     ),
-    ("github", "github://acme/app/auth.py", "auth.py", _AUTH, "text/x-python;code"),
-    ("internal", "internal://q/sso.md", "Single Sign-On Standard", _SSO_POLICY, "text/markdown"),
+    ("github", "github://acme/app/auth.py", "auth.py", _AUTH, "text/x-python;code", ["public"]),
+    (
+        "internal",
+        "internal://q/sso.md",
+        "Single Sign-On Standard",
+        _SSO_POLICY,
+        "text/markdown",
+        ["public"],
+    ),
+    (
+        "internal",
+        "internal://q/zephyr.md",
+        "Zephyr Rollout Secret",
+        _ZEPHYR_SECRET,
+        "text/markdown",
+        ["restricted"],
+    ),
 ]
 
 
@@ -88,9 +121,9 @@ def build_eval_fabric(platform, tenant: str = EVAL_TENANT) -> None:
     platform.policy.set_budget(tenant, 20.0)
     intake, worker = Intake(platform), IngestWorker(platform, None)
     worker.intake = intake
-    for source, uri, title, body, mime in _DOCS:
+    for source, uri, title, body, mime, acl in _DOCS:
         intake.submit(
-            intake.canonical(tenant, source, uri, title, body.encode(), mime=mime, acl=["public"])
+            intake.canonical(tenant, source, uri, title, body.encode(), mime=mime, acl=acl)
         )
     worker.drain()
 
@@ -222,6 +255,60 @@ def _c_persona_lens(ctx):
     return ok, f"dev_lens={dev.role_view.get('lens')} cur_lens={cur.role_view.get('lens')}"
 
 
+# ---- adversarial / invariant cases (T28.1) -------------------------------
+# The happy-path cases prove the system answers; these prove it REFUSES,
+# never LEAKS, and never lets framing change the facts — the failures that
+# actually hurt an enterprise deployment.
+def _c_declines_absent_subject(ctx):
+    """A plausible but out-of-corpus subject must decline, not fabricate. NexaAI
+    shares the product shape of the corpus but is not in it."""
+    a = ctx.ask("what is NexaAI pricing")
+    ok = a.kind != AnswerKind.ANSWER
+    return ok, f"kind={a.kind.value} cites={len(a.citations)}"
+
+
+def _c_no_fabricated_code(ctx):
+    """A function that shares tokens with real code but does not exist must not
+    produce a code answer — the identifier path must not hallucinate a symbol."""
+    a = ctx.ask("how does deploy_release work", designation="Developer")
+    fabricated = a.kind == AnswerKind.ANSWER and "```" in (a.answer_text or "")
+    return not fabricated, f"kind={a.kind.value} fabricated_code={fabricated}"
+
+
+def _c_no_restricted_leak(ctx):
+    """The public eval principal must never retrieve, cite, or echo a restricted
+    fact (permission-before-ranking, I6). Zephyr/BLUEHERON live in a restricted
+    document the public asker cannot see."""
+    leaked = []
+    for q in ("what is project Zephyr", "what is the Zephyr launch code", "when does Zephyr ship"):
+        a = ctx.ask(q)
+        titles = [c.document_title for c in a.citations]
+        if "Zephyr Rollout Secret" in titles or "BLUEHERON" in (a.answer_text or ""):
+            leaked.append(q)
+    return not leaked, f"leaked_on={leaked or 'none'}"
+
+
+def _c_persona_evidence_invariant(ctx):
+    """Persona conditioning changes framing, never the facts: the LEAD cited
+    document is identical across designations for the same question. Depth may
+    show fewer citations, but it must not swap the evidence base."""
+    leads = {}
+    for desig in ("CTO", "Developer", "Knowledge Curator"):
+        a = ctx.ask("what is QMentisAI", designation=desig)
+        leads[desig] = a.citations[0].document_title if a.citations else None
+    ok = len(set(leads.values())) == 1 and next(iter(leads.values())) == "QMentisAI"
+    return ok, f"leads={leads}"
+
+
+def _c_code_second_symbol(ctx):
+    """Code answering is not overfit to one function: a different symbol in a
+    different file resolves to a fenced answer anchored in that file."""
+    a = ctx.ask("how does mint_session_token work", designation="Developer")
+    lead = a.citations[0].document_title if a.citations else ""
+    ok = a.kind == AnswerKind.ANSWER and "```" in (a.answer_text or "") and lead == "auth.py"
+    return ok, f"kind={a.kind.value} lead={lead}"
+
+
 GOLDEN: list[Case] = [
     Case("answering", "grounded answer with citations", _c_answers),
     Case("grounding", "grounding above the floor", _c_grounded),
@@ -235,6 +322,14 @@ GOLDEN: list[Case] = [
     Case("persona", "designation depth shapes the answer", _c_persona_depth),
     Case("persona", "designation emphasis leads the evidence", _c_persona_emphasis),
     Case("persona", "designation stamps the right lens", _c_persona_lens),
+    # adversarial / invariant (T28.1) — refuse, never leak, never drift
+    Case("robustness", "declines a plausible out-of-corpus subject", _c_declines_absent_subject),
+    Case("robustness", "never fabricates code for a missing symbol", _c_no_fabricated_code),
+    Case("isolation", "a public asker never leaks a restricted fact", _c_no_restricted_leak),
+    Case(
+        "invariant", "persona changes framing, not the lead evidence", _c_persona_evidence_invariant
+    ),
+    Case("code", "a second code symbol resolves and is anchored", _c_code_second_symbol),
 ]
 
 
@@ -244,9 +339,23 @@ class SuiteResult:
     total: int
     passing: int
     score: float
-    dimensions: dict = field(default_factory=dict)
+    dimensions: dict = field(default_factory=dict)  # dimension -> pass rate (0..1)
+    dimension_counts: dict = field(default_factory=dict)  # dimension -> {"pass", "total"}
     failures: list = field(default_factory=list)
     rows: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        """Machine-readable result for dashboards / CI artifacts."""
+        return {
+            "passed": self.passed,
+            "score": self.score,
+            "passing": self.passing,
+            "total": self.total,
+            "dimensions": self.dimensions,
+            "dimension_counts": self.dimension_counts,
+            "failures": self.failures,
+            "rows": self.rows,
+        }
 
 
 def run_quality_suite(platform=None, tenant: str = EVAL_TENANT, build: bool = True) -> SuiteResult:
@@ -286,6 +395,7 @@ def run_quality_suite(platform=None, tenant: str = EVAL_TENANT, build: bool = Tr
         passing=passing,
         score=round(passing / total, 4) if total else 0.0,
         dimensions={k: round(v["pass"] / v["total"], 4) for k, v in dims.items()},
+        dimension_counts={k: dict(v) for k, v in dims.items()},
         failures=failures,
         rows=rows,
     )
@@ -296,7 +406,13 @@ def format_report(result: SuiteResult) -> str:
         f"Quality suite: {result.passing}/{result.total} golden cases passed "
         f"(score {result.score:.2f}) — {'PASS' if result.passed else 'FAIL'}",
         "",
+        "By dimension:",
     ]
+    for dim in sorted(result.dimension_counts):
+        c = result.dimension_counts[dim]
+        mark = "✓" if c["pass"] == c["total"] else "✗"
+        lines.append(f"  {mark} {dim:12s} {c['pass']}/{c['total']}")
+    lines.append("")
     for r in result.rows:
         mark = "✓" if r["ok"] else "✗"
         lines.append(f"  {mark} [{r['dimension']}] {r['name']}  ({r['detail']})")

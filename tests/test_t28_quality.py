@@ -88,5 +88,53 @@ class TestQualityGateCLI(unittest.TestCase):
         self.assertEqual(gate.main(["--json"]), 0)
 
 
+class TestAdversarialAndInvariantCases(unittest.TestCase):
+    """T28.1 — the golden suite must catch the failures that hurt in production:
+    fabrication, cross-ACL leakage, and persona changing the facts."""
+
+    def test_new_dimensions_are_registered(self):
+        dims = {c.dimension for c in quality.GOLDEN}
+        for expected in ("robustness", "isolation", "invariant"):
+            self.assertIn(expected, dims, expected)
+
+    def test_isolation_case_blocks_a_restricted_leak(self):
+        # Directly exercise the must-not-leak guarantee: a public asker on the
+        # eval fabric must never retrieve or echo the restricted Zephyr fact.
+        p = _fresh_platform()
+        quality.build_eval_fabric(p, quality.EVAL_TENANT)
+        ctx = quality._Ctx(p, quality.EVAL_TENANT)
+        for q in ("what is the Zephyr launch code", "when does Zephyr ship"):
+            a = ctx.ask(q)
+            self.assertNotIn("BLUEHERON", a.answer_text or "")
+            self.assertNotIn("Zephyr Rollout Secret", [c.document_title for c in a.citations])
+
+    def test_adversarial_cases_hold_on_a_healthy_fabric(self):
+        # Every new case must pass on the healthy fabric (they are hard must-holds).
+        r = quality.run_quality_suite(_fresh_platform())
+        by_name = {row["name"]: row["ok"] for row in r.rows}
+        for name in (
+            "declines a plausible out-of-corpus subject",
+            "never fabricates code for a missing symbol",
+            "a public asker never leaks a restricted fact",
+            "persona changes framing, not the lead evidence",
+            "a second code symbol resolves and is anchored",
+        ):
+            self.assertTrue(by_name.get(name), f"{name} did not pass: {r.failures}")
+
+    def test_report_has_per_dimension_rollup(self):
+        r = quality.run_quality_suite(_fresh_platform())
+        text = quality.format_report(r)
+        self.assertIn("By dimension:", text)
+        self.assertIn("isolation", text)
+
+    def test_to_dict_carries_dimension_counts_and_rows(self):
+        r = quality.run_quality_suite(_fresh_platform())
+        d = r.to_dict()
+        self.assertEqual(d["passing"], d["total"])
+        self.assertIn("dimension_counts", d)
+        self.assertEqual(d["dimension_counts"]["robustness"], {"pass": 2, "total": 2})
+        self.assertEqual(len(d["rows"]), d["total"])
+
+
 if __name__ == "__main__":
     unittest.main()
