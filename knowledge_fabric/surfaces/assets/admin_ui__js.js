@@ -119,12 +119,27 @@ async function doctor(){$('#doctor-btn').disabled=true;$('#doctor-report').textC
 // ---------------------------------------------------------------- models (T35/T36)
 function fmtRow(cells){return '<tr>'+cells.map(c=>'<td>'+c+'</td>').join('')+'</tr>'}
 function usd(x){return '$'+(Number(x)||0).toFixed(4)}
+// T55/T56 — the token-meter overview chips: efficiency, active-vs-idle, cost
+// by phase, burn rate and the provider quota. Everything reconciles with the
+// ledger totals above; absent telemetry simply renders nothing.
+function renderModelsTelemetry(tel){const box=$('#models-telemetry');if(!box)return;
+ if(!tel||tel.error||!tel.totals){box.innerHTML=tel&&tel.error?'<span class="muted small">telemetry unavailable</span>':'';return}
+ const eff=tel.efficiency||{},burn=tel.burn_rate||{},quota=tel.provider_quota||{};
+ const phases=(tel.cost_breakdown||[]).filter(p=>p.calls||p.cost_usd);
+ const chips=[];
+ if(eff.efficiency!=null)chips.push('<span class="pill" title="cited output tokens / total tokens">efficiency '+Math.round((eff.efficiency||0)*100)+'%</span>');
+ if(quota.provider)chips.push('<span class="pill" title="provider quota">'+esc(quota.provider)+' · '+esc(quota.limit||'')+'</span>');
+ if(burn.cost_per_hour!=null)chips.push('<span class="pill">burn '+usd(burn.cost_per_hour)+'/h · ~'+usd(burn.projected_per_day)+'/day</span>');
+ phases.forEach(p=>chips.push('<span class="pill" title="'+esc(p.calls||0)+' calls · '+esc(p.tokens||0)+' tokens">'+esc(p.phase)+' '+usd(p.cost_usd)+'</span>'));
+ box.innerHTML=chips.join(' ')||'<span class="muted small">no model activity in this window</span>'}
 async function loadModels(){try{const days=$('#models-days')?$('#models-days').value:'7';const d=await api('/admin/models?days='+encodeURIComponent(days));
  const p=d.provider||{};const c=d.consumption||{};const t=c.totals||{};
  const prov=p.provider?('<span class="pill good">'+esc(p.provider)+'</span> <span class="pill">key …'+esc(String(p.key_fingerprint||'').slice(-4))+'</span> <span class="pill">small '+esc(p.model_small)+'</span> <span class="pill">large '+esc(p.model_large)+'</span> <span class="muted small">verified '+esc(p.verified_at||'')+' · ping '+esc(((p.ping_usage||{}).input_tokens||0)+'/'+((p.ping_usage||{}).output_tokens||0))+' tokens</span>')
   :('<span class="pill '+(d.key_present?'warn':'bad')+'">'+(d.key_present?'key present — run doctor --require anthropic':'no ANTHROPIC_API_KEY')+'</span>');
- $('#provider-card').innerHTML=prov+' <span class="pill">mode '+esc(d.mode||'')+'</span> <span class="muted small">allowed: '+esc((d.allowed_models||[]).join(', '))+'</span>';
+ const badge=d.provider_badge||{};const badgeHtml=badge.label?('<span class="pill" title="the model that answers now"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+esc(badge.dot||'#5A6B7C')+';margin-right:5px"></span>'+esc(badge.label)+'</span> '):'';
+ $('#provider-card').innerHTML=badgeHtml+prov+' <span class="pill">mode '+esc(d.mode||'')+'</span> <span class="muted small">allowed: '+esc((d.allowed_models||[]).join(', '))+'</span>';
  $('#models-totals').innerHTML=['<span class="pill">'+esc(t.calls||0)+' calls</span>','<span class="pill">in '+esc(t.input_tokens||0)+'</span>','<span class="pill">out '+esc(t.output_tokens||0)+'</span>','<span class="pill">cache read '+esc(t.cache_read||0)+'</span>','<span class="pill">cache write '+esc(t.cache_write||0)+'</span>','<span class="pill good">'+usd(t.cost_usd)+'</span>'].join(' ');
+ renderModelsTelemetry(d.telemetry||{});
  const tbl=(id,obj,extra)=>{const b=$(id+' tbody');const ks=Object.keys(obj||{});b.innerHTML=ks.length?ks.map(k=>{const v=obj[k];return fmtRow([esc(k),esc(v.calls),esc(v.input_tokens),esc(v.output_tokens),esc(v.cache_read)].concat(extra?[esc(v.cache_write)]:[]).concat([usd(v.cost_usd)]))}).join(''):'<tr><td colspan="7" class="empty">—</td></tr>'};
  tbl('#models-purpose',c.by_purpose);tbl('#models-model',c.by_model);tbl('#models-day',c.by_day,true);
  $('#models-prices').innerHTML=Object.keys(c.prices||{}).map(m=>{const v=c.prices[m];return '<span class="pill" title="cache read '+esc(v.cache_read)+' · cache write '+esc(v.cache_write)+'">'+esc(m)+' · in '+esc(v.input)+' · out '+esc(v.output)+'</span>'}).join(' ')||'<span class="muted small">—</span>';

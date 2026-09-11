@@ -63,7 +63,7 @@ function renderFeedback(rows){const fb=rows||[];
 async function loadFeedback(){try{const d=await api('/curator/feedback');renderFeedback(d.feedback)}catch(e){}}
 async function loadAll(){try{
  const [q,g,d]=await Promise.all([api('/curator/quality'),api('/curator/gaps'),api('/curator/documents')]);gate(null);
- renderQuality(q);renderQueues(g);DOCS=d.documents||[];DATASET=d.dataset_version||0;renderDocs();renderAuthority(d.authority);loadFeedback();loadFabricViews()}
+ renderQuality(q);renderQueues(g);DOCS=d.documents||[];DATASET=d.dataset_version||0;renderDocs();renderAuthority(d.authority);loadFeedback();loadFabricViews();loadGovernance();loadTimeline();loadGraph()}
  catch(e){gate(e,'curator');if(e.status!==401&&e.status!==403)toast(e.message,'bad')}}
 
 async function decide(doc_id,decision,extra){const doc=DOCS.find(x=>x.document_id===doc_id)||{title:doc_id};
@@ -175,6 +175,72 @@ async function runTableQuery(){const t=TABLES[+$('#tq-sheet').value];if(!t)retur
  catch(e){$('#tq-result').innerHTML='';$('#tq-status').textContent=e.message;toast(e.message,e.status===501?'warn':'bad')}
  finally{$('#tq-run').disabled=false}}
 async function loadFabricViews(){await Promise.all([loadRepos(),loadInsights(),loadTables()])}
+
+// ===================== T53 — curation modes + review queue =========
+const MODE_LABEL={automated:'Automated',manual:'Manual review'};
+function modeToggle(source,mode,label){const other=mode==='manual'?'automated':'manual';
+ return '<span class="pill '+(mode==='manual'?'warn':'good')+'" style="cursor:pointer" '+
+  'data-source="'+esc(source)+'" data-mode="'+other+'" title="Click to switch to '+MODE_LABEL[other]+'">'+
+  esc(label)+': <b>'+esc(MODE_LABEL[mode]||mode)+'</b></span>'}
+function renderCuration(m,rq){const box=$('#curation-modes');const def=m.default||'automated';
+ let html=modeToggle('*',def,'Default');
+ Object.keys(m.sources||{}).sort().forEach(s=>{html+=modeToggle(s,m.sources[s],s)});
+ box.className='row';box.style.flexWrap='wrap';box.innerHTML=html;
+ KF.$$('#curation-modes .pill').forEach(p=>p.onclick=()=>setMode(p.dataset.source,p.dataset.mode));
+ const items=(rq&&rq.items)||[];$('#review-queue-count').textContent=items.length;
+ const rows=$('#review-queue-rows');
+ if(!items.length){rows.innerHTML='<tr><td colspan="5" class="empty">Nothing in review — every source is on automated, or all items are decided.</td></tr>';return}
+ rows.innerHTML=items.map(it=>{const sc=score01(it.score&&it.score.overall);
+  return '<tr data-rid="'+esc(it.review_id)+'"><td>'+esc(it.title||it.document_id||'')+'</td>'+
+   '<td class="small">'+esc(it.source||'—')+'</td>'+
+   '<td>'+(sc==null?'<span class="muted small">—</span>':scoreBar(it.score.overall))+'</td>'+
+   '<td class="small">'+esc(it.recommendation||'—')+'</td>'+
+   '<td class="actions"><button class="btn sm primary" data-act="accept">Accept</button>'+
+   '<button class="btn sm" data-act="reject">Reject</button></td></tr>'}).join('');
+ KF.$$('#review-queue-rows button').forEach(b=>b.onclick=()=>reviewDecision(b.closest('tr').dataset.rid,b.dataset.act))}
+async function setMode(source,mode){try{await api('/curator/curation-mode',{method:'POST',body:{source,mode}});
+  toast((source==='*'?'Default':source)+' → '+(MODE_LABEL[mode]||mode),'good');loadGovernance()}
+ catch(e){toast(e.message,'bad')}}
+async function reviewDecision(rid,action){if(action==='reject'&&!confirm('Reject this review item? It stays out of answers.'))return;
+ try{await api('/curator/review-decision',{method:'POST',body:{review_id:rid,action}});
+  toast('Review '+action+'ed','good');loadGovernance();loadAll()}
+ catch(e){toast(e.message,'bad')}}
+async function loadGovernance(){try{const [m,rq]=await Promise.all([api('/curator/curation-modes'),api('/curator/review')]);renderCuration(m,rq)}catch(e){if(e.status!==404)toast(e.message,'bad')}}
+
+// ===================== T54 — ingestion timeline ====================
+const TL_ACTIONS=[['ingested','var(--qz-blue)'],['accepted','var(--good)'],['rejected','var(--bad)'],['deleted','var(--mut)'],['auto_kept','var(--qz-purple)']];
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function renderTimeline(t){const sel=$('#timeline-year');const years=t.years||[];
+ sel.innerHTML=years.map(y=>'<option value="'+y+'"'+(y===t.year?' selected':'')+'>'+y+'</option>').join('')||('<option>'+t.year+'</option>');
+ const months=t.months||[];const max=Math.max(1,...months.map(m=>TL_ACTIONS.reduce((s,a)=>s+(m[a[0]]||0),0)));
+ const box=$('#timeline-chart');const total=(t.rows||[]).length;
+ if(!total){box.className='empty';box.innerHTML='No curation events recorded in '+esc(t.year)+'.';$('#timeline-meta').textContent='';return}
+ box.className='';
+ box.innerHTML='<div class="tl-bars">'+months.map((m,i)=>{const tot=TL_ACTIONS.reduce((s,a)=>s+(m[a[0]]||0),0);
+   const segs=TL_ACTIONS.filter(a=>m[a[0]]).map(a=>'<i style="height:'+(m[a[0]]/max*100).toFixed(1)+'%;background:'+a[1]+'" title="'+a[0]+' '+m[a[0]]+'"></i>').join('');
+   return '<div class="tl-col"><div class="tl-stack">'+segs+'</div><div class="tl-m">'+MONTHS[i]+'</div><div class="tl-n">'+(tot||'')+'</div></div>'}).join('')+'</div>'+
+  '<div class="legend" style="margin-top:8px">'+TL_ACTIONS.map(a=>'<span class="k"><span class="sw" style="background:'+a[1]+'"></span>'+a[0].replace('_',' ')+'</span>').join('')+'</div>';
+ $('#timeline-meta').textContent=total+' event(s) in '+t.year}
+async function loadTimeline(year){try{const t=await api('/curator/timeline'+(year?'?year='+year:''));renderTimeline(t);
+  $('#timeline-year').onchange=e=>loadTimeline(e.target.value)}
+ catch(e){if(e.status!==404)toast(e.message,'bad')}}
+
+// ===================== T57 — knowledge graph insights ==============
+function renderGraph(g){g=g||{};
+ let comm=g.communities||[];if(!Array.isArray(comm))comm=Object.values(comm);
+ const named=comm.filter(c=>c&&(c.size||0)>1).sort((a,b)=>(b.size||0)-(a.size||0)).slice(0,8);
+ $('#graph-comm-count').textContent=comm.length;
+ const cb=$('#graph-communities');cb.className=named.length?'':'empty';
+ cb.innerHTML=named.length?named.map(c=>'<div style="margin:3px 0"><span class="pill '+((c.flag)?'warn':'')+'" title="cohesion '+pct(c.cohesion)+'">'+
+   esc((c.labels&&c.labels[0])||('community '+c.community))+'</span> <span class="muted small">'+(c.size||0)+' concepts &middot; cohesion '+pct(c.cohesion)+(c.flag?' &middot; '+esc(c.flag):'')+'</span></div>').join(''):'No sizeable communities yet.';
+ const surp=g.surprising||[];$('#graph-surp-count').textContent=surp.length;
+ const sb=$('#graph-surprising');sb.className=surp.length?'':'empty';
+ sb.innerHTML=surp.length?surp.slice(0,8).map(s=>'<div class="small" style="margin:3px 0">'+esc(s.a_label||s.a)+' <span class="muted">&harr;</span> '+esc(s.b_label||s.b)+' <span class="muted small">('+pct(s.score||s.adamic_adar||0)+')</span></div>').join(''):'No surprising cross-domain links.';
+ const gaps=g.gaps||[];$('#graph-gaps-count').textContent=gaps.length;
+ const gb=$('#graph-gaps');gb.className=gaps.length?'':'empty';
+ gb.innerHTML=gaps.length?gaps.slice(0,8).map(x=>'<div class="small" style="margin:3px 0"><span class="pill warn">'+esc(x.kind||'gap')+'</span> '+esc(x.label||'')+
+   ((x.suggest_tags||[]).length?' <span class="muted small">tag: '+esc(x.suggest_tags.join(', '))+'</span>':'')+'</div>').join(''):'No knowledge gaps detected.'}
+async function loadGraph(){try{const d=await api('/curator/insights');renderGraph(d.graph)}catch(e){/* graph is best-effort */}}
 
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{DOCS=[];renderDocs();gate({status:401,message:''},'curator')}};
 KF.initBar({preferRole:'curator'});

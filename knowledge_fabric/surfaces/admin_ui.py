@@ -144,6 +144,9 @@ _MODELS = card(
     '</option><option value="30">30 days</option></select>'
     '<button class="btn sm" id="models-refresh">Refresh</button></div>'
     '<div id="models-totals" class="row"></div>'
+    # T55/T56 — the token-meter overview: which provider answers, efficiency
+    # (cited vs total tokens), active-vs-idle time, cost by phase and burn rate.
+    '<div id="models-telemetry" class="row" style="margin-top:8px"></div>'
     '<div class="grid two" style="margin-top:8px">'
     '<div><div class="muted small">By purpose</div><div class="tablewrap">'
     '<table id="models-purpose">'

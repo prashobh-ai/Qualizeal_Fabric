@@ -191,7 +191,10 @@ CURATOR_GETS = [
     "/admin/sources",  # T47: + github/jira/confluence cards
     "/curator/repositories",  # T47: facts.json + capabilities.json rows
     "/curator/tables",  # T47: extracted sheets (+ a read-only sample for the static preview)
-    "/curator/insights",  # T47: capabilities across repositories + reuse candidates
+    "/curator/insights",  # T47 + T57: capabilities/reuse + the graph community insights
+    "/curator/curation-modes",  # T53: per-source + global curation mode settings
+    "/curator/review",  # T53: the manual-mode review queue
+    "/curator/timeline",  # T54: the ingestion timeline (per-month stacks)
 ]
 # T45 — the Workspace's "Get full answer" opens an `ask` issue on this repo.
 KF_REPO = os.environ.get("GITHUB_REPOSITORY") or "prashobh-ai/QualiZeal_Fabric"
