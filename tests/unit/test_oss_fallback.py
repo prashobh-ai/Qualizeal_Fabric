@@ -14,13 +14,33 @@ import tempfile
 import unittest
 from unittest import mock
 
-os.environ["KF_DATA_ROOT"] = tempfile.mkdtemp(prefix="kf-oss-")
+import pytest
+
+_TMP = tempfile.mkdtemp(prefix="kf-oss-")
+os.environ["KF_DATA_ROOT"] = _TMP
 
 from knowledge_fabric.adapters import (
     model,  # noqa: E402
     oss_model,  # noqa: E402
 )
 from knowledge_fabric.telemetry import api_ledger  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _pin_data_root():
+    """Own KF_DATA_ROOT at RUNTIME for every test here, not just at import, so
+    this suite's $0 ledger rows land in its own tempdir and never leak into
+    another module's ledger (whichever module imports last otherwise wins the
+    process env — see the mirror fixture in test_t35_t36_provider_ledger)."""
+    prev = os.environ.get("KF_DATA_ROOT")
+    os.environ["KF_DATA_ROOT"] = _TMP
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop("KF_DATA_ROOT", None)
+        else:
+            os.environ["KF_DATA_ROOT"] = prev
 
 _EVIDENCE = (
     "The service provides automated testing across many repositories [1]. "
