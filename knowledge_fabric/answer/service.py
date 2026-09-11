@@ -30,6 +30,7 @@ import math
 import os
 import re
 
+from .. import curation
 from ..adapters.embedder import cosine
 from ..adapters.model import model_for_tier
 from ..contracts.types import (
@@ -474,10 +475,13 @@ class AnswerService:
                 fused = self._subject_boost(tenant, rq, fused, accessible)
                 fused = self._persona_boost(principal, tenant, fused)  # T27 emphasis
 
+            # T53 — documents in manual-review are held out of every answer;
+            # their passages must never reach an asker's trace.
+            review = curation.review_doc_ids(p, tenant)
             candidates: list[Candidate] = []
             for pid, fscore in fused[: k * 3]:
                 pas = p.passages.get(tenant, pid)
-                if pas:
+                if pas and pas.document_id not in review:
                     candidates.append(Candidate(passage=pas, fused_score=fscore))
 
             # E. graph expansion -----------------------------------------
@@ -985,8 +989,11 @@ class AnswerService:
             node_keys = sorted(node_keys)
             self.p.cache.put_graph(tenant, question, accessible, node_keys)
         traj["graph_node_keys"] = node_keys
+        review = curation.review_doc_ids(self.p, tenant)  # T53 hold-out
         for pas in self.p.passages.for_tenant(tenant):
             if pas.id in have:
+                continue
+            if pas.document_id in review:
                 continue
             if not (set(self.p.passages.acl_of(tenant, pas.id)) & set(accessible)):
                 continue
@@ -1271,9 +1278,12 @@ class AnswerService:
         subj = self._subject_of(tenant, rq)
         if any(not self._is_code_doc(tenant, did) for did in subj.values()):
             return None
+        review = curation.review_doc_ids(self.p, tenant)  # T53 hold-out
         scored = []
         for pas in self.p.passages.for_tenant(tenant):
             if pas.coordinate.kind.value != "symbol_line":
+                continue
+            if pas.document_id in review:
                 continue
             if not (set(self.p.passages.acl_of(tenant, pas.id)) & set(accessible)):
                 continue

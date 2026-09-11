@@ -105,6 +105,21 @@ def set_default_mode(platform, tenant: str, mode: str) -> str:
     return set_mode(platform, tenant, GLOBAL_SOURCE, mode)
 
 
+def modes(platform, tenant: str) -> dict:
+    """The curation-mode settings for the Curator switch: the tenant default,
+    every per-source override, and the allowed values."""
+    _guard(tenant)
+    rows = platform.db.query(
+        "SELECT source, mode FROM curation_settings WHERE tenant=?", (tenant,)
+    )
+    by_source = {r["source"]: r["mode"] for r in rows if r["mode"] in MODES}
+    return {
+        "default": by_source.get(GLOBAL_SOURCE, _DEFAULT_MODE),
+        "sources": {s: m for s, m in by_source.items() if s != GLOBAL_SOURCE},
+        "allowed": list(MODES),
+    }
+
+
 def get_mode(platform, tenant: str, source: str) -> str:
     """Resolve the mode for ``source``: source override, else the tenant default,
     else ``"automated"``."""
@@ -272,6 +287,18 @@ def is_live(doc) -> bool:
     if status and status != "active":
         return False
     return get_state(doc) == "live"
+
+
+def review_doc_ids(platform, tenant: str) -> set:
+    """Ids of documents held in the manual-mode review queue (state ``review``).
+    The answer path skips their passages so review content never reaches an
+    asker's trace (T53). Empty for the seeded corpus, which has no state key."""
+    try:
+        return {
+            d["id"] for d in platform.documents.list(tenant) if get_state(d) == "review"
+        }
+    except Exception:
+        return set()
 
 
 def live_filter(docs: list) -> list:
