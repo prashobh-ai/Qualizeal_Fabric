@@ -53,19 +53,42 @@ jobs:
         # Exits 2..6 with the exact cause (empty secret, key rejected, model
         # outside the allowed set, Sonnet 4.6 unavailable, ping failed) and
         # writes data/provider_status.json + the provider line to the summary.
+        #
+        # NON-FATAL here on purpose: the public showcase is a static, model-free
+        # artifact — every answer is pre-baked into snapshot.json and the browser
+        # engine never calls a model — so a rejected/expired key must NOT take the
+        # Pages demo offline. The model-dependent workflows (ingest.yml,
+        # quality.yml) keep the HARD gate; this one records the result and
+        # continues. When the key is valid the provider line + ledger still prove
+        # it; when it is not, the next step bakes from fabric-data extractively.
+        id: provider
+        continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python scripts/doctor.py --require anthropic
 
+      - name: Choose the build model mode from the provider check
+        id: mode
+        run: |
+          if [ "${{ steps.provider.outcome }}" = "success" ]; then
+            echo "kf_model_mode=anthropic" >> "$GITHUB_OUTPUT"
+            echo "Provider verified — baking the showcase with the real model." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "kf_model_mode=extractive" >> "$GITHUB_OUTPUT"
+            {
+              echo "::warning::Provider check failed (see the 'Provider check' step log — e.g. 401 key rejected). Building the showcase from the already-baked fabric-data with the extractive engine so the demo stays live. Rotate ANTHROPIC_API_KEY in Actions → Secrets to bake with the real model and prove consumption."
+              echo "⚠️ Provider check failed — showcase built extractively from baked data so the demo stays live. Rotate \`ANTHROPIC_API_KEY\` in Actions → Secrets to restore real-model baking."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Build the interactive showcase (seed + bake + emit surfaces)
-        # Answers are baked with the REAL model under KF_MODEL_MODE=anthropic.
-        # There is no fallback: a provider error stops the build with the
-        # response body in the log, and a run that made zero API calls exits 7.
-        # The ledger line (calls · tokens · cost · model) lands in the summary.
-        # fabric-data/answers/*.json (T44 bake + T45 queue) ship under
-        # dist/showcase/answers/ for the engine's baked-answer pass-through.
+        # Model mode is chosen by the provider check above: the real model when
+        # the key is valid (answers baked live, ledger proves the call count),
+        # else the extractive engine over the already-baked fabric-data so the
+        # static demo always ships. fabric-data/answers/*.json (T44 bake + T45
+        # queue) ship under dist/showcase/answers/ for the baked-answer pass-through.
         env:
-          KF_MODEL_MODE: anthropic
+          KF_MODEL_MODE: ${{ steps.mode.outputs.kf_model_mode }}
           KF_LEDGER_PURPOSE: answer_bake
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python scripts/build_showcase.py --out dist/showcase
