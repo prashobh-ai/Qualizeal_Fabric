@@ -307,6 +307,21 @@ class TestLedger(_Env):
         env = {"KF_RUN_ID": "run-with-no-calls", "KF_MODEL_MODE": "anthropic"}
         with mock.patch.dict(os.environ, env):
             self.assertEqual(b._api_summary(), 7)
+            # the doctor's ping alone does not count as the bake using the key
+            api_ledger.record(
+                purpose="doctor_ping",
+                model="claude-haiku-4-5",
+                usage={"input_tokens": 9, "output_tokens": 2},
+                latency_ms=1,
+            )
+            self.assertEqual(b._api_summary(), 7)
+            api_ledger.record(
+                purpose="answer_bake",
+                model="claude-sonnet-4-6",
+                usage={"input_tokens": 50, "output_tokens": 5},
+                latency_ms=1,
+            )
+            self.assertEqual(b._api_summary(), 0)
             os.environ["KF_MODEL_MODE"] = "off"
             self.assertEqual(b._api_summary(), 0)
 

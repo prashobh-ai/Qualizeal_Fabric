@@ -705,10 +705,18 @@ def _api_summary() -> int:
     print(line)
     api_ledger.append_step_summary(line)
     mode = (os.environ.get("KF_MODEL_MODE") or "").lower()
-    calls = api_ledger.summary(api_ledger.rows(2), api_ledger.run_id())["calls"]
-    if mode == "anthropic" and calls == 0:
+    # The doctor's ping shares this run id in Actions; it proves the key, not
+    # the bake. Exit 7 when the BAKE made no calls.
+    rid = api_ledger.run_id()
+    bake_calls = [
+        r
+        for r in api_ledger.rows(2)
+        if r.get("run_id") == rid and r.get("purpose") != "doctor_ping"
+    ]
+    if mode == "anthropic" and not bake_calls:
         print(
-            "build_showcase: KF_MODEL_MODE=anthropic but the ledger shows 0 API calls",
+            "build_showcase: KF_MODEL_MODE=anthropic but the ledger shows 0 API calls "
+            "from the bake (only the doctor ping, if any)",
             file=sys.stderr,
         )
         return 7
