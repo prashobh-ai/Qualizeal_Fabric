@@ -1,0 +1,49 @@
+# T46 — nightly answer-quality run under the real model.
+#
+# Runs eval/quality.py (the quality harness track) over every question set with
+# a 40-question sample. The harness lands with its own track: until
+# eval/quality.py exists this step FAILS LOUDLY (it never skips), so a missing
+# harness is visible in the Actions history, not hidden.
+name: quality
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    env:
+      KF_MODEL_MODE: anthropic
+      KF_LEDGER_PURPOSE: quality_harness
+      KF_FABRIC_ROOT: ${{ github.workspace }}/fabric-data
+      KF_DATA_ROOT: ${{ github.workspace }}/fabric-data/data
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check out fabric-data (read: facts, answers, provider status)
+        run: python -m knowledge_fabric.fabric_data_git checkout --root fabric-data
+
+      - name: Provider check — pin the models and prove the key (T35)
+        run: python scripts/doctor.py --require anthropic
+
+      - name: Quality harness over every set (real model, sample 40)
+        run: |
+          if [ ! -f eval/quality.py ]; then
+            echo "::error::eval/quality.py is missing — the quality harness has not landed; failing loudly"
+            exit 1
+          fi
+          python eval/quality.py --sets general code followup role facts tables images gap --model real --sample 40

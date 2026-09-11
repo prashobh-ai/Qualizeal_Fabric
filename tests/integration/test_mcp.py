@@ -88,7 +88,28 @@ class TestMcpServer(unittest.TestCase):
     def test_lists_the_governed_tools(self):
         tools = asyncio.run(self.server.list_tools())
         names = {t.name for t in tools}
-        self.assertEqual(names, {"ask", "discover", "corpus"})
+        # T31 core + the T48 fabric tools; every one is governed (ACL + budget).
+        self.assertEqual(
+            names,
+            {
+                "ask",
+                "discover",
+                "corpus",
+                "query_facts",
+                "get_repository",
+                "list_capabilities",
+                "get_dependencies",
+                "search_code",
+                "get_pull_requests",
+                "get_commits",
+                "explain_architecture",
+                "run_table_query",
+                "jira_search",
+                "confluence_search",
+                "describe_image",
+                "ask_fabric",
+            },
+        )
         # every tool carries a description and an input schema (MCP conformance);
         # the schema attribute is inputSchema on the wire, input_schema in the
         # 2.x Python objects — accept either.

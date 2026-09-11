@@ -1,4 +1,19 @@
 
+<style>
+/* T47 — five more corpus tiles + the agent's "Checked <tool>" step lines */
+.strip{flex-wrap:wrap}.strip .s{min-width:72px}
+.strip .s[data-key=repositories] .n{color:var(--qz-blue)}
+.strip .s[data-key=jira_projects] .n{color:var(--qz-blue-deep)}
+.strip .s[data-key=confluence_spaces] .n{color:var(--qz-purple)}
+.strip .s[data-key=tables] .n{color:var(--qz-coral)}
+.strip .s[data-key=images] .n{color:var(--qz-green)}
+.steps{margin:4px 0 8px;display:flex;flex-direction:column;gap:2px}
+.steps .st{font-size:12px;color:var(--mut);display:flex;gap:6px;align-items:center}
+.steps .st b{color:var(--qz-ink);font-weight:600}.steps .st .cnt{margin-left:auto;font-variant-numeric:tabular-nums}
+.steps .st.live::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--qz-blue);animation:kfpulse 1s infinite}
+@keyframes kfpulse{0%{opacity:.3}50%{opacity:1}100%{opacity:.3}}
+.msg.ai.live{cursor:default}
+</style>
 <div class="ws" id="ws">
   <aside class="threads" id="threads" aria-label="Conversations">
     <button class="btn primary new" id="new-chat">+ New chat</button>
@@ -12,6 +27,11 @@
       <div class="s" data-key="entities"><div class="n" id="tile-entities">0</div><div class="l">Entities</div></div>
       <div class="s" data-key="relationships"><div class="n" id="tile-relationships">0</div><div class="l">Relationships</div></div>
       <div class="s" data-key="domains"><div class="n" id="tile-domains">0</div><div class="l">Domains</div></div>
+      <div class="s" data-key="repositories"><div class="n" id="tile-repositories">0</div><div class="l">Repositories</div></div>
+      <div class="s" data-key="jira_projects"><div class="n" id="tile-jira_projects">0</div><div class="l">Jira projects</div></div>
+      <div class="s" data-key="confluence_spaces"><div class="n" id="tile-confluence_spaces">0</div><div class="l">Confluence spaces</div></div>
+      <div class="s" data-key="tables"><div class="n" id="tile-tables">0</div><div class="l">Tables</div></div>
+      <div class="s" data-key="images"><div class="n" id="tile-images">0</div><div class="l">Images</div></div>
     </div>
 
     <div class="messages" id="messages"></div>

@@ -11,6 +11,16 @@
  * Loaded BEFORE the shared runtime on every surface page. It also derives the
  * deploy base from the URL and sets window.KF_BASE / window.KF_ROUTES so the
  * one build serves any base path (Pages repo path, localhost, an AWS subpath).
+ *
+ * Serving order for POST /ask (T44/T45):
+ *   1. a BAKED answer — answers/<hash>.json, hash = sha256(norm(question))[:16],
+ *      fetched over the REAL network (the bake at ingest, or the ask queue);
+ *   2. in-browser retrieval and facts — the snapshot's baked bank, then BM25
+ *      over the exported index (Level 1/2 extractive);
+ *   3. the ask queue — a Level 2/3 or gap answer with no baked file is stamped
+ *      `queue: {eligible, hash, path}` so the Workspace offers "Get full
+ *      answer" (an `ask` issue) and polls answers/<hash>.json for the result.
+ * /answers/*.json and static assets pass through to the real fetch untouched.
  */
 (function () {
   "use strict";
@@ -547,6 +557,44 @@
     }
     return view;
   }
+  // ---- T44/T45: baked answer files + the ask queue -----------------------
+  // hash = sha256(norm(question))[:16] — the same key baking.py and
+  // build_showcase.py compute, so answers/<hash>.json is addressable here.
+  function sha256hex(s) {
+    var subtle = (typeof crypto !== "undefined" && crypto.subtle) ? crypto.subtle : null;
+    if (!subtle || typeof TextEncoder === "undefined") return Promise.resolve("");
+    return subtle.digest("SHA-256", new TextEncoder().encode(s)).then(function (buf) {
+      var b = new Uint8Array(buf), out = "";
+      for (var i = 0; i < b.length; i++) out += (b[i] < 16 ? "0" : "") + b[i].toString(16);
+      return out;
+    }).catch(function () { return ""; });
+  }
+  function questionHash(q) { return sha256hex(norm(q)).then(function (h) { return h.slice(0, 16); }); }
+  function answersPath(h) { return "answers/" + h + ".json"; }
+  // 1) a baked answer file (bake at ingest, or the queue) — real network fetch.
+  function bakedAnswer(question) {
+    return questionHash(question).then(function (h) {
+      if (!h) return { hash: "", answer: null };
+      return realFetch(base + "/" + answersPath(h)).then(function (r) {
+        if (!r || !r.ok) return { hash: h, answer: null };
+        return r.json().then(function (j) {
+          return { hash: h, answer: (j && j.kind) ? fromBaked(j) : null };
+        }).catch(function () { return { hash: h, answer: null }; });
+      }).catch(function () { return { hash: h, answer: null }; });
+    });
+  }
+  // A baked file is Answer.to_dict() + {question, asked_at, model, cost_usd,
+  // source, steps, trajectory_id}; surface the file's model/cost on the card.
+  function fromBaked(j) {
+    var a = clone(j);
+    a.model_name = j.model || a.model_name || "";
+    a.cost = Number(j.cost_usd != null ? j.cost_usd : a.cost) || 0;
+    a.baked = { source: j.source || "bake", asked_at: j.asked_at || "", model: j.model || "",
+                cost_usd: Number(j.cost_usd) || 0, steps: (j.steps || []).length };
+    a.why = a.why || { level_name: "baked", explain: "Served from a baked answer.", reasons: [],
+                       signals: {}, retrieved: (a.citations || []).length };
+    return a;
+  }
   function answerFor(subject, question, context) {
     var designation = designationOf(subject);  // the signed-in identity's org title
     // Rich two-turn context from the client, else a legacy history of strings.
@@ -556,24 +604,35 @@
       });
     var prof = PERSONA_PROFILE[personaFor(designation)];  // T27 depth + emphasis
     var res = resolveCtx(question, turns);
-    var a;
     if (res.clarify) {
-      a = clarifyChips(res.clarify.chips, res.clarify.reason);
-    } else {
-      var rq = res.question;  // the (possibly rewritten) question to retrieve on
-      // A baked answer is persona-agnostic; live retrieval applies the persona's
-      // emphasis + depth so an unbaked question differs per designation.
-      a = lookup(rq) || retrieve(rq, prof);
-      if (!a) {
-        var s2 = subjectInText(rq);
-        if (s2) a = clarifyAnswer(s2, question, turns.map(function (t) { return t.question; }));
-      }
-      if (!a) a = gapAnswer(question);
-      if (res.understood_as) a.understood_as = res.understood_as;  // shown under the bubble
+      var c = clarifyChips(res.clarify.chips, res.clarify.reason);
+      c.role_view = roleView(c, designation);
+      bumpUsage(subject, c);
+      return Promise.resolve(c);
     }
-    a.role_view = roleView(a, designation);  // T27 — the designation/persona lens
-    bumpUsage(subject, a);
-    return a;
+    var rq = res.question;  // the (possibly rewritten) question to retrieve on
+    return bakedAnswer(rq).then(function (b) {
+      var a = b.answer;
+      if (!a) {
+        // 2) in-browser retrieval and facts. A snapshot answer is persona-agnostic;
+        // live retrieval applies the persona's emphasis + depth.
+        a = lookup(rq) || retrieve(rq, prof);
+        if (!a) {
+          var s2 = subjectInText(rq);
+          if (s2) a = clarifyAnswer(s2, question, turns.map(function (t) { return t.question; }));
+        }
+        if (!a) a = gapAnswer(question);
+        // 3) the queue — Level 2/3 or a gap with no baked file can get the full
+        // answer from the agent; the Workspace offers it and polls the file.
+        var eligible = a.kind === "gap" || (a.kind === "answer" && Number(a.level) >= 2);
+        a.queue = { eligible: eligible, hash: b.hash, path: b.hash ? answersPath(b.hash) : "",
+                    question: rq, repo: window.KF_REPO || "prashobh-ai/QualiZeal_Fabric" };
+      }
+      if (res.understood_as) a.understood_as = res.understood_as;  // shown under the bubble
+      a.role_view = roleView(a, designation);  // T27 — the designation/persona lens
+      bumpUsage(subject, a);
+      return a;
+    });
   }
   function gapAnswer(question) {
     return {
@@ -608,6 +667,45 @@
   function emptyUsage(subject) {
     var w = { questions: 0, answered: 0, declined: 0, tokens_in: 0, tokens_out: 0, cost: 0, cost_saved: 0, cache_hit_rate: 0, by_level: {} };
     return { subject: subject, windows: { today: clone(w), "7d": clone(w), "30d": clone(w) }, budget: null, speech_seconds: null };
+  }
+
+  // ---- T47: fabric-data views (repositories / tables) --------------------
+  // The card overlay is baked per repository; the SELECT box previews the
+  // first rows the builder read from the real sqlite sheet (no SQL engine on
+  // Pages, so the query text is shown back with a "static preview" note).
+  function curatorGet(path) {
+    return (STATE.get.curator && STATE.get.curator[path]) ||
+           (STATE.get.admin && STATE.get.admin[path]) || undefined;
+  }
+  function repositoryCard(repo) {
+    var card = (SNAP.repository || {})[repo];
+    if (card) return respond(card);
+    return respond({ error: "repository '" + repo + "' is not in facts.json" }, 404);
+  }
+  function deleteRepository(body) {
+    var repo = body.repo || "", n = 0;
+    ["curator", "admin"].forEach(function (b) {
+      var list = STATE.get[b] && STATE.get[b]["/curator/repositories"];
+      if (Array.isArray(list)) {
+        var before = list.length;
+        STATE.get[b]["/curator/repositories"] = list.filter(function (r) { return r.repo !== repo; });
+        n = Math.max(n, before - STATE.get[b]["/curator/repositories"].length);
+      }
+    });
+    return respond({ repo: repo, deleted: n, document_ids: [], dataset_version: 1,
+                     note: "showcase — removed from the baked table (no server-side state on Pages)" });
+  }
+  function tableQuery(body) {
+    var sql = String(body.sql || "").trim();
+    if (!/^(select|with)\b/i.test(sql)) return respond({ error: "only SELECT queries are allowed" }, 400);
+    var tables = curatorGet("/curator/tables") || [];
+    var t = tables.filter(function (x) { return x.doc_id === body.doc_id && x.sheet === body.sheet; })[0];
+    if (!t) return respond({ error: "unknown sheet " + body.doc_id + "/" + body.sheet }, 404);
+    var rows = t.sample || [];
+    return respond({ doc_id: t.doc_id, sheet: t.sheet, sql: sql,
+                     columns: (t.columns || []).map(function (c) { return c.name; }),
+                     rows: rows, row_count: rows.length, truncated: rows.length < (t.rows || 0),
+                     note: "static preview" });
   }
 
   // ---- mutations --------------------------------------------------------
@@ -670,10 +768,12 @@
         if (r.code === 400) return respond({ error: "enter your user id" }, 400);
         return respond({ error: "unknown user " + (body.subject || "") }, 404);
       }
-      if (path === "/ask") return respond(answerFor(subject, body.question || "", body.context));
+      if (path === "/ask") return answerFor(subject, body.question || "", body.context).then(respond);
       if (path === "/curator/decision") { applyDecision(body); return respond({ ok: true, decision: body.decision }); }
       if (path === "/admin/users") return respond(userMutation(body));
       if (path === "/feedback") { recordFeedback(subject, body); return respond({ ok: true }); }
+      if (path === "/curator/repository/delete") return deleteRepository(body);  // T47
+      if (path === "/curator/tables/query") return tableQuery(body);             // T47
       // upload / sync / bulk-delete / budget / authority / connectors — demo success
       return respond({ ok: true, note: "showcase — action acknowledged (no server-side state on Pages)" });
     }
@@ -688,6 +788,7 @@
     if (path === "/curator/versions") { var d = q.get("document_id"); return respond((SNAP.versions || {})[d] || { versions: [], datasets: [] }); }
     if (path === "/admin/doctor") { var tg = q.get("target") || ""; return respond((SNAP.doctor || {})[tg] || (SNAP.doctor || {})[""] || { checks: [] }); }
     if (path === "/curator/feedback") return respond({ feedback: STATE.feedback }); // negative-feedback review (new)
+    if (path === "/curator/repository") return repositoryCard(q.get("repo") || "");  // T47 card overlay
     var data = pickGet(subject, path, q);
     if (data !== undefined) return respond(data);
     return respond({ error: "not found: " + path }, 404);
@@ -700,8 +801,10 @@
     var abs; try { abs = new URL(url, location.origin); } catch (e) { return realFetch(input, opts); }
     var path = abs.pathname;
     if (base && path.indexOf(base) === 0) path = path.slice(base.length) || "/";
-    // static assets + the snapshot itself go to the network untouched
+    // static assets, the snapshot and the baked answer files (T44/T45) go to
+    // the network untouched — answers/<hash>.json is a real file on Pages.
     if (path.indexOf("/assets/") === 0 || path.indexOf("/snapshot.json") >= 0 ||
+        path.indexOf("/answers/") === 0 ||
         /\.(png|jpe?g|gif|svg|css|js|woff2?|ico)$/i.test(path)) {
       return realFetch(input, opts);
     }

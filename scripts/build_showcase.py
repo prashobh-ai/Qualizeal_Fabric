@@ -29,6 +29,7 @@ import shutil
 import sys
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import ThreadingHTTPServer
 
@@ -178,8 +179,30 @@ ROLES = [
     "cto",
 ]
 # GET endpoints to capture per bucket (askers use only the /api/* set).
-ASKER_GETS = ["/api/corpus"]
-CURATOR_GETS = ["/curator/quality", "/curator/gaps", "/curator/documents", "/admin/sources"]
+ASKER_GETS = ["/api/corpus"]  # T47: carries the repositories/jira/confluence/tables/images tiles
+CURATOR_GETS = [
+    "/curator/quality",
+    "/curator/gaps",
+    "/curator/documents",
+    "/curator/recommendations",  # T44 — documents whose generated questions failed
+    "/admin/sources",  # T47: + github/jira/confluence cards
+    "/curator/repositories",  # T47: facts.json + capabilities.json rows
+    "/curator/tables",  # T47: extracted sheets (+ a read-only sample for the static preview)
+    "/curator/insights",  # T47: capabilities across repositories + reuse candidates
+]
+# T45 — the Workspace's "Get full answer" opens an `ask` issue on this repo.
+KF_REPO = os.environ.get("GITHUB_REPOSITORY") or "prashobh-ai/QualiZeal_Fabric"
+
+
+def norm(q):
+    """The question key. Byte-identical to ``knowledge_fabric.baking.norm`` and
+    to engine.js's ``norm`` (a test asserts it) — the baked-answer file name is
+    ``sha256(norm(q))[:16]``."""
+    import re
+
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", q.lower())).strip()
+
+
 ADMIN_GETS = [
     "/admin/models",  # T35/T36 provider card + consumption (baked from this run's ledger)
     "/admin/users",
@@ -192,7 +215,13 @@ ADMIN_GETS = [
     "/curator/quality",
     "/curator/gaps",
     "/curator/documents",
+    "/curator/repositories",
+    "/curator/tables",
+    "/curator/insights",
 ]
+# T47 — the repository card overlay is keyed by repo (GET /curator/repository?repo=),
+# so it is baked per repository under snap["repository"] rather than as a GET path.
+REPO_CARD_GET = "/curator/repository?repo="
 
 
 def _load_corpus(p):
@@ -507,11 +536,6 @@ def _bake(client, p=None) -> dict:
             snap["login"][subject] = j
             tokens[subject] = j["token"]
 
-    def norm(q):
-        import re
-
-        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", q.lower())).strip()
-
     # answers + galaxy (bake as the broad asker so citations are full)
     asker = tokens.get("asker.public")
     restricted = tokens.get("asker.restricted")
@@ -584,6 +608,17 @@ def _bake(client, p=None) -> dict:
         code, j = client.call("GET", path, token=tokens.get("curator"))
         if code == 200:
             snap["get"]["curator"][path.split("?")[0]] = j
+    # T47 — one repository card per analysed repository (keyed by repo).
+    snap["repository"] = {}
+    for row in snap["get"]["curator"].get("/curator/repositories") or []:
+        repo = row.get("repo") if isinstance(row, dict) else None
+        if not repo:
+            continue
+        code, j = client.call(
+            "GET", REPO_CARD_GET + urllib.parse.quote(repo, safe=""), token=tokens.get("curator")
+        )
+        if code == 200:
+            snap["repository"][repo] = j
     for path in ADMIN_GETS:
         code, j = client.call("GET", path, token=tokens.get("admin"))
         if code == 200:
@@ -624,7 +659,8 @@ def _rewrite(html: str, surface: str, asset_prefix: str, engine_href: str) -> st
     # root links (the lockup on standalone pages) point at the showcase root.
     html = html.replace('href="/"', 'href="../"')
     inject = (
-        f'<script>window.KF_SURFACE={surface!r};</script>\n<script src="{engine_href}"></script>\n'
+        f"<script>window.KF_SURFACE={surface!r};window.KF_REPO={KF_REPO!r};</script>\n"
+        f'<script src="{engine_href}"></script>\n'
     )
     # the engine must run before ANY page script (it installs the fetch shim and
     # sets KF_BASE). Inject before the first <script> — works for the shared
@@ -688,11 +724,32 @@ def build(out_dir: str) -> None:
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as fh:
         fh.write(landing)
 
+    # T44/T45 — baked answers from the fabric-data checkout ship as static
+    # files: the engine fetches answers/<hash>.json before retrieving.
+    baked = _copy_answers(out)
+
     entries = ", ".join(sorted(os.listdir(out)))
     print(
         f"showcase built at {out}\n  {entries}\n"
-        f"  answers={len(snap['answers'])} galaxies={len(snap['galaxy'])} bank={len(snap['bank'])}"
+        f"  answers={len(snap['answers'])} galaxies={len(snap['galaxy'])} bank={len(snap['bank'])} "
+        f"baked_files={baked}"
     )
+
+
+def _copy_answers(out: str) -> int:
+    """Copy ``<fabric root>/answers/*.json`` to ``<out>/answers/``; returns the count."""
+    from knowledge_fabric import fabric_data as fd
+
+    src = fd.path("answers")
+    dst = os.path.join(out, "answers")
+    os.makedirs(dst, exist_ok=True)
+    n = 0
+    if os.path.isdir(src):
+        for name in sorted(os.listdir(src)):
+            if name.endswith(".json"):
+                shutil.copy(os.path.join(src, name), os.path.join(dst, name))
+                n += 1
+    return n
 
 
 def _api_summary() -> int:

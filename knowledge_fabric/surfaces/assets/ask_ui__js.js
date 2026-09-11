@@ -15,6 +15,47 @@ function levelWord(name){const k=String(name||'');
 const KIND_CLS={answer:'good',clarify:'warn',gap:'bad'};
 const CPLX_CLS={simple:'good',medium:'warn',complex:'violet'};
 const DECLINE="There isn't enough evidence in the fabric to answer that.";
+// the question key — the same normalisation the engine and the bake use.
+function norm(q){return String(q||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim()}
+
+// ===================== the ask queue (T45) ============================
+// On the static Workspace the engine stamps `queue:{eligible,hash,path,repo}`
+// on a Level 2/3 or gap answer that has no baked file. "Get full answer" opens
+// an `ask` issue (the ask.yml form, pre-filled); the page then polls
+// answers/<hash>.json every 20 s for 5 minutes and swaps the bubble when the
+// queue's answer lands. The live server never stamps `queue`, so no button.
+const QUEUE_POLL_MS=20000, QUEUE_POLL_FOR_MS=5*60*1000;
+let QUEUE=[];   // {question,hash,at,status:'pending'|'answered',model,cost_usd} — per browser
+function loadQueue(){try{QUEUE=JSON.parse(localStorage.getItem('kf.queue')||'[]')}catch(e){QUEUE=[]}}
+function saveQueue(){try{localStorage.setItem('kf.queue',JSON.stringify(QUEUE.slice(0,50)))}catch(e){}}
+function issueUrl(a){const q=a.queue||{};const question=q.question||'';
+ const body={question,subject:(KF.session&&KF.session.subject)||'',context:{hash:q.hash||''}};
+ return 'https://github.com/'+(q.repo||'prashobh-ai/QualiZeal_Fabric')+'/issues/new?template=ask.yml&labels=ask'+
+  '&title='+encodeURIComponent(question)+'&question='+encodeURIComponent(question)+'&body='+encodeURIComponent(JSON.stringify(body))}
+function queueBar(a,i){if(!a.queue||!a.queue.eligible||a.baked)return '';
+ const pending=QUEUE.find(x=>x.hash===a.queue.hash&&x.status==='pending');
+ return '<div class="queue-bar" data-i="'+i+'"><a class="btn sm primary qbtn" href="'+esc(issueUrl(a))+'" target="_blank" rel="noopener">Get full answer</a>'+
+  '<span class="muted small qstatus">'+(pending?'queued — waiting for the full answer…':'Queue this question for the full agent answer (about a minute).')+'</span></div>'}
+function wireQueue(){const t=curThread();if(!t)return;
+ $$('#messages .queue-bar .qbtn').forEach(b=>b.onclick=()=>{const turn=t.turns[+b.closest('.queue-bar').dataset.i];if(turn)startPoll(turn)})}
+function startPoll(turn){const q=turn.a.queue;if(!q||!q.hash)return;
+ if(!QUEUE.some(x=>x.hash===q.hash))QUEUE.unshift({question:q.question,hash:q.hash,at:Date.now(),status:'pending'});
+ saveQueue();renderUsage();
+ const bar=$('#messages .queue-bar[data-i="'+turn._i+'"] .qstatus');if(bar)bar.textContent='queued — waiting for the full answer…';
+ const t0=Date.now();
+ const tick=async()=>{try{const r=await fetch((KF.base()||'')+'/'+q.path,{cache:'no-store'});
+   if(r.ok){const j=await r.json();if(j&&j.kind){applyFull(turn,j);return}}}catch(e){}
+  if(Date.now()-t0<QUEUE_POLL_FOR_MS)setTimeout(tick,QUEUE_POLL_MS);
+  else{const el=$('#messages .queue-bar[data-i="'+turn._i+'"] .qstatus');if(el)el.textContent='still queued — check back later or open the issue.'}};
+ setTimeout(tick,QUEUE_POLL_MS)}
+function applyFull(turn,j){const a=Object.assign({},j);
+ a.model_name=j.model||a.model_name||'';a.cost=Number(j.cost_usd!=null?j.cost_usd:a.cost)||0;
+ a.baked={source:j.source||'queue',asked_at:j.asked_at||'',model:j.model||'',cost_usd:Number(j.cost_usd)||0,steps:(j.steps||[]).length};
+ a.why=a.why||{level_name:'baked',explain:'Served from the queue answer.',reasons:[],signals:{},retrieved:(a.citations||[]).length};
+ a.role_view=turn.a.role_view;a._ms=turn.a._ms;turn.a=a;
+ const row=QUEUE.find(x=>x.hash===j.question_hash||norm(x.question)===norm(j.question||''));
+ if(row){row.status='answered';row.model=a.model_name;row.cost_usd=a.cost;}
+ saveQueue();saveThreads();renderMessages();selectAnswer(turn);toast('Full answer arrived.','good')}
 
 // ===================== threads (per-session) =========================
 let THREADS=[], CUR=null;
@@ -42,7 +83,7 @@ function renderMessages(){const box=$('#messages');const t=curThread();
      ?'<div class="understood">understood as: '+esc(tn.a.understood_as)+'</div>':'')+
    aiBlock(tn.a,i)+'</div>').join('');
  $$('#messages .msg.ai').forEach(el=>el.onclick=()=>selectAnswer(t.turns[+el.dataset.i]));
- wireCites();wireFeedback();wireClarify();box.scrollTop=box.scrollHeight}
+ wireCites();wireFeedback();wireClarify();wireQueue();box.scrollTop=box.scrollHeight}
 // a reader clicks one of the clarify's offered questions -> ask it straight away.
 function wireClarify(){$$('#messages .clarify-chips .chip').forEach(c=>c.onclick=e=>{e.stopPropagation();
  $('#question').value=c.dataset.cq;autosize();$('#question').focus();ask()})}
@@ -63,7 +104,29 @@ function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
   '<button class="fbbtn up" title="Helpful">&#128077;</button>'+
   '<button class="fbbtn down" title="Not helpful — flag for the curators">&#128078;</button>'+
   '<span class="fbmsg muted small"></span></div>';
- return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+'</div>'+body+roleLens(a)+fb+'</div>'}
+ const baked=a.baked?'<span class="pill info" title="'+esc(a.baked.asked_at||'')+'">'+(a.baked.source==='queue'?'full answer':'baked')+'</span>':'';
+ return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+baked+'</div>'+stepsHtml(a)+body+roleLens(a)+queueBar(a,i)+fb+'</div>'}
+// T47 — the agent's tool steps (why.steps on an agent-run answer): one line per
+// tool checked, "Checked <tool> · <n> results". KF.streamStep(step) appends the
+// same line live while the answer is in flight (the streaming route belongs to
+// another track; baked answers render from why.steps).
+function stepCount(s){if(typeof s.results==='number')return s.results;if(Array.isArray(s.results))return s.results.length;
+ for(const k of ['count','n','hits','rows'])if(typeof s[k]==='number')return s[k];
+ if(Array.isArray(s.citations))return s.citations.length;if(Array.isArray(s.result))return s.result.length;return null}
+function stepLine(s,live){s=s||{};const tool=s.tool||s.name||s.step||'tool';const n=stepCount(s);const extra=s.error?' · '+esc(s.error):(s.note?' · '+esc(s.note):'');
+ return '<div class="st'+(live?' live':'')+'" title="'+esc(s.query||s.args?JSON.stringify(s.query||s.args):'')+'">Checked <b>'+esc(tool)+'</b>'+extra+
+  '<span class="cnt">'+(n==null?'':num(n)+' result'+(n===1?'':'s'))+'</span></div>'}
+function stepsHtml(a){const steps=((a||{}).why||{}).steps;if(!Array.isArray(steps)||!steps.length)return '';
+ return '<div class="steps">'+steps.map(s=>stepLine(s)).join('')+'</div>'}
+KF.streamStep=function(step){let box=$('#live-steps .steps');
+ if(!box){const last=$$('#messages .msg.ai').pop();if(!last)return null;box=last.querySelector('.steps');
+  if(!box){box=document.createElement('div');box.className='steps';last.insertBefore(box,last.querySelector('.kwrap')?last.querySelector('.kwrap').nextSibling:last.firstChild)}}
+ const wait=box.querySelector('.st.wait');if(wait)wait.remove();
+ box.insertAdjacentHTML('beforeend',stepLine(step,true));const m=$('#messages');if(m)m.scrollTop=m.scrollHeight;return box}
+function liveTurn(q){const box=$('#messages');if(box.querySelector('.empty-chat'))box.innerHTML='';
+ box.insertAdjacentHTML('beforeend','<div class="turn" id="live-turn"><div class="msg user">'+esc(q)+'</div>'+
+  '<div class="msg ai live" id="live-steps"><div class="steps"><div class="st wait live">Checking the fabric…</div></div></div></div>');box.scrollTop=box.scrollHeight}
+function dropLiveTurn(){const t=$('#live-turn');if(t)t.remove()}
 // T27 — the designation/persona lens. Same grounded answer, framed for the
 // reader's org role, decided by the SIGNED-IN identity (the designation the
 // admin captured), never picked here. A reader with no designation sees the
@@ -147,6 +210,10 @@ function card(a){const box=$('#answer-card');const w=a.why||{};const lw=levelWor
  rows.push(['Answered by','<span class="pill '+lw.cls+'">'+esc(lw.word)+'</span>']);
  rows.push(['Why','<span style="font-weight:500">'+esc(w.explain||'—')+'</span>']);
  rows.push(['Model',modelLabel(a)]);
+ // T44/T45 — an answer served from answers/<hash>.json shows where it came
+ // from and the model + cost recorded in the file.
+ if(a.baked)rows.push(['Full answer','<span class="pill info">'+esc(a.baked.source==='queue'?'ask queue':'bake')+'</span> '+
+   esc(a.baked.model||'no model')+' &middot; '+money(a.baked.cost_usd)+(a.baked.steps?' &middot; '+a.baked.steps+' step(s)':'')]);
  rows.push(['Moved levels',esc(reasonWord(a))]);
  // --- under Details ---
  const det=[];
@@ -269,6 +336,13 @@ function renderUsage(){const box=$('#usage-body');if(!USAGE){return}
   html+='<div class="kv" style="margin-top:10px"><span>Fabric budget</span><b>'+money(b.spent)+' / '+money(b.cap)+'</b></div>'+
    '<div class="trk"><i style="width:'+(used*100).toFixed(1)+'%"></i></div>';}
  html+='<div class="kv"><span>Speech seconds</span><b><span id="speech-secs">'+(SPEECH_SECS?SPEECH_SECS+'s':'—')+'</span> <span class="muted small">(with voice)</span></b></div>';
+ // T45 — the reader's queued questions: the server's list (answers baked by
+ // the queue for this subject) merged with what this browser queued.
+ const seen={},queued=[];
+ (USAGE.queued||[]).concat(QUEUE).forEach(x=>{const k=x.hash||norm(x.question);if(!k||seen[k])return;seen[k]=1;queued.push(x)});
+ if(queued.length){html+='<div class="kv" style="margin-top:10px"><span>Queued questions</span><b>'+queued.length+'</b></div><ul class="queue-list">'+
+  queued.slice(0,8).map(x=>'<li><span class="pill '+(x.status==='answered'?'good':'warn')+'">'+esc(x.status||'answered')+'</span> '+esc(x.question||'')+
+   (x.model?' <span class="muted small">'+esc(x.model)+' &middot; '+money(x.cost_usd)+'</span>':'')+'</li>').join('')+'</ul>';}
  box.innerHTML=html;
  $$('#usage-body .win button').forEach(bt=>bt.onclick=()=>{USE_WIN=bt.dataset.w;renderUsage()})}
 
@@ -292,22 +366,28 @@ async function ask(){const q=$('#question').value.trim();if(!q)return;
    options:(tn.a&&tn.a.suggestions)||[]}));
  const ctx={turns,history:turns.map(t=>t.question)};
  const btn=$('#ask-btn');btn.disabled=true;$('#ask-status').textContent='thinking…';const t0=performance.now();
+ liveTurn(q);  // T47: the in-flight bubble KF.streamStep appends "Checked <tool>" lines to
  try{const a=await api('/ask',{method:'POST',body:{question:q,context:ctx}});gate(null);
-  a._ms=performance.now()-t0;
+  a._ms=performance.now()-t0;dropLiveTurn();
   const t=curThread();const turn={q,a};t.turns.push(turn);turn._i=t.turns.length-1;
   if(t.turns.length===1)t.title=q.slice(0,48);
   t.at=Date.now();saveThreads();renderThreads();renderMessages();
   turn._i=t.turns.length-1;selectAnswer(turn);
   $('#ask-status').textContent=Math.round(a._ms)+' ms · '+(a.kind||'');$('#question').value='';autosize()}
- catch(e){gate(e,'asker');$('#ask-status').textContent='failed';toast(e.message,'bad')}
+ catch(e){dropLiveTurn();gate(e,'asker');$('#ask-status').textContent='failed';toast(e.message,'bad')}
  finally{btn.disabled=false}}
 
 // ===================== corpus strip =================================
 function animateNumber(el,target,msdur){target=Number(target)||0;const from=Number(String(el.textContent).replace(/[^0-9]/g,''))||0;
  const t0=performance.now();const dur=msdur||600;
  (function step(t){const p=Math.min(1,(t-t0)/dur);el.textContent=num(Math.round(from+(target-from)*(1-Math.pow(1-p,3))));if(p<1)requestAnimationFrame(step)})(performance.now())}
+// T47 — ten tiles: the five corpus counts plus repositories, Jira projects,
+// Confluence spaces, tables and images (from the fabric-data files).
+const TILE_KEYS=['documents','passages','entities','relationships','domains',
+ 'repositories','jira_projects','confluence_spaces','tables','images'];
+function renderTiles(c){c=c||{};TILE_KEYS.forEach(k=>{const el=$('#tile-'+k);if(el)animateNumber(el,c[k]||0)})}
 async function corpusStrip(){if(!KF.session)return;
- try{const c=await api('/api/corpus');['documents','passages','entities','relationships','domains'].forEach(k=>{const el=$('#tile-'+k);if(el)animateNumber(el,c[k]||0)})}catch(e){}}
+ try{renderTiles(await api('/api/corpus'))}catch(e){}}
 
 // ===================== composer wiring ==============================
 function autosize(){const t=$('#question');t.style.height='auto';t.style.height=Math.min(150,t.scrollHeight)+'px'}
@@ -358,7 +438,7 @@ function setupMic(){const btn=$('#mic-btn');if(!btn)return;
   try{rec.start()}catch(e){/* a start already in flight */}}}
 
 // ===================== session lifecycle ============================
-function boot(){loadThreads();if(!THREADS.length){CUR=null}else{CUR=THREADS[0].id}
+function boot(){loadThreads();loadQueue();if(!THREADS.length){CUR=null}else{CUR=THREADS[0].id}
  renderThreads();renderMessages();
  if(KF.session){corpusStrip();loadUsage()}else{gate({status:401,message:''},'asker')}}
 window.KF_ON_SESSION=s=>{gate(null);if(s){corpusStrip();loadUsage();samples();$('#ask-status').textContent='ready for '+s.subject}

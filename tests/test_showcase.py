@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import unittest
@@ -79,8 +80,14 @@ class TestShowcaseBuilder(unittest.TestCase):
             self.assertIn('src="../engine.js"', html)
             self.assertIn("../assets/brand/", html)  # relative assets
             self.assertNotIn("/static/assets/", html)  # rewritten away
+            # Self-contained: nothing is LOADED from the network. The one outbound
+            # navigation the product needs — the Workspace "Get full answer" button
+            # opening an `ask` issue on GitHub (T45) — is an anchor built at click
+            # time, never a fetched resource.
+            self.assertEqual(verify_showcase._EXTERNAL.findall(html), [])
             self.assertNotIn("http://", html)
-            self.assertNotIn("https://", html)
+            for url in re.findall(r"https://[\w./-]+", html):
+                self.assertTrue(url.startswith("https://github.com/"), url)
 
     def test_engine_has_no_external_urls(self):
         eng = self._read("engine.js")

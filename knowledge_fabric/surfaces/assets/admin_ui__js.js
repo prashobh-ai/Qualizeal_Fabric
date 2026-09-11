@@ -130,9 +130,27 @@ async function loadModels(){try{const days=$('#models-days')?$('#models-days').v
  $('#models-prices').innerHTML=Object.keys(c.prices||{}).map(m=>{const v=c.prices[m];return '<span class="pill" title="cache read '+esc(v.cache_read)+' · cache write '+esc(v.cache_write)+'">'+esc(m)+' · in '+esc(v.input)+' · out '+esc(v.output)+'</span>'}).join(' ')||'<span class="muted small">—</span>';
  $('#models-calls tbody').innerHTML=(c.last_calls||[]).map(r=>fmtRow([esc((r.ts||'').replace('T',' ').slice(0,19)),'<span class="pill">'+esc(r.purpose)+'</span>',esc(r.model),esc(r.workflow),esc(r.input_tokens),esc(r.output_tokens),esc(r.cache_read_input_tokens),esc(r.latency_ms)+'ms',usd(r.cost_usd),'<span class="mono small">'+esc(String(r.request_id||'').slice(0,18))+'</span>'])).join('')||'<tr><td colspan="10" class="empty">no API calls recorded</td></tr>'}catch(e){}}
 
+// ---------------------------------------------------------------- sources (T47)
+// GitHub / Jira / Confluence cards from GET /admin/sources: last run + next run
+// (refresh scheduler), counts (facts.json), the live rate limit when known.
+const SRC_LABEL={github:'GitHub',jira:'Jira',confluence:'Confluence'};
+const SRC_COUNTS={github:['repositories','commits','prs','issues'],jira:['projects','issues'],confluence:['spaces','pages']};
+function srcStatus(s){const st=String(s.last_status||'');if(st.startsWith('error'))return '<span class="pill bad" title="'+esc(st)+'">error</span>';
+ if(st.startsWith('skipped'))return '<span class="pill warn">'+esc(st)+'</span>';
+ if(s.last_run)return '<span class="pill good">'+esc(st||'ok')+'</span>';return '<span class="pill">never run</span>'}
+function srcCard(name,s){s=s||{};const counts=s.counts||{};
+ return '<div class="conn-card'+(s.enabled?'':' off')+'" data-source="'+esc(name)+'"><h4>'+esc(SRC_LABEL[name]||name)+'<span style="margin-left:auto">'+srcStatus(s)+'</span></h4>'+
+  '<div class="hl"><span>last run</span><span class="mono">'+(s.last_run?esc(ago(s.last_run)):'—')+'</span>'+
+  '<span>next run</span><span class="mono">'+(s.next_run?esc(when(s.next_run)):'not scheduled')+'</span>'+
+  (SRC_COUNTS[name]||Object.keys(counts)).map(k=>'<span>'+esc(k)+'</span><span class="mono">'+num(counts[k])+'</span>').join('')+
+  (name==='github'?'<span>rate limit remaining</span><span class="mono">'+(s.rate_limit_remaining==null?'unknown — live connector not attached':num(s.rate_limit_remaining))+'</span>':'')+
+  '<span>facts as of</span><span class="mono">'+esc(s.as_of||'—')+'</span></div></div>'}
+async function loadSources(){try{const d=await api('/admin/sources');$('#sources-cards').innerHTML=['github','jira','confluence'].map(n=>srcCard(n,d[n])).join('')}
+ catch(e){$('#sources-cards').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
+
 // ---------------------------------------------------------------- boot
 async function loadAll(){try{await loadConnectors()}catch(e){return}
- await Promise.all([loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels()]);
+ await Promise.all([loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources()]);
  if(await loadRuns())schedulePoll()}
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{$('#connectors').innerHTML='';gate({status:401,message:''},'admin')}};
 KF.initBar({preferRole:'admin'});

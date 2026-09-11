@@ -104,6 +104,11 @@ jobs:
   mcp:
     needs: full
     runs-on: ubuntu-latest
+    env:
+      # T35: keyless is explicit. The inspector's tools/list conformance call
+      # never invokes a model; without this the server refuses to start
+      # (KF_MODEL_MODE defaults to anthropic and fails loudly with no key).
+      KF_MODEL_MODE: extractive
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -120,6 +125,7 @@ jobs:
       - name: Corpus policy
         run: uv run pytest -q tests/unit/test_corpus_policy.py
       - name: MCP conformance (inspector CLI)
+        # Pinned: the v2 inspector CLI changed its argument syntax.
         # The MCP server package lands at T20 (knowledge_fabric/mcp/). Once it
         # exists, run the integration test and the inspector's headless CLI
         # tools/list conformance call against it. Until then the server has no
@@ -128,7 +134,7 @@ jobs:
         run: |
           if [ -d knowledge_fabric/mcp ]; then
             uv run pytest -q tests/integration/test_mcp.py
-            npx --yes @modelcontextprotocol/inspector --cli --method tools/list \
+            npx --yes @modelcontextprotocol/inspector@0.15.0 --cli --method tools/list \
               -- uv run python -m knowledge_fabric.mcp
           else
             node --version

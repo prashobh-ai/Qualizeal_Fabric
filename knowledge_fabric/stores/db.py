@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY, tenant TEXT NOT NULL, source TEXT, source_version TEXT,
     content_hash TEXT, type TEXT, language TEXT, title TEXT, uri TEXT,
     ingested_at INTEGER, status TEXT, current_version INTEGER, acl TEXT,
-    authoritative INTEGER DEFAULT 0
+    authoritative INTEGER DEFAULT 0, meta TEXT
 );
 CREATE TABLE IF NOT EXISTS passages (
     id TEXT PRIMARY KEY, tenant TEXT NOT NULL, document_id TEXT NOT NULL,
@@ -185,9 +185,19 @@ class Database:
             self._local.conn = c
         return c
 
+    # Columns added after a table first shipped: (table, column, DDL type). A
+    # database created by an earlier release gets them via ALTER TABLE so an
+    # existing ``KF_DB`` keeps working without a rebuild.
+    _MIGRATIONS = (("documents", "meta", "TEXT"),)
+
     def _init_schema(self) -> None:
         with self._lock:
-            self.conn().executescript(SCHEMA)
+            conn = self.conn()
+            conn.executescript(SCHEMA)
+            for table, column, ddl in self._MIGRATIONS:
+                cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+                if column not in cols:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         with self._lock:

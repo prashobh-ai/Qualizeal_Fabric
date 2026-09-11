@@ -40,11 +40,12 @@ class DocumentRepo:
         _guard(doc.tenant)
         self.db.execute(
             """INSERT INTO documents(id,tenant,source,source_version,content_hash,type,
-               language,title,uri,ingested_at,status,current_version,acl)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+               language,title,uri,ingested_at,status,current_version,acl,meta)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO UPDATE SET source_version=excluded.source_version,
                content_hash=excluded.content_hash, status=excluded.status,
-               current_version=excluded.current_version, acl=excluded.acl""",
+               current_version=excluded.current_version, acl=excluded.acl,
+               meta=excluded.meta""",
             (
                 doc.id,
                 doc.tenant,
@@ -59,8 +60,21 @@ class DocumentRepo:
                 doc.status,
                 doc.current_version,
                 _acl_json(doc.acl),
+                json.dumps(doc.meta or {}, sort_keys=True, default=str),
             ),
         )
+
+    def meta_of(self, tenant: str, doc_id: str) -> dict:
+        """The persisted intake metadata (T41): ``source_kind``, ``citation_url``,
+        ``acl``, ``arrived_at`` and connector-specific keys. ``{}`` when absent."""
+        _guard(tenant)
+        r = self.db.one("SELECT meta FROM documents WHERE tenant=? AND id=?", (tenant, doc_id))
+        if not r or not r["meta"]:
+            return {}
+        try:
+            return json.loads(r["meta"])
+        except ValueError:
+            return {}
 
     def by_hash(self, tenant: str, content_hash: str) -> dict | None:
         _guard(tenant)

@@ -1,0 +1,65 @@
+# T46 — scheduled ingest into the fabric-data branch.
+#
+# Every six hours (and on demand): check out main and the fabric-data branch,
+# prove the provider key, run every source + analysis + the coverage bake
+# (T44), commit and push fabric-data with [skip ci], then fire the
+# `fabric-updated` repository_dispatch so the showcase rebuilds from the new
+# data. Steps whose module is not present are reported as skipped, never
+# silently passed.
+name: ingest
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Bake at most N changed documents (empty = all)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    env:
+      KF_MODEL_MODE: anthropic
+      KF_FABRIC_ROOT: ${{ github.workspace }}/fabric-data
+      KF_DATA_ROOT: ${{ github.workspace }}/fabric-data/data
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check out fabric-data (clone, or create the orphan branch)
+        run: python -m knowledge_fabric.fabric_data_git checkout --root fabric-data
+
+      - name: Provider check — pin the models and prove the key (T35)
+        run: python scripts/doctor.py --require anthropic
+
+      - name: Ingest every source, analyse, bake (T44/T46)
+        run: >
+          python scripts/ingest.py --website --github --jira --confluence --files --analysis --bake
+          ${{ github.event.inputs.limit && format('--limit {0}', github.event.inputs.limit) || '' }}
+
+      - name: Commit and push fabric-data
+        run: >
+          python -m knowledge_fabric.fabric_data_git push --root fabric-data
+          -m "ingest: run ${{ github.run_id }}"
+
+      - name: Rebuild the showcase from the new data (repository_dispatch fabric-updated)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh api repos/${{ github.repository }}/dispatches
+          -f event_type=fabric-updated
+          -F 'client_payload[run_id]=${{ github.run_id }}'

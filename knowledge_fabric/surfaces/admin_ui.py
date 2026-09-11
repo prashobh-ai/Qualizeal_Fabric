@@ -4,6 +4,8 @@ The admin owns the *plumbing*: connectors and their permissions, continuous
 refresh, bulk data operations, budgets, users, audit and cloud readiness.
 Every panel is wired to an admin endpoint of ``surfaces/http_api.py``:
 
+* source cards           ``GET /admin/sources`` (T47: GitHub / Jira / Confluence —
+                         last run, next run, counts from facts.json, rate limit);
 * connector cards        ``GET/POST /admin/connectors`` (enable/disable toggle,
                          allow-list, refresh interval, "Sync now" → ``POST /admin/sync``,
                          health badge with freshness / last status / errors / SLA breach);
@@ -165,8 +167,20 @@ _MODELS = card(
     "models-panel",
 )
 
+# T47 — one card per analysed source (GitHub / Jira / Confluence): last run and
+# next run from the refresh scheduler, counts from facts.json, the live GitHub
+# rate limit when the live connector exposes it. Served by GET /admin/sources.
+_SOURCES = card(
+    "Sources — GitHub, Jira, Confluence",
+    '<div class="conn" id="sources-cards"><div class="empty">Sign in as an admin to load the '
+    "source cards.</div></div>",
+    "sources-panel",
+    right='<span class="muted small">last run · next run · counts · rate limit</span>',
+)
+
 _BODY = (
     _CONNECTORS
+    + f'<div style="margin-top:14px">{_SOURCES}</div>'
     + f'<div style="margin-top:14px">{_MODELS}</div>'
     + f'<div style="margin-top:14px">{_RUNS}</div>'
     + f'<div class="grid two" style="margin-top:14px">{_UPLOAD}{_DELETE}</div>'

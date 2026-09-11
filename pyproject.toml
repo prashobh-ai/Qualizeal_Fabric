@@ -37,6 +37,16 @@ engines = [
   "tiktoken>=0.7",                      # MIT
 ]
 
+# Documents of every kind (T41): spreadsheets, OCR, SVG rasterising. Docling
+# (Word/PDF/PowerPoint) lives in `engines`. All imports are guarded.
+documents = [
+  "openpyxl>=3.1",                      # MIT
+  "pytesseract>=0.3",                   # Apache-2.0 (needs the tesseract binary)
+  "Pillow>=10.0",                       # MIT-CMU (HPND)
+  "svglib>=1.5",                        # BSD-3
+  "reportlab>=4.0",                     # BSD-3
+]
+
 # Postgres + pgvector engines behind the same repository API. pg8000 is BSD-3.
 db = [
   "pg8000>=1.31",                       # BSD-3
