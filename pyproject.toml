@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 # Developer + CI extras.
 dev = [
+  "networkx>=3.0",                      # BSD-3 (graph insights; tested in every job)
   "ruff>=0.6",                          # MIT
   "pytest>=8.0",                        # MIT
   "pytest-asyncio>=0.24",               # Apache-2.0
