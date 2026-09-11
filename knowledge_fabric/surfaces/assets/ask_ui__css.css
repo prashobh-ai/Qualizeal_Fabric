@@ -149,3 +149,7 @@ main{max-width:none;padding:0;display:flex;flex-direction:column}
 .samples{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;justify-content:center}
 .chip{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:4px 11px;font-size:12px;cursor:pointer;color:var(--fg)}
 .chip:hover{border-color:var(--accent)}
+
+/* T45 — the ask queue bar + queued list in My usage */
+.queue-bar{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.queue-list{margin:6px 0 0;padding-left:0;list-style:none;font-size:12px}.queue-list li{margin:3px 0}

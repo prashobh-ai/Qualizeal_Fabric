@@ -1,0 +1,15 @@
+{"id": "agent.01", "question": "compare the commit counts of acme/knowledge-fabric and acme/etl-jobs and say which is more active", "expect_tools": ["query_facts", "calculate"], "expect_cited": true}
+{"id": "agent.02", "question": "how many critical defects are in the Defects sheet and who owns most of them", "expect_tools": ["run_table_query"], "expect_cited": true}
+{"id": "agent.03", "question": "which retrieval techniques does knowledge-fabric use and where is the retriever implemented", "expect_tools": ["query_facts", "search_code"], "expect_cited": true}
+{"id": "agent.04", "question": "what does the architecture diagram show and which repo implements it", "expect_tools": ["search_passages", "query_facts"], "expect_cited": true}
+{"id": "agent.05", "question": "how many open bugs in QZ and what is the average story points of open defects", "expect_tools": ["query_facts", "run_table_query"], "expect_cited": true}
+{"id": "agent.06", "question": "is knowledge-fabric production ready and what would make it more so", "expect_tools": ["query_facts", "search_passages"], "expect_cited": true}
+{"id": "agent.07", "question": "find the retry helper and explain how it handles failures", "expect_tools": ["search_code", "get_symbol"], "expect_cited": true}
+{"id": "agent.08", "question": "what licences do knowledge-fabric dependencies carry and are any copyleft", "expect_tools": ["query_facts"], "expect_cited": true}
+{"id": "agent.09", "question": "who worked on etl-jobs and what did they change most recently", "expect_tools": ["query_facts", "search_passages"], "expect_cited": true}
+{"id": "agent.10", "question": "what is the total story points across all defects and how does it split by component", "expect_tools": ["run_table_query", "calculate"], "expect_cited": true}
+{"id": "agent.11", "question": "which repositories implement caching and which cache components are reusable", "expect_tools": ["query_facts", "search_code"], "expect_cited": true}
+{"id": "agent.12", "question": "summarise the single sign-on standard and point to the code that implements it", "expect_tools": ["search_passages", "search_code"], "expect_cited": true}
+{"id": "agent.13", "question": "how many deployments did knowledge-fabric have and which environments", "expect_tools": ["query_facts"], "expect_cited": true}
+{"id": "agent.14", "question": "what does the login screenshot show and which document is it from", "expect_tools": ["search_passages"], "expect_cited": true}
+{"id": "agent.15", "question": "how many defects are open per assignee and who has the most", "expect_tools": ["run_table_query"], "expect_cited": true}

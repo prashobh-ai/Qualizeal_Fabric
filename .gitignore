@@ -7,3 +7,9 @@ data/
 .env
 .DS_Store
 dist/
+
+# T46: the fabric-data checkout lives on its own branch, never in main
+fabric-data/
+
+# background agent worktrees (harness working copies, never project files)
+.claude/worktrees/

@@ -17,6 +17,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # T46: the ingest workflow fires this after it pushes fabric-data, so the
+  # showcase rebuilds from the new facts, analysis and baked answers.
+  repository_dispatch:
+    types: [fabric-updated]
 
 permissions:
   pages: write
@@ -30,20 +34,62 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # T46: the fabric-data checkout is the data root for the doctor (provider
+      # status), the ledger (api_calls/) and the build (answers/, facts).
+      KF_FABRIC_ROOT: ${{ github.workspace }}/fabric-data
+      KF_DATA_ROOT: ${{ github.workspace }}/fabric-data/data
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Build the interactive showcase (seed + bake + emit surfaces)
+      - name: Check out fabric-data into fabric-data/ (read-only here)
+        run: python -m knowledge_fabric.fabric_data_git checkout --root fabric-data
+
+      - name: Provider check — pin the models and prove the key (T35)
+        # Exits 2..6 with the exact cause (empty secret, key rejected, model
+        # outside the allowed set, Sonnet 4.6 unavailable, ping failed) and
+        # writes data/provider_status.json + the provider line to the summary.
+        #
+        # NON-FATAL here on purpose: the public showcase is a static, model-free
+        # artifact — every answer is pre-baked into snapshot.json and the browser
+        # engine never calls a model — so a rejected/expired key must NOT take the
+        # Pages demo offline. The model-dependent workflows (ingest.yml,
+        # quality.yml) keep the HARD gate; this one records the result and
+        # continues. When the key is valid the provider line + ledger still prove
+        # it; when it is not, the next step bakes from fabric-data extractively.
+        id: provider
+        continue-on-error: true
         env:
-          # Answers are baked at build time. Add an ANTHROPIC_API_KEY repo secret
-          # to bake fluent, grounded, cited answers with the real model — the
-          # static site then serves them at zero runtime cost. Without the secret
-          # the model client falls back to the deterministic extractive path, so
-          # the build stays green either way.
-          KF_MODEL_MODE: anthropic
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python scripts/doctor.py --require anthropic
+
+      - name: Choose the build model mode from the provider check
+        id: mode
+        run: |
+          if [ "${{ steps.provider.outcome }}" = "success" ]; then
+            echo "kf_model_mode=anthropic" >> "$GITHUB_OUTPUT"
+            echo "Provider verified — baking the showcase with the real model." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "kf_model_mode=extractive" >> "$GITHUB_OUTPUT"
+            {
+              echo "::warning::Provider check failed (see the 'Provider check' step log — e.g. 401 key rejected). Building the showcase from the already-baked fabric-data with the extractive engine so the demo stays live. Rotate ANTHROPIC_API_KEY in Actions → Secrets to bake with the real model and prove consumption."
+              echo "⚠️ Provider check failed — showcase built extractively from baked data so the demo stays live. Rotate \`ANTHROPIC_API_KEY\` in Actions → Secrets to restore real-model baking."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Build the interactive showcase (seed + bake + emit surfaces)
+        # Model mode is chosen by the provider check above: the real model when
+        # the key is valid (answers baked live, ledger proves the call count),
+        # else the extractive engine over the already-baked fabric-data so the
+        # static demo always ships. fabric-data/answers/*.json (T44 bake + T45
+        # queue) ship under dist/showcase/answers/ for the baked-answer pass-through.
+        env:
+          KF_MODEL_MODE: ${{ steps.mode.outputs.kf_model_mode }}
+          KF_LEDGER_PURPOSE: answer_bake
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python scripts/build_showcase.py --out dist/showcase
 

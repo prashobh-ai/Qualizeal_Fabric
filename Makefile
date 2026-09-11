@@ -3,12 +3,17 @@
 PY ?= python3
 KF_DB ?= ./data/kf.db
 PORT ?= 8080
+# T35: keyless is EXPLICIT. Local targets run the extractive floor unless you
+# export KF_MODEL_MODE=anthropic (with ANTHROPIC_API_KEY); the app itself never
+# falls back to a mock when a provider is configured but unreachable.
+KF_MODEL_MODE ?= extractive
 export KF_DB
+export KF_MODEL_MODE
 export PYTHONPATH := .
 
 UV ?= uv
 
-.PHONY: help install up down health test lint fmt notices corpus showcase demo demo-answering seed ask serve mcp demo-reset licences quality parity load ci compose-up compose-down
+.PHONY: help install up down health test lint fmt notices corpus showcase demo demo-answering demo-production quality-sets ingest bake analyse seed ask serve mcp demo-reset licences quality parity load ci compose-up compose-down
 
 PROFILE ?= lite
 export KF_PROFILE := $(PROFILE)
@@ -46,8 +51,13 @@ corpus: ## Ingest the QualiZeal corpus into the product fabric (see load-corpus 
 showcase: ## Build the self-contained static showcase snapshot for GitHub Pages
 	@$(UV) run python scripts/build_showcase.py
 
-demo: ## Run the narrated end-to-end execution demo (platform fundamentals)
+demo: ## Run every demo: fundamentals, answering intelligence, and production (T50)
 	@$(PY) scripts/demo.py
+	@$(PY) scripts/demo_answering.py
+	@$(PY) scripts/demo_production.py --fixture
+
+demo-production: ## Production-on-GitHub demo (T50): provider, consumption, facts, tables, images, queue
+	@$(PY) scripts/demo_production.py $(if $(FIXTURE),--fixture,)
 
 demo-answering: ## Run the answering-intelligence demo (T24–T33 capstone; model-free)
 	@$(PY) scripts/demo_answering.py
@@ -93,6 +103,18 @@ parity: ## Static parity (T32): the shipped engine.js answers like the server (n
 
 load: ## Load test (T33): the answer path under concurrent load, gated on SLOs
 	@$(PY) scripts/load_test.py
+
+ingest: ## Scheduled ingest (T46): make ingest STEPS="--all" (default) — sources → analysis → bake into KF_FABRIC_ROOT
+	@$(PY) scripts/ingest.py $(or $(STEPS),--all) $(if $(LIMIT),--limit $(LIMIT),)
+
+bake: ## Coverage bake (T44): pre-answer what the corpus invites into answers/<hash>.json
+	@$(PY) scripts/bake.py $(if $(LIMIT),--limit $(LIMIT),) $(if $(FORCE),--force,)
+
+analyse: ## Code understanding (T38–T40) over the cloned repositories in facts.json
+	@$(PY) scripts/ingest.py --analysis
+
+quality-sets: ## Nightly quality sets (T49): make quality-sets SETS="facts tables" MODEL=extractive|real
+	@$(PY) eval/quality.py --sets $(or $(SETS),general code followup role facts tables images gap jira) --model $(or $(MODEL),extractive)
 
 ci: test licences quality ## What CI runs
 	@$(PY) -c "from knowledge_fabric.tenants import demo; assert demo.validate_identifiers()==[]; print('identifier-safety: PASS')"

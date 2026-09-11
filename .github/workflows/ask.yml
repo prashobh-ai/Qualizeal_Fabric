@@ -1,0 +1,64 @@
+# T45 — the ask queue.
+#
+# A reader whose question the static Workspace could only answer extractively
+# clicks "Get full answer": that opens an `ask` issue (the ask.yml issue form).
+# This workflow answers it with the agent under the real model, bakes the
+# answer to fabric-data/answers/<hash>.json (the page polls for it), comments
+# the answer with citations on the issue, labels it `answered` and closes it.
+# Admins can also dispatch a question by hand. Failures are commented on the
+# issue and fail the run — never a faked answer.
+name: ask
+
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      question:
+        description: "Question to answer (admins)"
+        required: true
+
+permissions:
+  issues: write
+  contents: write
+
+concurrency:
+  group: ask
+  cancel-in-progress: false
+
+jobs:
+  answer:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.labels.*.name, 'ask')
+    runs-on: ubuntu-latest
+    env:
+      KF_MODEL_MODE: anthropic
+      KF_LEDGER_PURPOSE: ask_queue
+      KF_FABRIC_ROOT: ${{ github.workspace }}/fabric-data
+      KF_DATA_ROOT: ${{ github.workspace }}/fabric-data/data
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check out fabric-data (clone, or create the orphan branch)
+        run: python -m knowledge_fabric.fabric_data_git checkout --root fabric-data
+
+      - name: Provider check — pin the models and prove the key (T35)
+        run: python scripts/doctor.py --require anthropic
+
+      - name: Answer the queued question
+        run: |
+          if [ "${{ github.event_name }}" = "issues" ]; then
+            python scripts/answer_issue.py --issue ${{ github.event.issue.number }}
+          else
+            python scripts/answer_issue.py --question "${{ github.event.inputs.question }}"
+          fi
+
+      - name: Commit and push fabric-data
+        if: always()
+        run: >
+          python -m knowledge_fabric.fabric_data_git push --root fabric-data
+          -m "ask: run ${{ github.run_id }}"

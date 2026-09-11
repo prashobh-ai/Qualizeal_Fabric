@@ -9,15 +9,23 @@ config differs, never the application code.
 
 from __future__ import annotations
 
+from .confluence import ConfluenceConnector
 from .files import FilesConnector
 from .github import GitHubConnector
+from .github_live import GitHubLiveConnector
 from .jira import JiraConnector
+from .jira_live import JiraLiveConnector
+from .website import WebsiteConnector
 
 REGISTRY = {
     "files": FilesConnector,
-    "github": GitHubConnector,
-    "jira": JiraConnector,
-    # additive: "confluence": ConfluenceConnector, "sharepoint": ..., "drive": ...
+    "github": GitHubConnector,  # replay (in-memory records) — offline demos and tests
+    "github_live": GitHubLiveConnector,  # T37: GitHub REST + GraphQL (facts, activity, clone)
+    "website": WebsiteConnector,  # bounded same-host crawl of the public site
+    "jira": JiraConnector,  # replay (in-memory records) — offline demos and tests
+    "jira_live": JiraLiveConnector,  # T41: Jira Cloud REST (JQL window, comments, facts)
+    "confluence": ConfluenceConnector,  # T41: Confluence REST v2 (pages, attachments, facts)
+    # additive: "sharepoint": ..., "drive": ...
 }
 
 

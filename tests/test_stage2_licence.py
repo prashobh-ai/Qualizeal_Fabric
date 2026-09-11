@@ -148,9 +148,27 @@ class GateTests(unittest.TestCase):
         rep = gate.run(str(ROOT), str(MANIFEST))
         self.assertTrue(rep["ok"], rep["violations"])
         # the only third-party imports in shipped code are guarded optional deps:
-        # the cloud drivers (boto3, pg8000), OIDC verification (jwt), and the MCP
-        # server (mcp, T31) — each imported inside a function, never at module load.
-        self.assertEqual(rep["summary"]["third_party_imports"], ["boto3", "jwt", "mcp", "pg8000"])
+        # the cloud drivers (boto3, pg8000), OIDC verification (jwt), the MCP
+        # server (mcp, T31) and the T41 document engines (docling, openpyxl,
+        # pytesseract, PIL, svglib, reportlab) plus pydantic (declared runtime,
+        # used for the image-description schema) — each imported inside a
+        # function, never at module load.
+        self.assertEqual(
+            rep["summary"]["third_party_imports"],
+            [
+                "PIL",
+                "boto3",
+                "docling",
+                "jwt",
+                "mcp",
+                "openpyxl",
+                "pg8000",
+                "pydantic",
+                "pytesseract",
+                "reportlab",
+                "svglib",
+            ],
+        )
         self.assertIn("RESULT: PASS", gate.render(rep))
 
     def test_agpl_runtime_dependency_fails(self):

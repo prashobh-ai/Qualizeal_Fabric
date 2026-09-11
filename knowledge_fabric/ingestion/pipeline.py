@@ -14,6 +14,7 @@ import hashlib
 import re
 from itertools import combinations
 
+from ..adapters.converter import source_kind_for
 from ..contracts.types import (
     Document,
     GraphEdge,
@@ -41,6 +42,23 @@ def _abstract(text: str) -> str:
 def _overview(text: str) -> str:
     s = _sentences(text)
     return " ".join(s[:2]) if s else text[:280]
+
+
+SOURCE_KINDS = ("document", "table", "image", "jira", "confluence", "code", "analysis")
+
+
+def stamp_meta(raw: RawItem) -> dict:
+    """T41 — every document carries ``source_kind``, ``citation_url``, ``acl`` and
+    ``arrived_at`` in its persisted meta. Connectors set them explicitly; the
+    intake doors get deterministic defaults (kind from mime/uri, citation =
+    the uri, arrival = now). Transient keys (``tombstones``) are not stored."""
+    m = raw.meta
+    m.setdefault("acl", ["public"])
+    m.setdefault("arrived_at", now_ms())
+    kind = m.get("source_kind") or source_kind_for(raw.mime, raw.uri)
+    m["source_kind"] = kind if kind in SOURCE_KINDS else "document"
+    m.setdefault("citation_url", raw.uri)
+    return {k: v for k, v in m.items() if k != "tombstones"}
 
 
 class IngestionPipeline:
@@ -94,10 +112,15 @@ class IngestionPipeline:
                 self.p.objects.put(
                     tenant, content_hash, raw.bytes_, {"mime": raw.mime, "uri": raw.uri}
                 )
+                # The document id is fixed BEFORE conversion so converters that
+                # persist side artefacts (tables/<doc>/<sheet>.sqlite,
+                # images/<doc>/<name>.json) file them under the real id.
+                doc_id = existing["id"] if is_update else new_id("doc_")
+                raw.meta["doc_id"] = doc_id
                 converted = self.p.converter.convert(raw)
 
-            doc_id = existing["id"] if is_update else new_id("doc_")
-            acl = raw.meta.get("acl", ["public"])
+            meta = stamp_meta(raw)
+            acl = meta["acl"]
             doc = Document(
                 id=doc_id,
                 tenant=tenant,
@@ -112,6 +135,7 @@ class IngestionPipeline:
                 status="active",
                 current_version=version,
                 acl=acl,
+                meta=meta,
             )
 
             if is_update:  # incremental: supersede prior passages (lineage kept)
@@ -125,6 +149,9 @@ class IngestionPipeline:
                 "ingest.chunk", {"tenant": tenant, "trace_id": trace_id, "stage": "chunk"}
             ):
                 for region in converted.regions:
+                    # every passage resolves to a place AND a URL (I2 + T41)
+                    region.coordinate.locator.setdefault("citation_url", meta["citation_url"])
+                    region.coordinate.locator.setdefault("source_kind", meta["source_kind"])
                     prov = Provenance(
                         content_hash, raw.source, raw.source_version, region.coordinate
                     )

@@ -1,0 +1,29 @@
+# T45 — the ask queue's intake form. The Workspace's "Get full answer" opens
+# this form pre-filled; the `ask` workflow answers the issue with the agent.
+name: Ask the Knowledge Fabric
+description: Queue a question for the full (agent + model) answer. Answered by the ask workflow, commented here and baked into the Workspace.
+title: "[ask] "
+labels: ["ask"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The static Workspace answered extractively; this queues the question for the full agent
+        answer. The answer is posted as a comment (with citations) and the Workspace picks it up
+        within a few minutes.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: One self-contained question (name the product, repository or document).
+      placeholder: e.g. which capabilities does QMentisAI provide for API testing?
+    validations:
+      required: true
+  - type: input
+    id: subject
+    attributes:
+      label: Your fabric user id (optional)
+      description: So the answer shows under Home → My usage for you.
+      placeholder: you@qualizeal.com
+    validations:
+      required: false

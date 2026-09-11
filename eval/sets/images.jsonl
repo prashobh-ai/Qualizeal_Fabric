@@ -1,0 +1,10 @@
+{"id": "images.01", "question": "what does the architecture diagram show", "doc_id": "arch-deck.pptx", "name": "slide3.png", "expect_substring": "ingestion"}
+{"id": "images.02", "question": "which components are in the architecture diagram", "doc_id": "arch-deck.pptx", "name": "slide3.png", "expect_substring": "retriever"}
+{"id": "images.03", "question": "what kind of image is slide3", "doc_id": "arch-deck.pptx", "name": "slide3.png", "expect_substring": "diagram"}
+{"id": "images.04", "question": "what is the trend in the defects chart", "doc_id": "qa-report.docx", "name": "chart1.png", "expect_substring": "decreas"}
+{"id": "images.05", "question": "what chart type is chart1", "doc_id": "qa-report.docx", "name": "chart1.png", "expect_substring": "line"}
+{"id": "images.06", "question": "what were the readings in the defects chart", "doc_id": "qa-report.docx", "name": "chart1.png", "expect_substring": "42"}
+{"id": "images.07", "question": "what text is on the login screenshot", "doc_id": "onboarding.pdf", "name": "login.png", "expect_substring": "Sign in"}
+{"id": "images.08", "question": "what kind of image is the login screenshot", "doc_id": "onboarding.pdf", "name": "login.png", "expect_substring": "screenshot"}
+{"id": "images.09", "question": "what does the release timeline image show", "doc_id": "release-plan.docx", "name": "timeline.png", "expect_substring": "Q3"}
+{"id": "images.10", "question": "which entities appear in the timeline", "doc_id": "release-plan.docx", "name": "timeline.png", "expect_substring": "Zephyr"}

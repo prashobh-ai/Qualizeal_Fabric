@@ -4,6 +4,8 @@ The admin owns the *plumbing*: connectors and their permissions, continuous
 refresh, bulk data operations, budgets, users, audit and cloud readiness.
 Every panel is wired to an admin endpoint of ``surfaces/http_api.py``:
 
+* source cards           ``GET /admin/sources`` (T47: GitHub / Jira / Confluence —
+                         last run, next run, counts from facts.json, rate limit);
 * connector cards        ``GET/POST /admin/connectors`` (enable/disable toggle,
                          allow-list, refresh interval, "Sync now" → ``POST /admin/sync``,
                          health badge with freshness / last status / errors / SLA breach);
@@ -133,8 +135,53 @@ _AWS = card(
     "aws-panel",
 )
 
+_MODELS = card(
+    "Models — provider &amp; API consumption",
+    '<div id="provider-card" class="row"><span class="muted small">Run the provider check '
+    "(doctor --require anthropic) to pin the models and prove the key.</span></div>"
+    '<div class="row" style="margin:8px 0"><label class="muted small">Window</label>'
+    '<select id="models-days"><option value="1">24h</option><option value="7" selected>7 days'
+    '</option><option value="30">30 days</option></select>'
+    '<button class="btn sm" id="models-refresh">Refresh</button></div>'
+    '<div id="models-totals" class="row"></div>'
+    '<div class="grid two" style="margin-top:8px">'
+    '<div><div class="muted small">By purpose</div><div class="tablewrap">'
+    '<table id="models-purpose">'
+    "<thead><tr><th>Purpose</th><th>Calls</th><th>In</th><th>Out</th><th>Cache read</th>"
+    "<th>Cost</th></tr></thead><tbody></tbody></table></div></div>"
+    '<div><div class="muted small">By model</div><div class="tablewrap"><table id="models-model"'
+    "><thead><tr><th>Model</th><th>Calls</th><th>In</th><th>Out</th><th>Cache read</th>"
+    "<th>Cost</th></tr></thead><tbody></tbody></table></div></div></div>"
+    '<div class="muted small" style="margin-top:8px">By day</div>'
+    '<div class="tablewrap"><table id="models-day"><thead><tr><th>Day</th><th>Calls</th>'
+    "<th>In</th><th>Out</th><th>Cache read</th><th>Cache write</th><th>Cost</th></tr></thead>"
+    "<tbody></tbody></table></div>"
+    '<div class="muted small" style="margin-top:8px">Prices (USD per million tokens, '
+    'maintained by hand)</div><div id="models-prices" class="row"></div>'
+    '<div class="muted small" style="margin-top:8px">Last 50 calls</div>'
+    '<div class="tablewrap"><table id="models-calls"><thead><tr><th>When</th><th>Purpose</th>'
+    "<th>Model</th><th>Workflow</th><th>In</th><th>Out</th><th>Cache read</th><th>Latency</th>"
+    "<th>Cost</th><th>Request</th></tr></thead>"
+    '<tbody><tr><td colspan="10" class="empty">no API calls recorded</td></tr></tbody>'
+    "</table></div>",
+    "models-panel",
+)
+
+# T47 — one card per analysed source (GitHub / Jira / Confluence): last run and
+# next run from the refresh scheduler, counts from facts.json, the live GitHub
+# rate limit when the live connector exposes it. Served by GET /admin/sources.
+_SOURCES = card(
+    "Sources — GitHub, Jira, Confluence",
+    '<div class="conn" id="sources-cards"><div class="empty">Sign in as an admin to load the '
+    "source cards.</div></div>",
+    "sources-panel",
+    right='<span class="muted small">last run · next run · counts · rate limit</span>',
+)
+
 _BODY = (
     _CONNECTORS
+    + f'<div style="margin-top:14px">{_SOURCES}</div>'
+    + f'<div style="margin-top:14px">{_MODELS}</div>'
     + f'<div style="margin-top:14px">{_RUNS}</div>'
     + f'<div class="grid two" style="margin-top:14px">{_UPLOAD}{_DELETE}</div>'
     + f'<div class="grid" '

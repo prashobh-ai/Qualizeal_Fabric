@@ -51,7 +51,14 @@ __all__ = [
 ]
 
 #: connector-specific config key that carries its allow-list
-ALLOW_KEYS: dict[str, str] = {"github": "repos", "jira": "projects", "files": "allow_ext"}
+ALLOW_KEYS: dict[str, str] = {
+    "github": "repos",
+    "github_live": "repos",
+    "jira": "projects",
+    "jira_live": "projects",
+    "confluence": "spaces",
+    "files": "allow_ext",
+}
 #: key used for connectors without a known allow-list key
 DEFAULT_ALLOW_KEY = "allow"
 

@@ -1,5 +1,7 @@
-"""F0.3 — Anthropic-first provider selection and doctor model-id check.
+"""F0.3 → T35 — Anthropic-first provider selection and doctor model-id check.
 
+T35 replaced every silent fallback: a configured-but-unreachable provider
+raises ``ProviderUnavailable``; keyless must be explicit (``extractive``/``off``).
 The Anthropic API is never actually called: `urllib.request.urlopen` is
 patched so tests run without a network connection (or a real key).
 """
@@ -8,15 +10,19 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import unittest
 from unittest import mock
 
 from knowledge_fabric.adapters import model
 
+# The ledger (T36) appends under the data root; keep tests out of the repo's data/.
+os.environ.setdefault("KF_DATA_ROOT", tempfile.mkdtemp(prefix="kf-ledger-"))
+
 
 class TestBuildModelClient(unittest.TestCase):
-    """`KF_MODEL_MODE` selects the provider; anthropic wins by default when
-    its key is present, mock otherwise (F0.3)."""
+    """`KF_MODEL_MODE` selects the provider; anthropic is the default and
+    REQUIRES its key — there is no silent mock fallback (T35)."""
 
     def setUp(self):
         # Snapshot and clear the four env vars this test touches.
@@ -40,9 +46,10 @@ class TestBuildModelClient(unittest.TestCase):
             else:
                 os.environ[k] = v
 
-    def test_default_is_mock_when_no_key(self):
-        client = model.build_model_client()
-        self.assertIsInstance(client, model.MockModelClient)
+    def test_default_without_key_is_loud(self):
+        with self.assertRaises(model.ProviderUnavailable) as cm:
+            model.build_model_client()
+        self.assertIn("ANTHROPIC_API_KEY", str(cm.exception))
 
     def test_default_is_anthropic_when_key_set(self):
         os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
@@ -50,13 +57,25 @@ class TestBuildModelClient(unittest.TestCase):
         self.assertIsInstance(client, model.AnthropicModelClient)
         self.assertTrue(client.available())
 
-    def test_off_disables(self):
-        os.environ["KF_MODEL_MODE"] = "off"
-        self.assertIsInstance(model.build_model_client(), model.DisabledModelClient)
+    def test_off_and_extractive_disable(self):
+        for mode in ("off", "extractive"):
+            os.environ["KF_MODEL_MODE"] = mode
+            self.assertIsInstance(model.build_model_client(), model.DisabledModelClient)
 
-    def test_explicit_anthropic_without_key_falls_back_to_mock(self):
-        os.environ["KF_MODEL_MODE"] = "anthropic"
+    def test_mock_is_explicit_only(self):
+        os.environ["KF_MODEL_MODE"] = "mock"
         self.assertIsInstance(model.build_model_client(), model.MockModelClient)
+
+    def test_explicit_anthropic_without_key_raises(self):
+        os.environ["KF_MODEL_MODE"] = "anthropic"
+        with self.assertRaises(model.ProviderUnavailable):
+            model.build_model_client()
+
+    def test_unknown_or_unconfigured_provider_raises(self):
+        for mode in ("openai", "hosted", "bedrock", "vllm", "nonsense"):
+            os.environ["KF_MODEL_MODE"] = mode
+            with self.assertRaises(model.ProviderUnavailable):
+                model.build_model_client()
 
     def test_provider_order_recorded(self):
         self.assertEqual(model.PROVIDER_ORDER, ("anthropic", "openai", "bedrock", "vllm"))
@@ -78,7 +97,7 @@ class TestAnthropicModelClient(unittest.TestCase):
             "id": "msg_1",
             "type": "message",
             "role": "assistant",
-            "model": "claude-opus-5",
+            "model": "claude-sonnet-4-6",
             "content": [{"type": "text", "text": "OK."}],
             "usage": {
                 "input_tokens": 10,
@@ -106,8 +125,10 @@ class TestAnthropicModelClient(unittest.TestCase):
                 ],
                 {"max_tokens": 128},
             )
-        # The system role is lifted out of `messages` into top-level `system`.
-        self.assertEqual(captured["body"]["system"], "You are helpful.")
+        # The system role is lifted out of `messages` into top-level `system`
+        # as a cached block (T43 prompt layout: stable prefix under cache_control).
+        self.assertEqual(captured["body"]["system"][0]["text"], "You are helpful.")
+        self.assertEqual(captured["body"]["system"][0]["cache_control"], {"type": "ephemeral"})
         self.assertEqual(captured["body"]["messages"], [{"role": "user", "content": "hi"}])
         # Model selection follows KF_MODEL_LARGE for the escalation tier.
         self.assertEqual(
@@ -117,15 +138,16 @@ class TestAnthropicModelClient(unittest.TestCase):
         self.assertEqual(out["text"], "OK.")
         self.assertEqual(out["usage"]["in"], 10)
         self.assertEqual(out["usage"]["out"], 3)
-        self.assertGreater(out["cost"], 0.0)
-        self.assertEqual(out["model_name"], "claude-opus-5")
+        self.assertGreater(out["cost"], 0.0)  # priced from prices.json (T36)
+        self.assertEqual(out["model_name"], "claude-sonnet-4-6")
 
 
 class _Response:
-    """Minimal urlopen-return stand-in."""
+    """Minimal urlopen-return stand-in (carries the `request-id` header)."""
 
     def __init__(self, payload):
         self._data = json.dumps(payload).encode()
+        self.headers = {"request-id": "req_test_0001"}
 
     def __enter__(self):
         return self
@@ -163,11 +185,11 @@ class TestDoctorModelIdCheck(unittest.TestCase):
     def test_ok_when_ids_valid(self):
         os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
         os.environ["KF_MODEL_SMALL"] = "claude-haiku-4-5"
-        os.environ["KF_MODEL_LARGE"] = "claude-opus-5"
+        os.environ["KF_MODEL_LARGE"] = "claude-sonnet-4-6"
         payload = {
             "data": [
                 {"id": "claude-haiku-4-5"},
-                {"id": "claude-opus-5"},
+                {"id": "claude-sonnet-4-6"},
                 {"id": "claude-sonnet-5"},
             ]
         }
@@ -179,11 +201,21 @@ class TestDoctorModelIdCheck(unittest.TestCase):
         self.assertTrue(rep["providers"]["anthropic"]["small_valid"])
         self.assertTrue(rep["providers"]["anthropic"]["large_valid"])
 
-    def test_stale_when_default_id_gone(self):
+    def test_id_outside_allowed_set_is_refused(self):
+        # T35: nothing outside {sonnet-4-6, haiku-4-5} is ever configured.
         os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
         os.environ["KF_MODEL_SMALL"] = "claude-was-retired"
-        os.environ["KF_MODEL_LARGE"] = "claude-opus-5"
-        payload = {"data": [{"id": "claude-opus-5"}, {"id": "claude-haiku-4-5"}]}
+        os.environ["KF_MODEL_LARGE"] = "claude-sonnet-4-6"
+        from scripts import doctor
+
+        rep = doctor.check_model_ids()
+        self.assertEqual(rep["providers"]["anthropic"]["status"], "not-allowed")
+
+    def test_stale_when_allowed_id_not_listed_by_key(self):
+        os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
+        os.environ["KF_MODEL_SMALL"] = "claude-haiku-4-5"
+        os.environ["KF_MODEL_LARGE"] = "claude-sonnet-4-6"
+        payload = {"data": [{"id": "claude-sonnet-4-6"}]}  # key does not list haiku
         with mock.patch("urllib.request.urlopen", lambda *_a, **_kw: _Response(payload)):
             from scripts import doctor
 

@@ -1,0 +1,10 @@
+{"id": "jira.01", "question": "how many open bugs in project QZ", "expect": 14}
+{"id": "jira.02", "question": "how many issues in project QZ", "expect": 63}
+{"id": "jira.03", "question": "how many issues in QZ by status", "expect": {"open": 14, "in progress": 9, "done": 40}}
+{"id": "jira.04", "question": "how many critical issues in project QZ", "expect": 3}
+{"id": "jira.05", "question": "how many issues assigned to alice in QZ", "expect": 11}
+{"id": "jira.06", "question": "how many issues in project ENG", "expect": 27}
+{"id": "jira.07", "question": "how many open issues in ENG", "expect": 6}
+{"id": "jira.08", "question": "how many bugs in ENG", "expect": 12}
+{"id": "jira.09", "question": "how many issues in QZ by priority", "expect": {"critical": 3, "high": 15, "medium": 30, "low": 15}}
+{"id": "jira.10", "question": "how many done issues in QZ", "expect": 40}

@@ -157,7 +157,7 @@ class TestConnectorAdmin(Base):
     def test_defaults_when_unconfigured(self):
         self.assertIsNone(admin.get(self.p, T, "jira"))
         self.assertTrue(admin.is_enabled(self.p, T, "jira"))
-        self.assertTrue(admin.is_enabled(self.p, T, "confluence"))  # unknown → enabled
+        self.assertTrue(admin.is_enabled(self.p, T, "sharepoint"))  # unknown → enabled
         listed = admin.list_all(self.p, T)
         self.assertEqual([c["source"] for c in listed], registry.available())
         jira = next(c for c in listed if c["source"] == "jira")
@@ -216,14 +216,14 @@ class TestConnectorAdmin(Base):
 
     def test_list_all_merges_registry_and_configured(self):
         admin.upsert(
-            self.p, T, "confluence", enabled=True, allow=["QA"], scopes=["confluence:read"]
+            self.p, T, "sharepoint", enabled=True, allow=["QA"], scopes=["sharepoint:read"]
         )
         admin.upsert(self.p, T, "github", allow=["qualizeal/kf-platform"])
         listed = {c["source"]: c for c in admin.list_all(self.p, T)}
-        self.assertEqual(sorted(listed), sorted(set(registry.available()) | {"confluence"}))
-        self.assertFalse(listed["confluence"]["registered"])
-        self.assertEqual(listed["confluence"]["declared_scopes"], [])
-        self.assertEqual(listed["confluence"]["scopes"], ["confluence:read"])
+        self.assertEqual(sorted(listed), sorted(set(registry.available()) | {"sharepoint"}))
+        self.assertFalse(listed["sharepoint"]["registered"])
+        self.assertEqual(listed["sharepoint"]["declared_scopes"], [])
+        self.assertEqual(listed["sharepoint"]["scopes"], ["sharepoint:read"])
         self.assertTrue(listed["github"]["registered"])
         self.assertEqual(listed["github"]["allow"], ["qualizeal/kf-platform"])
         self.assertTrue(listed["files"]["enabled"])  # untouched registry entry
@@ -243,7 +243,8 @@ class TestConnectorAdmin(Base):
             cfg, {"token_ref": "secret://gh", "depth": 2, "repos": ["qualizeal/kf-platform"]}
         )
         self.assertEqual(admin.allow_key("jira"), "projects")
-        self.assertEqual(admin.allow_key("confluence"), "allow")
+        self.assertEqual(admin.allow_key("confluence"), "spaces")
+        self.assertEqual(admin.allow_key("sharepoint"), "allow")
         # an empty admin allow-list imposes no restriction
         admin.upsert(self.p, T, "github", allow=[])
         self.assertEqual(
@@ -412,22 +413,22 @@ class TestScheduler(Base):
         self.assertEqual((r["status"], r["ingested"]), ("ok", 1))
 
     def test_error_path_increments_error_count_and_backs_off(self):
-        # 'confluence' is not registered → SyncManager raises inside the run
-        scheduler.set_schedule(self.p, T, "confluence", INTERVAL, {}, now=NOW)
+        # 'sharepoint' is not registered → SyncManager raises inside the run
+        scheduler.set_schedule(self.p, T, "sharepoint", INTERVAL, {}, now=NOW)
         expected_factor = [2, 3, 4, 4, 4]  # min(4, 1 + error_count)
         now = NOW
         for i, factor in enumerate(expected_factor, start=1):
             with self.assertLogs("knowledge_fabric.refresh", level="WARNING") as logged:
                 r = scheduler.run_due(self.p, T, now)
             self.assertEqual(len(logged.records), 1)
-            self.assertIn("confluence", logged.output[0])
+            self.assertIn("sharepoint", logged.output[0])
             self.assertEqual(len(r), 1)
             self.assertEqual(r[0]["status"], "error")
             self.assertIn("unknown connector", r[0]["error"])
             self.assertEqual(r[0]["error_count"], i)
             self.assertEqual(r[0]["backoff_factor"], factor)
             self.assertEqual(r[0]["next_run"], now + INTERVAL * factor)
-            s = scheduler.get_schedule(self.p, T, "confluence")
+            s = scheduler.get_schedule(self.p, T, "sharepoint")
             self.assertEqual(s["error_count"], i)
             self.assertTrue(s["last_status"].startswith("error:"))
             self.assertIn("unknown connector", s["last_status"])
@@ -440,12 +441,12 @@ class TestScheduler(Base):
         self.assertTrue(all(r["status"] == "error" for r in listed))
         self.assertEqual(listed[0]["steps"][0]["status"], "error")
         self.assertIn("unknown connector", listed[0]["steps"][0]["detail"])
-        h = next(x for x in scheduler.health(self.p, T, now=now) if x["source"] == "confluence")
+        h = next(x for x in scheduler.health(self.p, T, now=now) if x["source"] == "sharepoint")
         self.assertIsNone(h["freshness_minutes"])
         self.assertEqual(h["error_count"], 5)
         self.assertTrue(h["sla_breach"])  # enabled, never succeeded, failing
         # editing the schedule re-arms it (clears the back-off) but keeps the error history
-        s = scheduler.set_schedule(self.p, T, "confluence", 60, {}, now=now)
+        s = scheduler.set_schedule(self.p, T, "sharepoint", 60, {}, now=now)
         self.assertEqual(s["next_run"], now)
         self.assertEqual(s["error_count"], 5)
 
