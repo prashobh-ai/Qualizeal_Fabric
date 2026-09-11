@@ -2,8 +2,8 @@
 
 Exercises knowledge_fabric/health/galaxy.py over a small in-memory fabric with
 a hand-built graph and one recorded answer trace, then smoke-checks the browser
-module scripts/showcase/galaxy.js (it must parse under node, define KFGalaxy,
-and carry no external URLs).
+module surfaces/static/vendor/galaxy.js (it must parse under node, define
+KFGalaxy, and carry no external URLs).
 """
 
 from __future__ import annotations
@@ -32,7 +32,9 @@ TENANT = "test-galaxy"
 TRACE = "trace_galaxy_1"
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-GALAXY_JS = os.path.join(REPO_ROOT, "scripts", "showcase", "galaxy.js")
+GALAXY_JS = os.path.join(
+    REPO_ROOT, "knowledge_fabric", "surfaces", "static", "vendor", "galaxy.js"
+)
 
 _BUCKETS = {"Concept", "Product", "Service", "Repository", "Person"}
 
@@ -219,7 +221,9 @@ class TestGalaxyBuilder(unittest.TestCase):
         self.assertEqual(pl["edges"], [])
         self.assertEqual(pl["activated_ids"], [])
         self.assertEqual(pl["halo_ids"], [])
-        self.assertEqual(pl["stats"], {"nodes": 0, "edges": 0, "activated": 0})
+        self.assertEqual(pl["stats"]["nodes"], 0)
+        self.assertEqual(pl["stats"]["edges"], 0)
+        self.assertEqual(pl["stats"]["activated"], 0)
         self.assertEqual(galaxy.top_concepts(p, "empty-tenant"), [])
         self.assertIsNone(galaxy.node_detail(p, "empty-tenant", "n_req"))
 

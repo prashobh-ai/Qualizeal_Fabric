@@ -90,6 +90,15 @@ _SHELL = _read_asset("ui_common__shell.html")
 
 _VERSION = "v0.3"
 
+#: The real-physics galaxy (T51): vendored vis-network + the KFGalaxy view,
+#: both same-origin under /static/vendor/. Pages that render a galaxy pass this
+#: as ``shell(..., head=GALAXY_HEAD)``. Loaded in <head> so ``window.KFGalaxy``
+#: exists before the page script that mounts it runs.
+GALAXY_HEAD = (
+    '<script src="/static/vendor/vis-network.min.js"></script>'
+    '<script src="/static/vendor/galaxy.js"></script>'
+)
+
 
 def card(title: str, body: str, id_: str = "", extra: str = "", right: str = "") -> str:
     """One brand panel: ``<div class="card"><h3>title</h3>body</div>``."""
@@ -102,7 +111,13 @@ def card(title: str, body: str, id_: str = "", extra: str = "", right: str = "")
 
 
 def shell(
-    title: str, subtitle: str, body: str, script: str, active: str, extra_css: str = ""
+    title: str,
+    subtitle: str,
+    body: str,
+    script: str,
+    active: str,
+    extra_css: str = "",
+    head: str = "",
 ) -> str:
     """Assemble a complete console page from the shared shell.
 
@@ -111,6 +126,13 @@ def shell(
     compatibility but is NOT rendered — the product chrome has no narrative
     header (L1.2 / D6). The browser title is
     ``QualiZeal Knowledge Fabric — <page>`` (L1.2).
+
+    ``head`` is raw markup placed at the end of ``<head>`` — the galaxy pages
+    use it to pull the vendored ``vis-network`` and ``galaxy.js`` same-origin
+    from ``/static/vendor/`` (T51). It stays empty for every other page, so no
+    surface pays for a script it does not render. The showcase build rewrites
+    the ``/static/`` prefix to a relative path, so a ``<script src>`` here works
+    live and baked alike.
     """
     parts = []
     for label, path, roles in NAV:
@@ -128,6 +150,7 @@ def shell(
         .replace("__FAVICON__", _FAVICON)
         .replace("__VERSION__", _VERSION)
         .replace("__NAV__", nav)
+        .replace("__HEAD__", head)
         .replace("__DIRECTORY__", directory)
         .replace("__RUNTIME__", RUNTIME_JS)
         .replace("__BODY__", body)

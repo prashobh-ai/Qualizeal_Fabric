@@ -46,6 +46,7 @@ from ..contracts.types import (
 )
 from ..governance import authority
 from ..stores import versioning
+from ..telemetry import timing
 from . import lang as langmod
 from . import personas, reasoning
 from . import selector as sel
@@ -378,6 +379,10 @@ class AnswerService:
                 "context_resolved": 1 if context_resolved else 0,
             },
         ) as span:
+            # T56 — phase / active-idle stopwatch for this answer. Retrieval is
+            # wall time (active=False → idle); model composition is active. The
+            # collected block rides on the answer span and the Answer object.
+            timer = timing.PhaseTimer()
             # A. policy + rate limit (the parent request already did this for steps)
             if not _nested:
                 if not p.policy.rate_check(tenant, principal.subject):
@@ -462,8 +467,12 @@ class AnswerService:
                 p.cache.put_embedding(rq, qvec)
 
             # D. hybrid retrieval + RRF (retrieval cache) + authority boost
-            with p.telemetry.span(
-                "answer.retrieve", {"tenant": tenant, "trace_id": trace_id, "stage": "retrieve"}
+            with (
+                p.telemetry.span(
+                    "answer.retrieve",
+                    {"tenant": tenant, "trace_id": trace_id, "stage": "retrieve"},
+                ),
+                timer.phase("retrieve", active=False),
             ):
                 fused = p.cache.get_retrieval(tenant, rq, accessible)
                 if fused is None:
@@ -641,8 +650,12 @@ class AnswerService:
                     }
 
             # I. compose from passages only + citation post-check -------
-            with p.telemetry.span(
-                "answer.compose", {"tenant": tenant, "trace_id": trace_id, "stage": "compose"}
+            with (
+                p.telemetry.span(
+                    "answer.compose",
+                    {"tenant": tenant, "trace_id": trace_id, "stage": "compose"},
+                ),
+                timer.phase("summarise"),
             ):
                 text, citations, cost, tin, tout, saved, model_name = self._compose(
                     principal, rq, selected, tier
@@ -659,9 +672,10 @@ class AnswerService:
                 tier = decision["tier"]
                 est = self._estimate_cost(question, selected, tier)
                 if p.policy.try_spend(tenant, est, principal.subject if principal.agent else None):
-                    text, citations, cost, tin, tout, saved, model_name = self._compose(
-                        principal, rq, selected, tier
-                    )
+                    with timer.phase("summarise"):
+                        text, citations, cost, tin, tout, saved, model_name = self._compose(
+                            principal, rq, selected, tier
+                        )
                     confidence = self._confidence(g, citations, selected)
 
             # L2.3 — surface the five grounding signals (the Trust bars) and the
@@ -704,9 +718,11 @@ class AnswerService:
                     dataset_version=dsv,
                 )
 
-            text = self._localize(text, qlang, principal, tier)
+            with timer.phase("translate", active=qlang not in ("", "en")):
+                text = self._localize(text, qlang, principal, tier)
             sources = [c.document_title for c in citations]
             auth = self._authority_card(tenant, citations)
+            tblock = timer.timing()  # T56 — phase / active-idle for this answer
 
             answer = Answer(
                 AnswerKind.ANSWER,
@@ -729,6 +745,7 @@ class AnswerService:
                 complexity=complexity,
                 authoritative_source=auth,
                 dataset_version=dsv,
+                timing=tblock,
             )
             p.cache.put_answer(tenant, question, answer_scope, answer.to_dict(), cost)
 
@@ -752,6 +769,7 @@ class AnswerService:
                 model_name=model_name,
                 complexity=complexity,
                 dataset_version=dsv,
+                timing=tblock,
             )
             return answer
 

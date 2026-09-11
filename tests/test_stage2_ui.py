@@ -197,8 +197,11 @@ class TestMarkup(unittest.TestCase):
                 self.assertTrue(html.startswith("<!doctype html>"))
                 self.assertIn("<title>QualiZeal Knowledge Fabric — ", html)  # L1.2 title
                 self.assertTrue(html.rstrip().endswith("</html>"))
-                self.assertEqual(html.count("<script>"), html.count("</script>"))
-                self.assertEqual(html.count("<script>"), 3)  # directory, runtime, page
+                # every opened <script> (inline or vendored src) is closed
+                self.assertEqual(
+                    len(re.findall(r"<script(?:\s[^>]*)?>", html)), html.count("</script>")
+                )
+                self.assertEqual(html.count("<script>"), 3)  # inline: directory, runtime, page
                 self.assertEqual(html.count("<style>"), html.count("</style>"))
                 self.assertGreater(len(html), 10_000)
 

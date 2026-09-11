@@ -39,6 +39,8 @@ registry pattern shapes the provider card. Credited in the manifest and
 ### vis-network (Apache-2.0 / MIT)
 
 `https://github.com/visjs/vis-network`. The standalone UMD build is vendored
-at `knowledge_fabric/surfaces/assets/vendor/vis-network.min.js` and renders
-the force-directed knowledge galaxy. No CDN; served same-origin. Credited in
-the manifest and `THIRD_PARTY_NOTICES.md`.
+at `knowledge_fabric/surfaces/static/vendor/vis-network.min.js` and renders
+the force-directed knowledge galaxy; the view half is
+`knowledge_fabric/surfaces/static/vendor/galaxy.js`. No CDN; served
+same-origin under `/static/vendor/`. Credited in the manifest and
+`THIRD_PARTY_NOTICES.md`.

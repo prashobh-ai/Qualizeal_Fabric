@@ -240,7 +240,14 @@ def build_payload(platform, tenant: str, trace_id: str | None = None) -> dict[st
         "edges": edges,
         "activated_ids": sorted(activated),
         "halo_ids": sorted(halo),
-        "stats": {"nodes": len(nodes), "edges": len(edges), "activated": len(activated)},
+        "stats": {
+            "nodes": len(nodes),
+            "edges": len(edges),
+            "relationships": len(edges),
+            "activated": len(activated),
+            "halo": len(halo),
+            "hops": 1 if halo else 0,
+        },
     }
 
 

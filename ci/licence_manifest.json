@@ -1232,8 +1232,8 @@
       "status": "optional",
       "import_names": [],
       "distributions": [],
-      "why": "Vendored standalone UMD build at surfaces/assets/vendor/vis-network.min.js; no CDN, no python import; renders the force-directed knowledge graph.",
-      "evidence": "knowledge_fabric/surfaces/assets/vendor/vis-network.min.js"
+      "why": "Vendored standalone UMD build at surfaces/static/vendor/vis-network.min.js; served same-origin under /static/vendor/, no CDN, no python import; renders the force-directed knowledge graph.",
+      "evidence": "knowledge_fabric/surfaces/static/vendor/vis-network.min.js"
     },
     {
       "name": "token-meter",

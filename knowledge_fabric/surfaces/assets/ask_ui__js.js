@@ -217,7 +217,7 @@ function card(a){const box=$('#answer-card');const w=a.why||{};const lw=levelWor
  rows.push(['Moved levels',esc(reasonWord(a))]);
  // --- under Details ---
  const det=[];
- det.push(['Relationships',(gx.relationships!=null?gx.relationships:0)+' &middot; '+(gx.hops!=null?gx.hops:0)+' hop(s) &middot; '+(gx.documents!=null?gx.documents:cited)+' docs']);
+ det.push(['Graph',(gx.activated!=null?gx.activated:0)+' lit &middot; '+(gx.relationships!=null?gx.relationships:(gx.edges||0))+' links &middot; '+(gx.hops!=null?gx.hops:0)+' hop(s) &middot; '+cited+' docs cited']);
  det.push(['Sources',found+' found &middot; '+cited+' cited']);
  det.push(['Trust','<span class="trust-num">'+trust+'</span> '+bars(w.signals)+' <span class="muted small" title="grounding score">g '+pct(a.grounding_score)+'</span>']);
  det.push(['Language','<span class="pill">'+esc((a.lang||'en').toUpperCase())+'</span>']);
@@ -225,6 +225,7 @@ function card(a){const box=$('#answer-card');const w=a.why||{};const lw=levelWor
  det.push(['Cost',money(a.cost)+' &middot; top '+money(topCost)+' &middot; saved '+money(a.cost_saved)]);
  det.push(['Cache',a.cache_hit?'<span class="pill good">hit</span>':'<span class="pill">miss</span>']);
  det.push(['Timing',a._ms!=null?ms(a._ms):'—']);
+ if(a.timing)det.push(['Phases',phaseBar(a.timing)]);
  det.push(['Complexity','<span class="pill '+(CPLX_CLS[a.complexity]||'')+'">'+esc(a.complexity||'n/a')+'</span> &middot; dataset v'+esc(a.dataset_version||0)]);
  let authHtml='<span class="muted">none determined</span>';
  if(auth){authHtml='<span class="pill good">'+esc(auth.source||'authoritative')+'</span> '+esc(auth.document_title||'');
@@ -237,6 +238,18 @@ function card(a){const box=$('#answer-card');const w=a.why||{};const lw=levelWor
  const tl=$('#trace-link');if(tl)tl.onclick=e=>{e.preventDefault();$('#trace-val').classList.toggle('hidden')};
  $('#explain-btn').disabled=!(a.kind==='answer');
  $('#explain-btn').onclick=()=>openExplain(a,gx)}
+// T56 — the phase / active-idle bar: where the answer's wall-clock went
+// (retrieve is idle wall time; summarise/translate are active model work).
+const PHASE_COLOR={retrieve:'#0096FF',summarise:'#7048E8',agent_steps:'#F53E5A',translate:'#0CA678',image:'#F59F00'};
+function phaseBar(t){const pm=t.phase_ms||{};const total=Number(t.total_ms)||0;
+ if(!total)return '<span class="muted small">—</span>';
+ const order=['retrieve','summarise','agent_steps','translate','image'];
+ const segs=order.filter(k=>pm[k]).map(k=>'<i title="'+k+' '+Math.round(pm[k])+' ms" style="width:'+
+   Math.max(2,pm[k]/total*100).toFixed(1)+'%;background:'+(PHASE_COLOR[k]||'#7C8DA1')+'"></i>').join('');
+ const act=Number(t.active_ms)||0,idle=Number(t.idle_ms)||0;
+ return '<div class="phasebar">'+segs+'</div>'+
+  '<div class="muted small" style="margin-top:3px">active '+Math.round(act)+' ms &middot; idle '+
+   Math.round(idle)+' ms'+(t.tool_calls?' &middot; '+t.tool_calls+' tool call(s)':'')+'</div>';}
 function reasoningHtml(a){const r=a.reasoning;if(!r||!(r.steps||[]).length)return '';
  return '<div class="r"><span class="k">Reasoning</span><span class="v">'+esc(r.mode||'multistep')+'</span></div>'+
   '<ol class="timeline">'+(r.steps||[]).map(s=>{const cls=s.skipped?'skipped':s.condition===true?'cond-true':s.condition===false?'cond-false':'';
@@ -273,18 +286,49 @@ function selectAnswer(turn){const a=turn.a;LAST_A=a; // read-aloud speaks the an
  $$('#messages .msg.ai').forEach(el=>el.classList.remove('sel'));
  const el=$('#messages .msg.ai[data-i="'+turn._i+'"]');if(el)el.classList.add('sel');
  card(a);loadGalaxy(a.trajectory_id,a);loadUsage()}
+let GALAXY=null;  // the mounted KFGalaxy handle for the current answer (T51)
 async function loadGalaxy(trace_id,a){const box=$('#galaxy'),st=$('#galaxy-stats');
  if(!trace_id){box.innerHTML='<div class="gx-empty">Ask a question to light up the graph.</div>';st.innerHTML='';return}
  try{const g=await api('/api/galaxy?trace_id='+encodeURIComponent(trace_id));
   CARD_GX[trace_id]=g.stats||{};if(a)card(a);
   renderGalaxy(g);
-  const s=g.stats||{};st.innerHTML='<span><b>'+(s.activated||0)+'</b> lit</span><span><b>'+(s.relationships||0)+
-   '</b> links</span><span><b>'+(s.hops||0)+'</b> hop(s)</span><span><b>'+(s.passages||0)+'</b> passages</span>';}
+  const s=g.stats||{};st.innerHTML='<span><b>'+(s.activated||0)+'</b> lit</span><span><b>'+(s.halo||0)+
+   '</b> halo</span><span><b>'+(s.relationships!=null?s.relationships:(s.edges||0))+
+   '</b> links</span><span><b>'+(s.nodes||0)+'</b> concepts</span>';}
  catch(e){box.innerHTML='<div class="gx-empty">Galaxy unavailable for this answer.</div>';st.innerHTML=''}}
-function renderGalaxy(g){const box=$('#galaxy');const nodes=(g.nodes||[]).slice(0,60);
+// The real-physics galaxy (T51): mount the vendored vis-network view when it is
+// present (the Workspace <head> pulls it same-origin), flash the activated
+// nodes, and open a concept side-sheet on click. Falls back to the inline SVG
+// force layout when the library is absent (e.g. a stripped bake).
+function renderGalaxy(g){const box=$('#galaxy');
+ if(window.KFGalaxy&&typeof vis!=='undefined'){
+  box.style.height=box.style.height||'300px';
+  try{
+   GALAXY=window.KFGalaxy.mount(box,g,{onNode:openNode});
+   const lit=(g.activated_ids||[]);
+   if(lit.length)setTimeout(function(){try{GALAXY.flash(lit)}catch(e){}},120);
+   return;
+  }catch(e){/* fall through to the SVG renderer */}
+ }
+ renderGalaxySVG(g);}
+// One concept's side-sheet from /api/galaxy/node — its type, doc count and the
+// passages that mention it, reusing the page drawer.
+async function openNode(id){if(!id)return;const d=$('#page-drawer');
+ try{const n=await api('/api/galaxy/node?id='+encodeURIComponent(id));if(!n||!n.id)return;
+  d.innerHTML='<button class="btn sm right" id="page-close">Close</button>'+
+   '<h3>'+esc(n.name||'Concept')+'</h3>'+
+   '<div class="pagemeta"><span class="pill">'+esc(n.type||'Concept')+'</span> &middot; '+(n.docs||0)+' document(s)</div>'+
+   (n.passages||[]).map(function(p){return '<div class="pagedoc" style="margin-top:8px">'+esc(p.text||'')+'</div>'}).join('')+
+   ((n.passages||[]).length?'':'<p class="muted small" style="margin-top:10px">No passages mention this concept directly.</p>');
+  d.classList.remove('hidden');$('#page-close').onclick=function(){d.classList.add('hidden')};}
+ catch(e){/* a node with no detail simply does not open a sheet */}}
+function renderGalaxySVG(g){const box=$('#galaxy');const nodes=(g.nodes||[]).slice(0,60);
  if(!nodes.length){box.innerHTML='<div class="gx-empty">No graph relationships were used for this answer.</div>';return}
+ // the new payload marks activation as an id list + from/to edges; project it
+ // onto the fields this inline renderer expects so the fallback still lights up.
+ const lit={};(g.activated_ids||[]).forEach(id=>lit[id]=1);
  const idx={};nodes.forEach((n,i)=>idx[n.id]=i);
- const edges=(g.edges||[]).filter(e=>idx[e.src]!=null&&idx[e.dst]!=null);
+ const edges=(g.edges||[]).map(e=>({src:e.from,dst:e.to})).filter(e=>idx[e.src]!=null&&idx[e.dst]!=null);
  // deterministic seed layout on a circle, then a short force settle.
  const N=nodes.length,P=nodes.map((n,i)=>({x:Math.cos(i/N*6.283)*100,y:Math.sin(i/N*6.283)*100}));
  for(let it=0;it<90;it++){const fx=new Array(N).fill(0),fy=new Array(N).fill(0);
@@ -298,16 +342,16 @@ function renderGalaxy(g){const box=$('#galaxy');const nodes=(g.nodes||[]).slice(
  const pad=18,vw=(maxx-minx)+pad*2,vh=(maxy-miny)+pad*2;
  const X=x=>x-minx+pad,Y=y=>y-miny+pad;
  let svg='<svg viewBox="0 0 '+vw.toFixed(0)+' '+vh.toFixed(0)+'" preserveAspectRatio="xMidYMid meet">';
- edges.forEach(e=>{const a=P[idx[e.src]],b=P[idx[e.dst]];
-  svg+='<line class="gx-edge'+(e.activated?' act':'')+'" x1="'+X(a.x).toFixed(1)+'" y1="'+Y(a.y).toFixed(1)+
-   '" x2="'+X(b.x).toFixed(1)+'" y2="'+Y(b.y).toFixed(1)+'" stroke-width="'+(e.activated?1.2:0.7)+
-   '" stroke-opacity="'+(e.activated?0.9:0.04)+'"/>'});
+ edges.forEach(e=>{const a=P[idx[e.src]],b=P[idx[e.dst]];const act=lit[e.src]&&lit[e.dst];
+  svg+='<line class="gx-edge'+(act?' act':'')+'" x1="'+X(a.x).toFixed(1)+'" y1="'+Y(a.y).toFixed(1)+
+   '" x2="'+X(b.x).toFixed(1)+'" y2="'+Y(b.y).toFixed(1)+'" stroke-width="'+(act?1.2:0.7)+
+   '" stroke-opacity="'+(act?0.9:0.04)+'"/>'});
  // degree per node, so only the most-connected activated nodes get a label
  // (a compact galaxy stays legible instead of a wall of overlapping text).
  const deg={};edges.forEach(e=>{deg[e.src]=(deg[e.src]||0)+1;deg[e.dst]=(deg[e.dst]||0)+1});
- const labelled=new Set(nodes.filter(n=>n.activated).sort((a,b)=>(deg[b.id]||0)-(deg[a.id]||0)).slice(0,9).map(n=>n.id));
- nodes.forEach((n,i)=>{const p=P[i];svg+='<circle class="gx-node'+(n.activated?' act flash':'')+'" cx="'+X(p.x).toFixed(1)+
-   '" cy="'+Y(p.y).toFixed(1)+'" r="'+(n.activated?4.2:2.4)+'"><title>'+esc(n.label)+'</title></circle>';
+ const labelled=new Set(nodes.filter(n=>lit[n.id]).sort((a,b)=>(deg[b.id]||0)-(deg[a.id]||0)).slice(0,9).map(n=>n.id));
+ nodes.forEach((n,i)=>{const p=P[i];svg+='<circle class="gx-node'+(lit[n.id]?' act flash':'')+'" cx="'+X(p.x).toFixed(1)+
+   '" cy="'+Y(p.y).toFixed(1)+'" r="'+(lit[n.id]?4.2:2.4)+'"><title>'+esc(n.label)+'</title></circle>';
   if(labelled.has(n.id))svg+='<text x="'+(X(p.x)+5).toFixed(1)+'" y="'+(Y(p.y)+3).toFixed(1)+'">'+esc((n.label||'').slice(0,16))+'</text>'});
  box.innerHTML=svg+'</svg>'}
 
@@ -438,9 +482,16 @@ function setupMic(){const btn=$('#mic-btn');if(!btn)return;
   try{rec.start()}catch(e){/* a start already in flight */}}}
 
 // ===================== session lifecycle ============================
+// T52 — the honest provider badge: which model answers (the pinned provider,
+// or the open-source fallback when it is unavailable, or the extractive core).
+async function loadProvider(){const el=$('#provider-badge');if(!el)return;
+ try{const p=await api('/api/provider');if(!p||!p.label){el.classList.remove('on');return}
+  el.innerHTML='<span class="dot" style="background:'+esc(p.dot||'#5A6B7C')+'"></span>'+esc(p.label);
+  el.classList.add('on');}
+ catch(e){el.classList.remove('on')}}
 function boot(){loadThreads();loadQueue();if(!THREADS.length){CUR=null}else{CUR=THREADS[0].id}
  renderThreads();renderMessages();
- if(KF.session){corpusStrip();loadUsage()}else{gate({status:401,message:''},'asker')}}
-window.KF_ON_SESSION=s=>{gate(null);if(s){corpusStrip();loadUsage();samples();$('#ask-status').textContent='ready for '+s.subject}
+ if(KF.session){corpusStrip();loadUsage();loadProvider()}else{gate({status:401,message:''},'asker')}}
+window.KF_ON_SESSION=s=>{gate(null);if(s){corpusStrip();loadUsage();samples();loadProvider();$('#ask-status').textContent='ready for '+s.subject}
  else{$('#usage-body').innerHTML='<div class="placeholder">Sign in to see your usage.</div>'}};
 KF.initBar({preferRole:'asker'});boot();setupReadAloud();setupMic();

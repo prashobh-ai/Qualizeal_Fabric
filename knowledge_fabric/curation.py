@@ -366,8 +366,12 @@ def log_event(
 
 
 def _latest_row(platform, tenant: str, review: str) -> dict | None:
+    # Order by event time, then by insertion order (rowid) to break a same-ms
+    # tie — never by the random uuid ``id``, which is not monotonic and would
+    # pick an arbitrary event as "latest" (leaving a resolved review queued).
     r = platform.db.one(
-        "SELECT * FROM curation_log WHERE tenant=? AND review_id=? ORDER BY id DESC LIMIT 1",
+        "SELECT * FROM curation_log WHERE tenant=? AND review_id=? "
+        "ORDER BY ts DESC, rowid DESC LIMIT 1",
         (tenant, review),
     )
     return dict(r) if r else None
@@ -559,7 +563,11 @@ def review_queue(platform, tenant: str) -> list[dict]:
     """
     _guard(tenant)
     latest: dict[str, dict] = {}
-    for r in platform.db.query("SELECT * FROM curation_log WHERE tenant=? ORDER BY id", (tenant,)):
+    # last-write-wins per review id, so iterate in true chronological order
+    # (ts, then insertion order) — never by the random uuid ``id``.
+    for r in platform.db.query(
+        "SELECT * FROM curation_log WHERE tenant=? ORDER BY ts, rowid", (tenant,)
+    ):
         latest[r["review_id"]] = dict(r)
     out: list[dict] = []
     for rid, row in latest.items():
@@ -612,7 +620,7 @@ def timeline(
     all_rows = [
         dict(r)
         for r in platform.db.query(
-            "SELECT * FROM curation_log WHERE tenant=? ORDER BY ts, id", (tenant,)
+            "SELECT * FROM curation_log WHERE tenant=? ORDER BY ts, rowid", (tenant,)
         )
     ]
     years = sorted({_ym(r["ts"])[0] for r in all_rows})

@@ -108,6 +108,9 @@ class TestMcpServer(unittest.TestCase):
                 "confluence_search",
                 "describe_image",
                 "ask_fabric",
+                "provider_status",
+                "fabric_communities",
+                "knowledge_gaps",
             },
         )
         # every tool carries a description and an input schema (MCP conformance);

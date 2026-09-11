@@ -13,6 +13,11 @@
 .steps .st.live::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--qz-blue);animation:kfpulse 1s infinite}
 @keyframes kfpulse{0%{opacity:.3}50%{opacity:1}100%{opacity:.3}}
 .msg.ai.live{cursor:default}
+/* T52 — the active-provider badge in the composer toolbar */
+.provbadge{display:none;align-items:center;gap:6px;font-size:12px;color:var(--mut);
+ padding:2px 8px;border:1px solid var(--line);border-radius:999px;white-space:nowrap}
+.provbadge.on{display:inline-flex}
+.provbadge .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
 </style>
 <div class="ws" id="ws">
   <aside class="threads" id="threads" aria-label="Conversations">
@@ -52,6 +57,7 @@
           </select>
         </span>
         <button class="iconbtn" id="read-aloud" type="button" disabled title="Read the answer aloud">&#128266;</button>
+        <span class="provbadge" id="provider-badge" title="The model that answers — the pinned provider, or the open-source fallback when it is unavailable."></span>
         <span class="grow"></span>
         <span class="hint" id="ask-status"></span>
       </div>

@@ -49,6 +49,9 @@ from knowledge_fabric.surfaces.signin_ui import SIGNIN_HTML  # noqa: E402
 from knowledge_fabric.tenants import demo  # noqa: E402
 
 BRAND_SRC = os.path.join(ROOT, "knowledge_fabric", "surfaces", "static", "assets", "brand")
+# Vendored browser libs (vis-network + the KFGalaxy view) served same-origin
+# under /static/vendor/ live; copied to the showcase root as /vendor/ (T51).
+VENDOR_SRC = os.path.join(ROOT, "knowledge_fabric", "surfaces", "static", "vendor")
 ENGINE_SRC = os.path.join(ROOT, "scripts", "showcase", "engine.js")
 LANDING_SRC = os.path.join(ROOT, "scripts", "showcase", "landing.html")
 TENANT = "qualizeal"
@@ -522,6 +525,7 @@ def _bake(client, p=None) -> dict:
         "get": {"asker": {}, "curator": {}, "admin": {}},
         "answers": {},
         "galaxy": {},
+        "galaxy_nodes": {},  # T51 — node side-sheets keyed by node id
         "usage": {},
         "suggestions": {},
         "analytics": {},
@@ -563,6 +567,28 @@ def _bake(client, p=None) -> dict:
             if tid:
                 _, g = client.call("GET", "/api/galaxy?trace_id=" + tid, token=asker)
                 snap["galaxy"][tid] = g
+
+    # T51 — provider badge + the full-fabric galaxy + node side-sheets. The node
+    # sheets are baked for every node the answer galaxies actually surface
+    # (activated + halo), so a click in the static demo opens the same panel.
+    if asker:
+        _, snap["provider"] = client.call("GET", "/api/provider", token=asker)
+        # The whole-fabric galaxy (Curator graph) needs curate scope.
+        curator_tok = tokens.get("curator")
+        if curator_tok:
+            _, snap["galaxy_full"] = client.call(
+                "GET", "/api/galaxy/full", token=curator_tok
+            )
+        node_ids: set[str] = set()
+        for g in list(snap["galaxy"].values()) + [snap.get("galaxy_full") or {}]:
+            node_ids.update(g.get("activated_ids") or [])
+            node_ids.update(g.get("halo_ids") or [])
+        for nid in sorted(node_ids):
+            code, nd = client.call(
+                "GET", "/api/galaxy/node?id=" + urllib.parse.quote(str(nid)), token=asker
+            )
+            if code == 200 and nd and nd.get("id"):
+                snap["galaxy_nodes"][nid] = nd
 
     # ---- follow-up vocabulary (coreference "it/that" -> the topic) ----------
     # Data-driven: whatever the corpus actually answers about becomes a subject
@@ -656,6 +682,8 @@ def _bake(client, p=None) -> dict:
 def _rewrite(html: str, surface: str, asset_prefix: str, engine_href: str) -> str:
     """Rewrite a served page for static hosting: relative assets + the engine."""
     html = html.replace("/static/assets/", asset_prefix)
+    # Vendored galaxy libs live beside assets (../vendor/ for a surface page).
+    html = html.replace("/static/vendor/", asset_prefix.replace("assets/", "vendor/"))
     # root links (the lockup on standalone pages) point at the showcase root.
     html = html.replace('href="/"', 'href="../"')
     inject = (
@@ -678,6 +706,7 @@ def build(out_dir: str) -> None:
     os.makedirs(out, exist_ok=True)
     open(os.path.join(out, ".nojekyll"), "w").close()
     shutil.copytree(BRAND_SRC, os.path.join(out, "assets", "brand"))
+    shutil.copytree(VENDOR_SRC, os.path.join(out, "vendor"))
     shutil.copy(ENGINE_SRC, os.path.join(out, "engine.js"))
 
     # seed + run server + bake

@@ -57,6 +57,9 @@ TOOL_NAMES = (
     "confluence_search",
     "describe_image",
     "ask_fabric",
+    "provider_status",
+    "fabric_communities",
+    "knowledge_gaps",
 )
 
 
@@ -321,6 +324,63 @@ def tool_ask_fabric(
         },
         "citations": payload.get("citations") or [],
         "steps": steps or [],
+    }
+
+
+def tool_provider_status(platform, tenant: str) -> dict:
+    """Which model answers right now, honestly (T52/T60): the pinned provider,
+    the open-source fallback when it is unavailable, or the extractive core —
+    plus whether a model is reachable. No fabrication: an absent client reads as
+    the extractive core, never as a live model."""
+    from ..adapters import model as _model
+
+    client = getattr(platform, "model", None)
+    name = type(client).__name__ if client is not None else ""
+    available = bool(client and getattr(client, "available", lambda: False)())
+    if name == "AnthropicModelClient":
+        try:
+            _small, large = _model.resolve_models()
+        except Exception:
+            large = _model.DEFAULT_LARGE
+        provider, model_name = "Claude", large
+    elif name == "OSSModelClient" and hasattr(client, "provider_label"):
+        lab = client.provider_label()
+        provider, model_name = "Open-source", lab.get("model", "")
+    else:
+        provider, model_name = "Extractive", "core"
+    return {
+        "result": {
+            "provider": provider,
+            "model": model_name,
+            "available": available,
+            "fallback": provider != "Claude",
+        },
+        "citations": [],
+    }
+
+
+def tool_fabric_communities(platform, tenant: str) -> dict:
+    """The knowledge communities the graph clusters into (T57/T60): each with a
+    size, a cohesion score and a low-cohesion flag where the cluster is thin.
+    Concepts-only reimplementation credited in docs/CONCEPTS.md."""
+    from ..health import graph_insights as _gi
+
+    payload = _gi.insights(platform, tenant)
+    return {"result": {"communities": payload.get("communities", [])}, "citations": []}
+
+
+def tool_knowledge_gaps(platform, tenant: str) -> dict:
+    """Where the fabric is thin (T57/T60): single-source concepts carrying real
+    weight, and thin communities — each with suggested tags to fill the gap."""
+    from ..health import graph_insights as _gi
+
+    payload = _gi.insights(platform, tenant)
+    return {
+        "result": {
+            "gaps": payload.get("gaps", []),
+            "surprising": payload.get("surprising", []),
+        },
+        "citations": [],
     }
 
 
@@ -640,5 +700,39 @@ def build_server(platform=None, tenant: str | None = None):
                 conversation, oldest first, used as context.
         """
         return tool_ask_fabric(platform, tenant, question, designation, previous_questions, svc)
+
+    @server.tool(
+        description=(
+            "Report which model answers the fabric right now — the pinned "
+            "provider, the open-source fallback when it is unavailable, or the "
+            "governed extractive core — and whether a model is reachable. Never "
+            "reports a live model when none is configured."
+        )
+    )
+    def provider_status() -> dict:
+        """The active answering provider and its availability."""
+        return tool_provider_status(platform, tenant)
+
+    @server.tool(
+        description=(
+            "List the knowledge communities the fabric graph clusters into, each "
+            "with its size, a cohesion score, and a flag where the cluster is "
+            "thin. Useful for seeing how the knowledge base is organised."
+        )
+    )
+    def fabric_communities() -> dict:
+        """The graph communities with cohesion scores."""
+        return tool_fabric_communities(platform, tenant)
+
+    @server.tool(
+        description=(
+            "Surface where the fabric is thin: concepts that carry weight but "
+            "rest on a single source, and thin communities — each with suggested "
+            "tags to fill the gap — plus surprising cross-domain connections."
+        )
+    )
+    def knowledge_gaps() -> dict:
+        """The fabric's knowledge gaps and surprising connections."""
+        return tool_knowledge_gaps(platform, tenant)
 
     return server
