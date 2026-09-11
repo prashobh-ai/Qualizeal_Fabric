@@ -47,6 +47,12 @@ documents = [
   "reportlab>=4.0",                     # BSD-3
 ]
 
+# Concept-graph analytics (T57): community detection over the tenant graph.
+# The import is guarded; without it graph insights fall back to components.
+graph = [
+  "networkx>=3.0",                      # BSD-3
+]
+
 # Postgres + pgvector engines behind the same repository API. pg8000 is BSD-3.
 db = [
   "pg8000>=1.31",                       # BSD-3

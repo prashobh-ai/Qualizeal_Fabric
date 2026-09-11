@@ -32,6 +32,7 @@ licence, named against each entry.
 | LiteLLM | MIT License | provider gateway (T08, providers/, guarded) |
 | MCP Python SDK | MIT License | MCP server runtime (T20, mcp/, guarded) |
 | msal | MIT License | Azure/Entra auth for the SharePoint connector (P2.x) |
+| networkx | BSD 3-Clause License | concept-graph community detection (T57) |
 | numpy | BSD 3-Clause License | audio buffer arithmetic for the speech loop (P8) |
 | openai | Apache License 2.0 | provider gateway OpenAI backend (P4.5) |
 | openpyxl | MIT License | Excel (.xlsx) reader for the spreadsheet→SQLite route (T41) |
@@ -51,8 +52,10 @@ licence, named against each entry.
 | spacy | MIT License | named-entity recognition adapter (P3.5) |
 | svglib | BSD 3-Clause License | SVG rasterising for diagram understanding (T41) |
 | tiktoken | MIT License | provider-accurate tokenisation for pricing/limits (P4.5) |
+| token-meter | MIT License | telemetry concepts reference (T55) |
 | torch | PyTorch BSD-3-Clause | tensor backend used by sentence-transformers and faster-whisper |
 | transformers | Apache License 2.0 | HuggingFace transformers used by embedder / NLLB (P3.4) |
+| vis-network | Apache License 2.0 OR MIT | physics galaxy renderer, vendored browser asset (T51) |
 
 ## Model weights — downloaded artefacts
 
