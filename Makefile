@@ -3,7 +3,12 @@
 PY ?= python3
 KF_DB ?= ./data/kf.db
 PORT ?= 8080
+# T35: keyless is EXPLICIT. Local targets run the extractive floor unless you
+# export KF_MODEL_MODE=anthropic (with ANTHROPIC_API_KEY); the app itself never
+# falls back to a mock when a provider is configured but unreachable.
+KF_MODEL_MODE ?= extractive
 export KF_DB
+export KF_MODEL_MODE
 export PYTHONPATH := .
 
 UV ?= uv

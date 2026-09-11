@@ -36,14 +36,22 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build the interactive showcase (seed + bake + emit surfaces)
+      - name: Provider check — pin the models and prove the key (T35)
+        # Exits 2..6 with the exact cause (empty secret, key rejected, model
+        # outside the allowed set, Sonnet 4.6 unavailable, ping failed) and
+        # writes data/provider_status.json + the provider line to the summary.
         env:
-          # Answers are baked at build time. Add an ANTHROPIC_API_KEY repo secret
-          # to bake fluent, grounded, cited answers with the real model — the
-          # static site then serves them at zero runtime cost. Without the secret
-          # the model client falls back to the deterministic extractive path, so
-          # the build stays green either way.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python scripts/doctor.py --require anthropic
+
+      - name: Build the interactive showcase (seed + bake + emit surfaces)
+        # Answers are baked with the REAL model under KF_MODEL_MODE=anthropic.
+        # There is no fallback: a provider error stops the build with the
+        # response body in the log, and a run that made zero API calls exits 7.
+        # The ledger line (calls · tokens · cost · model) lands in the summary.
+        env:
           KF_MODEL_MODE: anthropic
+          KF_LEDGER_PURPOSE: answer_bake
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python scripts/build_showcase.py --out dist/showcase
 

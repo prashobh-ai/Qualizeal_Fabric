@@ -34,6 +34,7 @@ from http.server import ThreadingHTTPServer
 
 ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, ROOT)
+os.environ.setdefault("KF_LEDGER_PURPOSE", "answer_bake")
 os.environ.setdefault("KF_MODEL_MODE", "mock")  # deterministic, no network
 
 from knowledge_fabric.answer.service import AnswerService  # noqa: E402
@@ -180,6 +181,7 @@ ROLES = [
 ASKER_GETS = ["/api/corpus"]
 CURATOR_GETS = ["/curator/quality", "/curator/gaps", "/curator/documents", "/admin/sources"]
 ADMIN_GETS = [
+    "/admin/models",  # T35/T36 provider card + consumption (baked from this run's ledger)
     "/admin/users",
     "/admin/runs?limit=12",
     "/admin/audit?limit=40",
@@ -390,27 +392,18 @@ def _seed():
     qbank.generate(p, TENANT)  # bank from the loaded corpus
     svc = AnswerService(p)
     for subject, q in SCRIPT:
-        try:
-            svc.ask(demo.principal_for(p, TENANT, subject), q)
-        except Exception:
-            pass
+        svc.ask(demo.principal_for(p, TENANT, subject), q)  # T35: a provider error is loud
     # T29 — drive a broad spread across every role so the telemetry Explorer has
     # real volume to filter and pivot (role x level x model x language x kind).
     if not os.environ.get("KF_SHOWCASE_CORPUS_LIMIT"):  # full build only
         for subject in ROLES:
             for q in EXTRA_Q:
-                try:
-                    svc.ask(demo.principal_for(p, TENANT, subject), q)
-                except Exception:
-                    pass
+                svc.ask(demo.principal_for(p, TENANT, subject), q)
         # T30 — drive a few two-turn follow-ups so the Explorer's context
         # dimension (T26) carries `resolved` rows beside the `direct` majority.
         for subject, first, follow in FOLLOWUPS:
-            try:
-                ctx = {"turns": [{"question": first}]}
-                svc.ask(demo.principal_for(p, TENANT, subject), follow, context=ctx)
-            except Exception:
-                pass
+            ctx = {"turns": [{"question": first}]}
+            svc.ask(demo.principal_for(p, TENANT, subject), follow, context=ctx)
     return p
 
 
@@ -433,7 +426,7 @@ class _Client:
         except urllib.error.HTTPError as e:
             try:
                 return e.code, json.loads(e.read() or b"{}")
-            except Exception:
+            except json.JSONDecodeError:
                 return e.code, {}
 
 
@@ -702,12 +695,32 @@ def build(out_dir: str) -> None:
     )
 
 
+def _api_summary() -> int:
+    """T35/T36: the direct check that the key was used in THIS run. Prints and
+    appends the ledger line for this run id; under KF_MODEL_MODE=anthropic a
+    run with zero API calls exits 7."""
+    from knowledge_fabric.telemetry import api_ledger
+
+    line = api_ledger.step_summary_line()
+    print(line)
+    api_ledger.append_step_summary(line)
+    mode = (os.environ.get("KF_MODEL_MODE") or "").lower()
+    calls = api_ledger.summary(api_ledger.rows(2), api_ledger.run_id())["calls"]
+    if mode == "anthropic" and calls == 0:
+        print(
+            "build_showcase: KF_MODEL_MODE=anthropic but the ledger shows 0 API calls",
+            file=sys.stderr,
+        )
+        return 7
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="build_showcase")
     ap.add_argument("--out", default="dist/showcase")
     args = ap.parse_args(argv)
     build(args.out)
-    return 0
+    return _api_summary()
 
 
 if __name__ == "__main__":

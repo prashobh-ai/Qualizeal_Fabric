@@ -131,7 +131,10 @@ function bars(sig){const order=['retrieval','semantic','coverage','agreement','r
 function reasonWord(a){const r=((a.why||{}).reasons||[]).map(x=>x.code);
  return r.indexOf('confidence_fail')>=0?'Yes — escalated after a confidence check':'No'}
 function modelLabel(a){const m=a.model_name||'';
- return (!m||/mock|echo|demo|off|none/i.test(m))?'demo model':esc(m)}
+ // T35: the id from the provider's response, or "No model needed" when the
+ // extractive core answered. Only the explicit test double reads "demo model".
+ if(!m||/^none|extractive|off$/i.test(m))return 'No model needed';
+ return /mock|echo|demo/i.test(m)?'demo model':esc(m)}
 let CARD_GX={};
 function card(a){const box=$('#answer-card');const w=a.why||{};const lw=levelWord(w.level_name);
  const trust=Math.round((Number(a.confidence)||0)*100);

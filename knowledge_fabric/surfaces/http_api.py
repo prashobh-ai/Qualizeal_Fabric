@@ -645,6 +645,29 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, otel_export.export(p, prin.tenant, None))
             except TypeError:
                 return self._send(200, otel_export.export(p, prin.tenant))
+        if u.path == "/admin/models":
+            # T35/T36 — the provider card and API consumption, straight from the
+            # doctor's provider_status.json and the call ledger, so the numbers
+            # on screen are the ledger sums by construction.
+            prin = self._require("admin")
+            if not prin:
+                return
+            from ..adapters import model as _model
+            from ..telemetry import api_ledger
+
+            days = int(first("days", "7") or 7)
+            status = _model.provider_status()
+            mode = (os.environ.get("KF_MODEL_MODE") or "anthropic").lower()
+            return self._send(
+                200,
+                {
+                    "mode": mode,
+                    "allowed_models": list(_model.ALLOWED_MODELS),
+                    "provider": status,
+                    "key_present": bool(os.environ.get("ANTHROPIC_API_KEY", "").strip()),
+                    "consumption": api_ledger.consumption(days),
+                },
+            )
         if u.path == "/admin/doctor":
             prin = self._require("admin")
             if not prin:

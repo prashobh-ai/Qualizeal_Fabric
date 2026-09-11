@@ -25,7 +25,9 @@ cache savings, language, sources, dataset version and any reasoning trace.
 
 from __future__ import annotations
 
+import hashlib
 import math
+import os
 import re
 
 from ..adapters.embedder import cosine
@@ -1606,30 +1608,34 @@ class AnswerService:
                 {"role": "system", "content": _SYSTEM_PREAMBLE},
                 {"role": "user", "content": extractive},
             ]
-            try:
-                out = self.p.model.complete(principal.tenant, tier, msg, {"temperature": 0.0})
-                cost = out["cost"]
-                usage = out.get("usage", {})
-                tin = int(
-                    usage.get("in") or (len(_SYSTEM_PREAMBLE.split()) + len(extractive.split()))
-                )
-                tout = int(usage.get("out") or max(1, len(out.get("text", "").split())))
-                model_name = out.get("model_name") or model_for_tier(tier)
-                input_cost = tin * (5e-6 if tier in ("deep", "escalation") else 1e-6)
-                saved = self.p.cache.prompt_discount(_SYSTEM_PREAMBLE, input_cost)
-                cost = max(0.0, cost - saved)
-                self.p.policy.try_spend(
-                    principal.tenant, cost, principal.subject if principal.agent else None
-                )
-                checked = self._postcheck(out["text"], selected)
-                text = checked or extractive
-            except Exception:
-                # A model or network error must never lose the answer: fall back
-                # to the grounded extractive text — the citations already hold.
-                cost = tin = tout = 0
-                saved = 0.0
-                text = extractive
-                model_name = model_for_tier("none")
+            # T35: a provider error is LOUD — it propagates out of ask() so a
+            # bake or a queued answer fails visibly instead of silently serving
+            # the extractive draft under a real model's name. The keyless
+            # extractive path is `available() == False`, decided above, never a
+            # catch-all here.
+            out = self.p.model.complete(
+                principal.tenant,
+                tier,
+                msg,
+                {
+                    "temperature": 0.0,
+                    "purpose": os.environ.get("KF_LEDGER_PURPOSE", "answer_bake"),
+                    "question_hash": hashlib.sha1(question.encode("utf-8")).hexdigest()[:16],
+                },
+            )
+            cost = out["cost"]
+            usage = out.get("usage", {})
+            tin = int(usage.get("in") or (len(_SYSTEM_PREAMBLE.split()) + len(extractive.split())))
+            tout = int(usage.get("out") or max(1, len(out.get("text", "").split())))
+            model_name = out.get("model_name") or model_for_tier(tier)
+            input_cost = tin * (5e-6 if tier in ("deep", "escalation") else 1e-6)
+            saved = self.p.cache.prompt_discount(_SYSTEM_PREAMBLE, input_cost)
+            cost = max(0.0, cost - saved)
+            self.p.policy.try_spend(
+                principal.tenant, cost, principal.subject if principal.agent else None
+            )
+            checked = self._postcheck(out["text"], selected)
+            text = checked or extractive
         return text, citations, cost, tin, tout, saved, model_name
 
     def _postcheck(self, text, selected):
