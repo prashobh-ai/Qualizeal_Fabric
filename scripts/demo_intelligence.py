@@ -124,25 +124,35 @@ def main() -> int:
     print(f"  answer: {a.answer_text[:90]}…")
     print(f"  cited : {len(a.citations)} source(s); model: {a.model_name or 'extractive core'}")
     prov = mcp.tool_provider_status(p, TENANT)["result"]
-    print(f"  provider (honest): {prov['provider']} · available={prov['available']} "
-          f"· fallback={prov['fallback']}")
+    print(
+        f"  provider (honest): {prov['provider']} · available={prov['available']} "
+        f"· fallback={prov['fallback']}"
+    )
     gx = galaxy.build_payload(p, TENANT, a.trajectory_id)
-    print(f"  galaxy: {gx['stats']['nodes']} concepts, {gx['stats']['edges']} links; "
-          f"{len(gx['activated_ids'])} lit, {len(gx['halo_ids'])} in the halo")
+    print(
+        f"  galaxy: {gx['stats']['nodes']} concepts, {gx['stats']['edges']} links; "
+        f"{len(gx['activated_ids'])} lit, {len(gx['halo_ids'])} in the halo"
+    )
     if a.timing:
         t = a.timing
-        print(f"  timing: active {t['active_ms']}ms · idle {t['idle_ms']}ms · "
-              f"phases {', '.join(f'{k} {round(v)}ms' for k, v in t['phase_ms'].items())}")
+        print(
+            f"  timing: active {t['active_ms']}ms · idle {t['idle_ms']}ms · "
+            f"phases {', '.join(f'{k} {round(v)}ms' for k, v in t['phase_ms'].items())}"
+        )
 
     rule("T53 — a manual-review document never reaches an asker, until accepted")
     curation.set_mode(p, TENANT, "wiki", "manual")
     intake = Intake(p)
     intake.submit(
         intake.canonical(
-            TENANT, "wiki", "wiki://secret.md", "Project Zephyr",
+            TENANT,
+            "wiki",
+            "wiki://secret.md",
+            "Project Zephyr",
             b"# Project Zephyr\n\nProject Zephyr is an unreleased internal initiative "
             b"on the Fabric platform. Details are confidential.\n",
-            mime="text/markdown", acl=["public"],
+            mime="text/markdown",
+            acl=["public"],
         )
     )
     res = IngestWorker(p, intake).drain()[-1]
@@ -150,49 +160,63 @@ def main() -> int:
     out = curation.on_ingest(p, TENANT, doc, "wiki")
     held = svc.ask(who, "What is Project Zephyr?")
     print(f"  ingested under manual mode → state '{out['state']}' (review queue)")
-    print(f"  asked while in review → kind '{held.kind.value}', "
-          f"Zephyr in answer: {'zephyr' in held.answer_text.lower()}, "
-          f"cited: {len(held.citations)}")
+    print(
+        f"  asked while in review → kind '{held.kind.value}', "
+        f"Zephyr in answer: {'zephyr' in held.answer_text.lower()}, "
+        f"cited: {len(held.citations)}"
+    )
     curation.accept(p, TENANT, out["review_id"], actor="curator")
     now = svc.ask(who, "What is Project Zephyr?")
-    print(f"  curator accepts → asked again → cites the document: "
-          f"{doc['id'] in {c.document_id for c in now.citations}}")
+    print(
+        f"  curator accepts → asked again → cites the document: "
+        f"{doc['id'] in {c.document_id for c in now.citations}}"
+    )
 
     rule("T54 — the ingestion timeline")
     tl = curation.timeline(p, TENANT)
-    active = [(m['month'], sum(m[k] for k in ('ingested', 'accepted', 'auto_kept')))
-              for m in tl['months']]
+    active = [
+        (m["month"], sum(m[k] for k in ("ingested", "accepted", "auto_kept"))) for m in tl["months"]
+    ]
     active = [x for x in active if x[1]]
-    print(f"  year {tl['year']}: {len(tl['rows'])} events across "
-          f"{len(active)} month(s); {active}")
+    print(f"  year {tl['year']}: {len(tl['rows'])} events across {len(active)} month(s); {active}")
 
     rule("T57 — knowledge-graph insights")
     ins = graph_insights.insights(p, TENANT)
-    comm = [c for c in ins['communities'] if c.get('size', 0) > 1]
+    comm = [c for c in ins["communities"] if c.get("size", 0) > 1]
     print(f"  communities: {len(ins['communities'])} ({len(comm)} with >1 concept)")
     for c in comm[:3]:
-        print(f"    • {(c.get('labels') or ['?'])[0]} — {c['size']} concepts, "
-              f"cohesion {c['cohesion']:.2f}{' [thin]' if c.get('flag') else ''}")
+        print(
+            f"    • {(c.get('labels') or ['?'])[0]} — {c['size']} concepts, "
+            f"cohesion {c['cohesion']:.2f}{' [thin]' if c.get('flag') else ''}"
+        )
     print(f"  surprising cross-domain links: {len(ins['surprising'])}")
     print(f"  knowledge gaps: {len(ins['gaps'])}")
-    for g in ins['gaps'][:3]:
-        print(f"    • {g['kind']}: {g.get('label', '')} "
-              f"(tags: {', '.join(g.get('suggest_tags', []))})")
+    for g in ins["gaps"][:3]:
+        print(
+            f"    • {g['kind']}: {g.get('label', '')} "
+            f"(tags: {', '.join(g.get('suggest_tags', []))})"
+        )
 
     rule("T55 / T60 — token-meter + the same insights through governed MCP tools")
     from knowledge_fabric.telemetry import insights as tmeter
 
     ov = tmeter.overview(7)
     eff = ov["efficiency"].get("efficiency", 0.0)
-    print(f"  token-meter: efficiency {round(eff * 100)}% · provider quota "
-          f"{ov['provider_quota'].get('provider')} ({ov['provider_quota'].get('limit')})")
+    print(
+        f"  token-meter: efficiency {round(eff * 100)}% · provider quota "
+        f"{ov['provider_quota'].get('provider')} ({ov['provider_quota'].get('limit')})"
+    )
     fc = mcp.tool_fabric_communities(p, TENANT)["result"]["communities"]
     kg = mcp.tool_knowledge_gaps(p, TENANT)["result"]
-    print(f"  MCP fabric_communities → {len(fc)} communities; "
-          f"knowledge_gaps → {len(kg['gaps'])} gaps, {len(kg['surprising'])} surprising")
+    print(
+        f"  MCP fabric_communities → {len(fc)} communities; "
+        f"knowledge_gaps → {len(kg['gaps'])} gaps, {len(kg['surprising'])} surprising"
+    )
 
-    rule("DONE — T51–T60: galaxy, honest fallback, curation gate, timeline, "
-         "graph insights, token-meter and MCP — deterministic, no credits.")
+    rule(
+        "DONE — T51–T60: galaxy, honest fallback, curation gate, timeline, "
+        "graph insights, token-meter and MCP — deterministic, no credits."
+    )
 
     # A hard smoke gate: the review item must have been held, then answerable.
     held_cited = doc["id"] in {c.document_id for c in held.citations}

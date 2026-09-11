@@ -109,9 +109,7 @@ def modes(platform, tenant: str) -> dict:
     """The curation-mode settings for the Curator switch: the tenant default,
     every per-source override, and the allowed values."""
     _guard(tenant)
-    rows = platform.db.query(
-        "SELECT source, mode FROM curation_settings WHERE tenant=?", (tenant,)
-    )
+    rows = platform.db.query("SELECT source, mode FROM curation_settings WHERE tenant=?", (tenant,))
     by_source = {r["source"]: r["mode"] for r in rows if r["mode"] in MODES}
     return {
         "default": by_source.get(GLOBAL_SOURCE, _DEFAULT_MODE),
@@ -294,9 +292,7 @@ def review_doc_ids(platform, tenant: str) -> set:
     The answer path skips their passages so review content never reaches an
     asker's trace (T53). Empty for the seeded corpus, which has no state key."""
     try:
-        return {
-            d["id"] for d in platform.documents.list(tenant) if get_state(d) == "review"
-        }
+        return {d["id"] for d in platform.documents.list(tenant) if get_state(d) == "review"}
     except Exception:
         return set()
 

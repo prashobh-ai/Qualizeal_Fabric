@@ -579,9 +579,7 @@ def _bake(client, p=None) -> dict:
         # The whole-fabric galaxy (Curator graph) needs curate scope.
         curator_tok = tokens.get("curator")
         if curator_tok:
-            _, snap["galaxy_full"] = client.call(
-                "GET", "/api/galaxy/full", token=curator_tok
-            )
+            _, snap["galaxy_full"] = client.call("GET", "/api/galaxy/full", token=curator_tok)
         node_ids: set[str] = set()
         for g in list(snap["galaxy"].values()) + [snap.get("galaxy_full") or {}]:
             node_ids.update(g.get("activated_ids") or [])

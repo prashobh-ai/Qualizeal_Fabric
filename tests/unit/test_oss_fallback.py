@@ -19,10 +19,7 @@ import pytest
 _TMP = tempfile.mkdtemp(prefix="kf-oss-")
 os.environ["KF_DATA_ROOT"] = _TMP
 
-from knowledge_fabric.adapters import (
-    model,  # noqa: E402
-    oss_model,  # noqa: E402
-)
+from knowledge_fabric.adapters import model, oss_model  # noqa: E402
 from knowledge_fabric.telemetry import api_ledger  # noqa: E402
 
 
@@ -41,6 +38,7 @@ def _pin_data_root():
             os.environ.pop("KF_DATA_ROOT", None)
         else:
             os.environ["KF_DATA_ROOT"] = prev
+
 
 _EVIDENCE = (
     "The service provides automated testing across many repositories [1]. "

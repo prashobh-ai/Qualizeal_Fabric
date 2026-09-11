@@ -32,9 +32,7 @@ TENANT = "test-galaxy"
 TRACE = "trace_galaxy_1"
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-GALAXY_JS = os.path.join(
-    REPO_ROOT, "knowledge_fabric", "surfaces", "static", "vendor", "galaxy.js"
-)
+GALAXY_JS = os.path.join(REPO_ROOT, "knowledge_fabric", "surfaces", "static", "vendor", "galaxy.js")
 
 _BUCKETS = {"Concept", "Product", "Service", "Repository", "Person"}
 

@@ -41,8 +41,13 @@ class ReviewGateBase(unittest.TestCase):
 
     def _ingest_under_review(self) -> tuple[dict, str]:
         raw = self.intake.canonical(
-            T, "internal", "internal://z/beacon.md", SUBJECT, BODY.encode(),
-            mime="text/markdown", acl=["public"],
+            T,
+            "internal",
+            "internal://z/beacon.md",
+            SUBJECT,
+            BODY.encode(),
+            mime="text/markdown",
+            acl=["public"],
         )
         self.intake.submit(raw)
         res = IngestWorker(self.p, self.intake).drain()[-1]
