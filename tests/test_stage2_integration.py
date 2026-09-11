@@ -154,7 +154,8 @@ class TestHttpFixes(unittest.TestCase):
         self.assertEqual(code, 400)
 
     def test_sync_unknown_source_404_and_files_default_folder(self):
-        code, out = self._call("POST", "/admin/sync", "admin", {"source": "confluence"})
+        # 'confluence' is a registered connector since T41; 'sharepoint' is not.
+        code, out = self._call("POST", "/admin/sync", "admin", {"source": "sharepoint"})
         self.assertEqual(code, 404)
         code, out = self._call("POST", "/admin/sync", "admin", {"source": "files"})
         self.assertEqual(code, 200)

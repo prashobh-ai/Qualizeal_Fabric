@@ -63,7 +63,7 @@ class Platform:
         self.vindex = SqlVectorIndex(self.db, self.embedder.model_id())
         self.lindex = SqlLexicalIndex(self.db)
         self.telemetry = SqlTelemetry(self.db)
-        self.converter = DoclingLite()
+        self.converter = DoclingLite(platform=self)  # T41: image describe uses self.model
         self.model = build_model_client()
 
         self.documents = DocumentRepo(self.db)

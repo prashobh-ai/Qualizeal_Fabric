@@ -63,7 +63,7 @@ function renderFeedback(rows){const fb=rows||[];
 async function loadFeedback(){try{const d=await api('/curator/feedback');renderFeedback(d.feedback)}catch(e){}}
 async function loadAll(){try{
  const [q,g,d]=await Promise.all([api('/curator/quality'),api('/curator/gaps'),api('/curator/documents')]);gate(null);
- renderQuality(q);renderQueues(g);DOCS=d.documents||[];DATASET=d.dataset_version||0;renderDocs();renderAuthority(d.authority);loadFeedback()}
+ renderQuality(q);renderQueues(g);DOCS=d.documents||[];DATASET=d.dataset_version||0;renderDocs();renderAuthority(d.authority);loadFeedback();loadFabricViews()}
  catch(e){gate(e,'curator');if(e.status!==401&&e.status!==403)toast(e.message,'bad')}}
 
 async function decide(doc_id,decision,extra){const doc=DOCS.find(x=>x.document_id===doc_id)||{title:doc_id};
@@ -98,9 +98,88 @@ async function addDoc(ev){ev.preventDefault();const filename=$('#add-filename').
  catch(e){$('#add-status').textContent=e.message;toast(e.message,'bad')}
  finally{$('#add-btn').disabled=false}}
 
+// ---------------------------------------------------------------- T47: repositories / insights / tables
+// Everything below reads the fabric-data files through the curator routes
+// (facts.json, capabilities.json, dependencies.json, analysis/<repo>/,
+// tables/<doc>/<sheet>.sqlite). An empty fabric renders honest empty panels.
+let REPOS=[],TABLES=[];
+const LANG_COLORS=['#0096FF','#7048E8','#0CA678','#F53E5A','#E8A23A','#3B5BDB','#12B886','#868E96'];
+const PERMISSIVE=/^(mit|apache|bsd|isc|psf|unlicense|cc0|zlib|mpl)/i, COPYLEFT=/(gpl|agpl|lgpl|eupl|cddl|ssl|sspl)/i;
+function whenStr(s){if(!s)return '—';if(typeof s==='number')return KF.when(s);return String(s).replace('T',' ').replace(/(\.\d+)?(Z|[+-]\d\d:?\d\d)?$/,'').slice(0,16)}
+function capPills(cs){return (cs||[]).map(c=>'<span class="pill violet">'+esc(c)+'</span>').join(' ')||'<span class="muted small">none detected</span>'}
+function score01(s){if(s==null||s==='')return null;const v=Number(s);if(isNaN(v))return null;return v>1?Math.min(1,v/100):Math.max(0,v)}
+function scoreBar(s){const v=score01(s);if(v==null)return '<span class="muted small">—</span>';const col=v>=0.7?'var(--good)':v>=0.4?'var(--warn)':'var(--bad)';return '<div class="score" title="enterprise readiness">'+bar(v,col)+'<b>'+Math.round(v*100)+'</b></div>'}
+function licPill(l){const t=String(l||'').trim();if(!t)return '<span class="pill">unknown</span>';const cls=PERMISSIVE.test(t)?'good':COPYLEFT.test(t)?'warn':'';return '<span class="pill '+cls+'">'+esc(t)+'</span>'}
+function mdLite(md){if(!md)return '<span class="muted small">not generated yet</span>';return esc(md).replace(/^#{1,6}\s+(.*)$/gm,'<b>$1</b>').replace(/^\s*[-*]\s+/gm,'• ')}
+function repoRow(r){return '<tr data-repo="'+esc(r.repo)+'">'+
+ '<td><b>'+esc(r.repo)+'</b>'+(r.description?'<div class="muted small">'+esc(String(r.description).slice(0,120))+'</div>':'')+'</td>'+
+ '<td>'+(r.primary_language?'<span class="pill info">'+esc(r.primary_language)+'</span>':'<span class="muted">—</span>')+'</td>'+
+ '<td>'+num(r.commits)+'</td><td>'+num(r.prs_merged)+'</td><td>'+num(r.contributors_count)+'</td><td>'+num(r.deployments_count)+'</td>'+
+ '<td>'+capPills(r.capabilities)+'</td><td>'+scoreBar(r.enterprise_score)+'</td>'+
+ '<td class="mono small">'+esc(whenStr(r.pushed_at))+'</td>'+
+ '<td><div class="actions"><button class="btn sm" data-act="card"'+(r.has_card||r.has_architecture?'':' title="no analysis card yet — facts only"')+'>card</button>'+
+ '<button class="btn sm danger" data-act="delete">Delete</button></div></td></tr>'}
+function renderRepos(){$('#repo-count').textContent=REPOS.length+' repositories';
+ $('#repo-rows').innerHTML=REPOS.map(repoRow).join('')||'<tr><td colspan="10" class="empty">No repositories analysed yet — facts.json is written by the GitHub analysis workflow.</td></tr>';
+ KF.$$('#repo-rows button').forEach(b=>b.onclick=()=>{const repo=b.closest('tr').dataset.repo;b.dataset.act==='card'?openRepo(repo):deleteRepo(repo)})}
+async function loadRepos(){try{const d=await api('/curator/repositories');REPOS=Array.isArray(d)?d:(d.repositories||[]);renderRepos()}catch(e){if(e.status!==404)toast(e.message,'bad')}}
+function factTile(k,v){return '<div class="f"><div class="k">'+esc(k)+'</div><div class="v">'+v+'</div></div>'}
+function langBar(bar){if(!(bar||[]).length)return '<span class="muted small">no language data</span>';
+ return '<div class="langbar">'+bar.map((l,i)=>'<i style="width:'+(l.share*100).toFixed(1)+'%;background:'+LANG_COLORS[i%LANG_COLORS.length]+'" title="'+esc(l.name)+' '+(l.share*100).toFixed(1)+'%"></i>').join('')+'</div>'+
+  '<div class="legend">'+bar.map((l,i)=>'<span><span class="sw" style="background:'+LANG_COLORS[i%LANG_COLORS.length]+'"></span>'+esc(l.name)+' '+(l.share*100).toFixed(1)+'%</span>').join('')+'</div>'}
+function activity(list,empty){if(!(list||[]).length)return '<div class="muted small">'+esc(empty)+'</div>';
+ return '<ul class="queue">'+list.map(x=>'<li><b>'+esc(x.title)+'</b> <span class="muted small mono">'+esc(x.uri||'')+'</span>'+(x.snippet?'<div class="muted small">'+esc(x.snippet)+'</div>':'')+'</li>').join('')+'</ul>'}
+function renderRepoCard(d){const f=d.facts||{},pr=f.pull_requests||{},dep=f.deployments||{};
+ let html='<div class="facts">'+factTile('Commits',num(f.commits))+factTile('PRs merged',num(pr.merged)+' <span class="muted small">/ '+num(pr.total)+'</span>')+
+  factTile('Open PRs',num(pr.open))+factTile('Contributors',num(f.contributors_count))+factTile('Deployments',num(dep.count))+
+  factTile('Releases',num((f.releases||[]).length))+factTile('Last push','<span class="small mono">'+esc(whenStr(f.pushed_at))+'</span>')+factTile('As of','<span class="small mono">'+esc(whenStr(f.as_of))+'</span>')+'</div>';
+ if(f.description)html+='<p class="small" style="margin:10px 0 0">'+esc(f.description)+'</p>';
+ html+='<h4>Languages</h4>'+langBar(d.languages_bar);
+ html+='<h4>Capabilities</h4>'+((d.capabilities||[]).length?d.capabilities.map(c=>'<div class="cap-group"><span class="pill violet">'+esc(c.capability)+'</span> <span class="muted small">confidence '+pct(c.confidence)+'</span>'+
+  '<ul class="evidence">'+(c.evidence||[]).slice(0,6).map(e=>'<li><code>'+esc(e.path)+(e.line!=null?':'+esc(e.line):'')+'</code> '+esc(String(e.snippet||'').slice(0,140))+'</li>').join('')+'</ul></div>').join(''):'<div class="muted small">no capabilities classified</div>');
+ html+='<h4>Dependencies <span class="pill">'+num((d.dependencies||[]).length)+'</span></h4>'+((d.dependencies||[]).length?'<div class="tablewrap"><table><thead><tr><th>Name</th><th>Version</th><th>Ecosystem</th><th>Category</th><th>Licence</th></tr></thead><tbody>'+
+  d.dependencies.map(x=>'<tr><td><b>'+esc(x.name)+'</b></td><td class="mono small">'+esc(x.version||'')+'</td><td class="small">'+esc(x.ecosystem||'')+'</td><td class="small">'+esc(x.category||'')+'</td><td>'+licPill(x.licence)+'</td></tr>').join('')+'</tbody></table></div>':'<div class="muted small">no manifests parsed</div>');
+ html+='<h4>Architecture summary</h4><div class="md">'+mdLite(d.architecture_md)+'</div>';
+ if(d.card_md)html+='<h4>Repository card</h4><div class="md">'+mdLite(d.card_md)+'</div>';
+ html+='<h4>Contributors</h4>'+((d.contributors||[]).length?'<div class="row">'+d.contributors.slice(0,20).map(c=>'<span class="pill">'+esc(c.login)+' · '+num(c.contributions)+'</span>').join('')+'</div>':'<div class="muted small">—</div>');
+ const note=d.note||'no pull-request passages ingested yet';
+ html+='<h4>Recent pull requests</h4>'+activity(d.recent_prs,note)+'<h4>Recent commits</h4>'+activity(d.recent_commits,d.note||'no commit passages ingested yet');
+ if((f.workflows||[]).length)html+='<h4>Workflows</h4><div class="row">'+f.workflows.map(w=>'<span class="pill '+(w.last_conclusion==='success'?'good':w.last_conclusion==='failure'?'bad':'')+'">'+esc(w.name)+(w.last_conclusion?' · '+esc(w.last_conclusion):'')+'</span>').join('')+'</div>';
+ return html}
+async function openRepo(repo){const pnl=$('#repo-panel');pnl.classList.remove('hidden');$('#repo-title').textContent=repo;$('#repo-body').innerHTML='<div class="empty">loading…</div>';
+ try{const d=await api('/curator/repository?repo='+encodeURIComponent(repo));$('#repo-body').innerHTML=renderRepoCard(d)}
+ catch(e){$('#repo-body').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
+async function deleteRepo(repo){if(!confirm('Delete every ingested document of "'+repo+'"? Its passages leave retrieval and the dataset version is bumped (facts.json is untouched until the next analysis run).'))return;
+ try{const out=await api('/curator/repository/delete',{method:'POST',body:{repo}});toast('Removed '+num(out.deleted)+' document(s) of '+repo+' · dataset v'+out.dataset_version,'good');await loadAll()}catch(e){toast(e.message,'bad')}}
+function renderInsights(d){const caps=d.capabilities||{},keys=Object.keys(caps).sort();
+ const cb=$('#insights-capabilities');cb.className=keys.length?'':'empty';
+ cb.innerHTML=keys.length?keys.map(k=>'<div class="cap-group"><span class="pill violet">'+esc(k)+'</span> '+caps[k].map(r=>'<span class="pill" title="confidence '+pct(r.confidence)+'">'+esc(r.repo)+' · '+pct(r.confidence)+'</span>').join(' ')+'</div>').join(''):'No capabilities classified yet.';
+ const reuse=d.reuse||[];const rb=$('#insights-reuse');rb.className=reuse.length?'tablewrap':'empty';
+ rb.innerHTML=reuse.length?'<table><thead><tr><th>Repository</th><th>Symbol</th><th>Path</th><th>Why</th></tr></thead><tbody>'+reuse.map(r=>'<tr><td>'+esc(r.repo)+'</td><td class="mono small">'+esc(r.symbol)+'</td><td class="mono small">'+esc(r.path)+'</td><td class="small">'+esc(r.why)+'</td></tr>').join('')+'</tbody></table>':'No reuse candidates yet.';
+ $('#insights-meta').textContent=keys.length+' capabilities · '+reuse.length+' reuse candidates'}
+async function loadInsights(){try{renderInsights(await api('/curator/insights'))}catch(e){if(e.status!==404)toast(e.message,'bad')}}
+function renderTables(){$('#tables-count').textContent=TABLES.length+' sheets';const box=$('#tables-list');box.className=TABLES.length?'':'empty';
+ box.innerHTML=TABLES.length?TABLES.map(t=>'<div class="sheet"><b>'+esc(t.doc_title)+'</b> <span class="pill info">'+esc(t.sheet)+'</span> <span class="muted small">'+num(t.rows)+' rows'+(t.available===false?' · sqlite not present':'')+'</span>'+
+  '<div class="cols">'+(t.columns||[]).map(c=>'<span class="pill" title="'+esc(c.type||'')+'">'+esc(c.name)+(c.type?' <span class="muted">'+esc(c.type)+'</span>':'')+'</span>').join('')+'</div></div>').join(''):'No tables extracted yet — sheets are written under tables/<doc>/<sheet>.sqlite by the document workflow.';
+ const sel=$('#tq-sheet');sel.innerHTML=TABLES.map((t,i)=>'<option value="'+i+'">'+esc(t.doc_title+' · '+t.sheet)+'</option>').join('');$('#tq-run').disabled=!TABLES.length}
+async function loadTables(){try{const d=await api('/curator/tables');TABLES=Array.isArray(d)?d:(d.tables||[]);renderTables()}catch(e){if(e.status!==404)toast(e.message,'bad')}}
+function renderRows(out){const cols=out.columns||[],rows=out.rows||[];if(!rows.length)return '<div class="empty">no rows</div>';
+ const names=cols.map(c=>typeof c==='string'?c:c.name);const arr=rows.map(r=>Array.isArray(r)?r:names.map(n=>r[n]));
+ return '<table><thead><tr>'+names.map(n=>'<th>'+esc(n)+'</th>').join('')+'</tr></thead><tbody>'+arr.map(r=>'<tr>'+r.map(v=>'<td class="small">'+esc(v==null?'':v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>'}
+async function runTableQuery(){const t=TABLES[+$('#tq-sheet').value];if(!t)return;const sql=$('#tq-sql').value.trim()||'SELECT * FROM t LIMIT 20';
+ $('#tq-status').textContent='running…';$('#tq-run').disabled=true;
+ try{const out=await api('/curator/tables/query',{method:'POST',body:{doc_id:t.doc_id,sheet:t.sheet,sql}});const rows=out.rows||[];
+  if(!out.columns&&rows.length&&!Array.isArray(rows[0]))out.columns=Object.keys(rows[0]);
+  if(!out.columns)out.columns=(t.columns||[]).map(c=>c.name);
+  $('#tq-result').innerHTML=renderRows(out);$('#tq-status').textContent=rows.length+' row(s)'+(out.note?' · '+out.note:'')+(out.truncated?' · truncated':'')}
+ catch(e){$('#tq-result').innerHTML='';$('#tq-status').textContent=e.message;toast(e.message,e.status===501?'warn':'bad')}
+ finally{$('#tq-run').disabled=false}}
+async function loadFabricViews(){await Promise.all([loadRepos(),loadInsights(),loadTables()])}
+
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{DOCS=[];renderDocs();gate({status:401,message:''},'curator')}};
 KF.initBar({preferRole:'curator'});
 $('#doc-filter').addEventListener('change',renderDocs);$('#doc-search').addEventListener('input',renderDocs);
 $('#doc-refresh').onclick=loadAll;$('#history-close').onclick=()=>$('#history-panel').classList.add('hidden');
 $('#add-doc-form').addEventListener('submit',addDoc);
+$('#repo-refresh').onclick=loadFabricViews;$('#repo-close').onclick=()=>$('#repo-panel').classList.add('hidden');$('#tq-run').onclick=runTableQuery;
 if(KF.session)loadAll();else gate({status:401,message:''},'curator');

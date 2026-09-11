@@ -1,0 +1,5 @@
+{
+  "_note": "USD per MILLION tokens. Maintained by hand (T36); shown on Admin → Models. A fabric-data checkout may override this file at data/prices.json.",
+  "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
+  "claude-haiku-4-5": {"input": 1.0, "output": 5.0, "cache_read": 0.10, "cache_write": 1.25}
+}

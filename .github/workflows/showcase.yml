@@ -17,6 +17,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # T46: the ingest workflow fires this after it pushes fabric-data, so the
+  # showcase rebuilds from the new facts, analysis and baked answers.
+  repository_dispatch:
+    types: [fabric-updated]
 
 permissions:
   pages: write
@@ -30,20 +34,39 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # T46: the fabric-data checkout is the data root for the doctor (provider
+      # status), the ledger (api_calls/) and the build (answers/, facts).
+      KF_FABRIC_ROOT: ${{ github.workspace }}/fabric-data
+      KF_DATA_ROOT: ${{ github.workspace }}/fabric-data/data
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Build the interactive showcase (seed + bake + emit surfaces)
+      - name: Check out fabric-data into fabric-data/ (read-only here)
+        run: python -m knowledge_fabric.fabric_data_git checkout --root fabric-data
+
+      - name: Provider check — pin the models and prove the key (T35)
+        # Exits 2..6 with the exact cause (empty secret, key rejected, model
+        # outside the allowed set, Sonnet 4.6 unavailable, ping failed) and
+        # writes data/provider_status.json + the provider line to the summary.
         env:
-          # Answers are baked at build time. Add an ANTHROPIC_API_KEY repo secret
-          # to bake fluent, grounded, cited answers with the real model — the
-          # static site then serves them at zero runtime cost. Without the secret
-          # the model client falls back to the deterministic extractive path, so
-          # the build stays green either way.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python scripts/doctor.py --require anthropic
+
+      - name: Build the interactive showcase (seed + bake + emit surfaces)
+        # Answers are baked with the REAL model under KF_MODEL_MODE=anthropic.
+        # There is no fallback: a provider error stops the build with the
+        # response body in the log, and a run that made zero API calls exits 7.
+        # The ledger line (calls · tokens · cost · model) lands in the summary.
+        # fabric-data/answers/*.json (T44 bake + T45 queue) ship under
+        # dist/showcase/answers/ for the engine's baked-answer pass-through.
+        env:
           KF_MODEL_MODE: anthropic
+          KF_LEDGER_PURPOSE: answer_bake
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python scripts/build_showcase.py --out dist/showcase
 

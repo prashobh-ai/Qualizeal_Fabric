@@ -18,7 +18,8 @@
         "Zlib",
         "blessing",
         "CC0-1.0",
-        "CC-BY-4.0"
+        "CC-BY-4.0",
+        "MIT-CMU"
       ],
       "weak_copyleft": [
         "MPL-2.0",
@@ -1117,6 +1118,92 @@
       ],
       "why": "Exposes the fabric as MCP tools/resources; optional feature selected at start-up.",
       "evidence": "pyproject.toml [project.optional-dependencies].mcp; tests/integration/test_mcp.py"
+    },
+    {
+      "name": "openpyxl",
+      "role": "Excel (.xlsx) reader for the spreadsheet→SQLite route (T41)",
+      "linkage": "optional-runtime",
+      "licence": "MIT",
+      "licence_name": "MIT License",
+      "approved": true,
+      "status": "optional",
+      "import_names": [
+        "openpyxl"
+      ],
+      "distributions": [
+        "openpyxl"
+      ],
+      "why": "Reads every sheet of an uploaded workbook into tables/<doc>/<sheet>.sqlite; guarded import, stdlib zip/xml fallback covers plain workbooks.",
+      "evidence": "knowledge_fabric/ingestion/tables.py"
+    },
+    {
+      "name": "pytesseract",
+      "role": "OCR for images and scanned pages (T41)",
+      "linkage": "optional-runtime",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0",
+      "approved": true,
+      "status": "optional",
+      "import_names": [
+        "pytesseract"
+      ],
+      "distributions": [
+        "pytesseract"
+      ],
+      "why": "Wraps the tesseract binary so image text becomes searchable passages; guarded import, images without OCR still get a stored description.",
+      "evidence": "knowledge_fabric/ingestion/images.py"
+    },
+    {
+      "name": "Pillow",
+      "role": "image decoding for OCR + description (T41)",
+      "linkage": "optional-runtime",
+      "licence": "MIT-CMU",
+      "licence_name": "Historical Permission Notice and Disclaimer (MIT-CMU / HPND)",
+      "approved": true,
+      "status": "optional",
+      "import_names": [
+        "PIL"
+      ],
+      "distributions": [
+        "Pillow",
+        "pillow"
+      ],
+      "why": "Decodes PNG/JPEG for the OCR step and image sizing; guarded import.",
+      "evidence": "knowledge_fabric/ingestion/images.py"
+    },
+    {
+      "name": "svglib",
+      "role": "SVG rasterising for diagram understanding (T41)",
+      "linkage": "optional-runtime",
+      "licence": "BSD-3-Clause",
+      "licence_name": "BSD 3-Clause License",
+      "approved": true,
+      "status": "optional",
+      "import_names": [
+        "svglib"
+      ],
+      "distributions": [
+        "svglib"
+      ],
+      "why": "Turns SVG diagrams into a raster the describe step can read; guarded import.",
+      "evidence": "knowledge_fabric/ingestion/images.py"
+    },
+    {
+      "name": "reportlab",
+      "role": "render backend used by svglib (T41)",
+      "linkage": "optional-runtime",
+      "licence": "BSD-3-Clause",
+      "licence_name": "BSD 3-Clause License",
+      "approved": true,
+      "status": "optional",
+      "import_names": [
+        "reportlab"
+      ],
+      "distributions": [
+        "reportlab"
+      ],
+      "why": "svglib's rendering backend; only imported alongside svglib; guarded import.",
+      "evidence": "knowledge_fabric/ingestion/images.py"
     }
   ]
 }

@@ -116,14 +116,46 @@ async function doctor(){$('#doctor-btn').disabled=true;$('#doctor-report').textC
   $('#doctor-report').textContent=d.report||d.error||JSON.stringify(d,null,2)}
  catch(e){$('#doctor-report').textContent=e.message;toast(e.message,'bad')}finally{$('#doctor-btn').disabled=false}}
 
+// ---------------------------------------------------------------- models (T35/T36)
+function fmtRow(cells){return '<tr>'+cells.map(c=>'<td>'+c+'</td>').join('')+'</tr>'}
+function usd(x){return '$'+(Number(x)||0).toFixed(4)}
+async function loadModels(){try{const days=$('#models-days')?$('#models-days').value:'7';const d=await api('/admin/models?days='+encodeURIComponent(days));
+ const p=d.provider||{};const c=d.consumption||{};const t=c.totals||{};
+ const prov=p.provider?('<span class="pill good">'+esc(p.provider)+'</span> <span class="pill">key …'+esc(String(p.key_fingerprint||'').slice(-4))+'</span> <span class="pill">small '+esc(p.model_small)+'</span> <span class="pill">large '+esc(p.model_large)+'</span> <span class="muted small">verified '+esc(p.verified_at||'')+' · ping '+esc(((p.ping_usage||{}).input_tokens||0)+'/'+((p.ping_usage||{}).output_tokens||0))+' tokens</span>')
+  :('<span class="pill '+(d.key_present?'warn':'bad')+'">'+(d.key_present?'key present — run doctor --require anthropic':'no ANTHROPIC_API_KEY')+'</span>');
+ $('#provider-card').innerHTML=prov+' <span class="pill">mode '+esc(d.mode||'')+'</span> <span class="muted small">allowed: '+esc((d.allowed_models||[]).join(', '))+'</span>';
+ $('#models-totals').innerHTML=['<span class="pill">'+esc(t.calls||0)+' calls</span>','<span class="pill">in '+esc(t.input_tokens||0)+'</span>','<span class="pill">out '+esc(t.output_tokens||0)+'</span>','<span class="pill">cache read '+esc(t.cache_read||0)+'</span>','<span class="pill">cache write '+esc(t.cache_write||0)+'</span>','<span class="pill good">'+usd(t.cost_usd)+'</span>'].join(' ');
+ const tbl=(id,obj,extra)=>{const b=$(id+' tbody');const ks=Object.keys(obj||{});b.innerHTML=ks.length?ks.map(k=>{const v=obj[k];return fmtRow([esc(k),esc(v.calls),esc(v.input_tokens),esc(v.output_tokens),esc(v.cache_read)].concat(extra?[esc(v.cache_write)]:[]).concat([usd(v.cost_usd)]))}).join(''):'<tr><td colspan="7" class="empty">—</td></tr>'};
+ tbl('#models-purpose',c.by_purpose);tbl('#models-model',c.by_model);tbl('#models-day',c.by_day,true);
+ $('#models-prices').innerHTML=Object.keys(c.prices||{}).map(m=>{const v=c.prices[m];return '<span class="pill" title="cache read '+esc(v.cache_read)+' · cache write '+esc(v.cache_write)+'">'+esc(m)+' · in '+esc(v.input)+' · out '+esc(v.output)+'</span>'}).join(' ')||'<span class="muted small">—</span>';
+ $('#models-calls tbody').innerHTML=(c.last_calls||[]).map(r=>fmtRow([esc((r.ts||'').replace('T',' ').slice(0,19)),'<span class="pill">'+esc(r.purpose)+'</span>',esc(r.model),esc(r.workflow),esc(r.input_tokens),esc(r.output_tokens),esc(r.cache_read_input_tokens),esc(r.latency_ms)+'ms',usd(r.cost_usd),'<span class="mono small">'+esc(String(r.request_id||'').slice(0,18))+'</span>'])).join('')||'<tr><td colspan="10" class="empty">no API calls recorded</td></tr>'}catch(e){}}
+
+// ---------------------------------------------------------------- sources (T47)
+// GitHub / Jira / Confluence cards from GET /admin/sources: last run + next run
+// (refresh scheduler), counts (facts.json), the live rate limit when known.
+const SRC_LABEL={github:'GitHub',jira:'Jira',confluence:'Confluence'};
+const SRC_COUNTS={github:['repositories','commits','prs','issues'],jira:['projects','issues'],confluence:['spaces','pages']};
+function srcStatus(s){const st=String(s.last_status||'');if(st.startsWith('error'))return '<span class="pill bad" title="'+esc(st)+'">error</span>';
+ if(st.startsWith('skipped'))return '<span class="pill warn">'+esc(st)+'</span>';
+ if(s.last_run)return '<span class="pill good">'+esc(st||'ok')+'</span>';return '<span class="pill">never run</span>'}
+function srcCard(name,s){s=s||{};const counts=s.counts||{};
+ return '<div class="conn-card'+(s.enabled?'':' off')+'" data-source="'+esc(name)+'"><h4>'+esc(SRC_LABEL[name]||name)+'<span style="margin-left:auto">'+srcStatus(s)+'</span></h4>'+
+  '<div class="hl"><span>last run</span><span class="mono">'+(s.last_run?esc(ago(s.last_run)):'—')+'</span>'+
+  '<span>next run</span><span class="mono">'+(s.next_run?esc(when(s.next_run)):'not scheduled')+'</span>'+
+  (SRC_COUNTS[name]||Object.keys(counts)).map(k=>'<span>'+esc(k)+'</span><span class="mono">'+num(counts[k])+'</span>').join('')+
+  (name==='github'?'<span>rate limit remaining</span><span class="mono">'+(s.rate_limit_remaining==null?'unknown — live connector not attached':num(s.rate_limit_remaining))+'</span>':'')+
+  '<span>facts as of</span><span class="mono">'+esc(s.as_of||'—')+'</span></div></div>'}
+async function loadSources(){try{const d=await api('/admin/sources');$('#sources-cards').innerHTML=['github','jira','confluence'].map(n=>srcCard(n,d[n])).join('')}
+ catch(e){$('#sources-cards').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
+
 // ---------------------------------------------------------------- boot
 async function loadAll(){try{await loadConnectors()}catch(e){return}
- await Promise.all([loadRuns(),loadUsers(),loadAuthority(),loadAudit()]);
+ await Promise.all([loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources()]);
  if(await loadRuns())schedulePoll()}
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{$('#connectors').innerHTML='';gate({status:401,message:''},'admin')}};
 KF.initBar({preferRole:'admin'});
 $('#connectors-refresh').onclick=loadAll;$('#run-due-btn').onclick=runDue;
 $('#upload-add').onclick=addToBatch;$('#upload-btn').onclick=upload;$('#delete-btn').onclick=bulkDelete;
-$('#budget-btn').onclick=setBudget;$('#authority-btn').onclick=setAuthority;$('#audit-refresh').onclick=loadAudit;$('#doctor-btn').onclick=doctor;
+$('#budget-btn').onclick=setBudget;$('#authority-btn').onclick=setAuthority;$('#audit-refresh').onclick=loadAudit;$('#doctor-btn').onclick=doctor;$('#models-refresh').onclick=loadModels;$('#models-days').onchange=loadModels;
 $('#add-user-btn').onclick=addUser;
 if(KF.session)loadAll();else gate({status:401,message:''},'admin');

@@ -1,0 +1,50 @@
+{"id": "facts.01", "question": "how many commits in acme/knowledge-fabric", "expect": 1284, "kind": "count"}
+{"id": "facts.02", "question": "how many contributors in acme/knowledge-fabric", "expect": 7, "kind": "count"}
+{"id": "facts.03", "question": "how many pull requests were merged in acme/knowledge-fabric", "expect": 212, "kind": "count"}
+{"id": "facts.04", "question": "how many open pull requests in acme/knowledge-fabric", "expect": 9, "kind": "count"}
+{"id": "facts.05", "question": "which languages are used in acme/knowledge-fabric", "expect": ["Python", "JavaScript"], "kind": "list"}
+{"id": "facts.06", "question": "how many deployments in acme/knowledge-fabric", "expect": 41, "kind": "count"}
+{"id": "facts.07", "question": "how many repositories do we have", "expect": 3, "kind": "count"}
+{"id": "facts.08", "question": "do we have any rag implementation", "expect": 2, "kind": "count"}
+{"id": "facts.09", "question": "have we ever built a knowledge graph", "expect": 1, "kind": "count"}
+{"id": "facts.10", "question": "is there any caching implementation", "expect": 2, "kind": "count"}
+{"id": "facts.11", "question": "which retrieval techniques were used in acme/knowledge-fabric", "expect": ["bm25", "dense", "rrf"], "kind": "list"}
+{"id": "facts.12", "question": "licensed libraries in acme/knowledge-fabric", "expect": ["fastapi", "pydantic"], "kind": "list"}
+{"id": "facts.13", "question": "is acme/knowledge-fabric production ready", "expect": 80, "kind": "score"}
+{"id": "facts.14", "question": "reusable components for caching", "expect": ["AnswerCache"], "kind": "list"}
+{"id": "facts.15", "question": "examples of retry_call implementation", "expect": ["retry_call"], "kind": "list"}
+{"id": "facts.16", "question": "do we have a css template for dashboards", "expect": ["dashboard.css"], "kind": "list"}
+{"id": "facts.17", "question": "who worked on acme/knowledge-fabric", "expect": ["alice", "bob"], "kind": "list"}
+{"id": "facts.18", "question": "how many commits in acme/etl-jobs", "expect": 96, "kind": "count"}
+{"id": "facts.19", "question": "how many contributors in acme/etl-jobs", "expect": 2, "kind": "count"}
+{"id": "facts.20", "question": "how many pull requests merged in acme/web-portal", "expect": 58, "kind": "count"}
+{"id": "facts.v01", "question": "total commits for knowledge-fabric", "expect": 1284, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v02", "question": "commit count knowledge fabric repo", "expect": 1284, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v03", "question": "number of contributors on knowledge-fabric", "expect": 7, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v04", "question": "merged PRs in knowledge-fabric", "expect": 212, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v05", "question": "PRs merged for knowledge fabric", "expect": 212, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v06", "question": "open PRs knowledge-fabric", "expect": 9, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v07", "question": "languages in knowledge-fabric", "expect": ["Python", "JavaScript"], "kind": "list", "variant_of": "facts"}
+{"id": "facts.v08", "question": "deployments of knowledge-fabric", "expect": 41, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v09", "question": "how many repos do we have", "expect": 3, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v10", "question": "count of repositories", "expect": 3, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v11", "question": "any RAG implementations?", "expect": 2, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v12", "question": "did we build RAG anywhere", "expect": 2, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v13", "question": "knowledge graph built before?", "expect": 1, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v14", "question": "caching implementations we have", "expect": 2, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v15", "question": "retrieval techniques in knowledge-fabric", "expect": ["bm25", "dense", "rrf"], "kind": "list", "variant_of": "facts"}
+{"id": "facts.v16", "question": "what retrieval was used in knowledge fabric", "expect": ["bm25", "dense", "rrf"], "kind": "list", "variant_of": "facts"}
+{"id": "facts.v17", "question": "libraries and licences in knowledge-fabric", "expect": ["fastapi", "pydantic"], "kind": "list", "variant_of": "facts"}
+{"id": "facts.v18", "question": "is knowledge-fabric enterprise ready", "expect": 80, "kind": "score", "variant_of": "facts"}
+{"id": "facts.v19", "question": "is knowledge fabric scalable", "expect": 80, "kind": "score", "variant_of": "facts"}
+{"id": "facts.v20", "question": "reusable caching components", "expect": ["AnswerCache"], "kind": "list", "variant_of": "facts"}
+{"id": "facts.v21", "question": "show retry_call examples", "expect": ["retry_call"], "kind": "list", "variant_of": "facts"}
+{"id": "facts.v22", "question": "do we have dashboard css", "expect": ["dashboard.css"], "kind": "list", "variant_of": "facts"}
+{"id": "facts.v23", "question": "who owns knowledge-fabric", "expect": ["alice", "bob"], "kind": "list", "variant_of": "facts"}
+{"id": "facts.v24", "question": "commits in etl-jobs", "expect": 96, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v25", "question": "contributors etl-jobs", "expect": 2, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v26", "question": "merged pull requests web-portal", "expect": 58, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v27", "question": "how many PRs merged in web-portal", "expect": 58, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v28", "question": "total commits etl jobs", "expect": 96, "kind": "count", "variant_of": "facts"}
+{"id": "facts.v29", "question": "who worked on etl-jobs", "expect": ["carol", "dave"], "kind": "list", "variant_of": "facts"}
+{"id": "facts.v30", "question": "languages used in web-portal", "expect": ["TypeScript"], "kind": "list", "variant_of": "facts"}

@@ -34,17 +34,22 @@ licence, named against each entry.
 | msal | MIT License | Azure/Entra auth for the SharePoint connector (P2.x) |
 | numpy | BSD 3-Clause License | audio buffer arithmetic for the speech loop (P8) |
 | openai | Apache License 2.0 | provider gateway OpenAI backend (P4.5) |
+| openpyxl | MIT License | Excel (.xlsx) reader for the spreadsheet→SQLite route (T41) |
 | opentelemetry-api | Apache License 2.0 | real Telemetry SDK adapter (P5.1) |
 | opentelemetry-exporter-otlp-proto-http | Apache License 2.0 | OTLP/HTTP exporter |
 | opentelemetry-instrumentation | Apache License 2.0 | OTel auto-instrumentation base |
 | opentelemetry-sdk | Apache License 2.0 | OTel SDK runtime |
 | opentelemetry-semantic-conventions | Apache License 2.0 | OTel GenAI semantic conventions |
 | pg8000 | BSD 3-Clause | PostgreSQL driver (AWS shape) |
+| Pillow | Historical Permission Notice and Disclaimer (MIT-CMU / HPND) | image decoding for OCR + description (T41) |
 | PyJWT | MIT License | OIDC/JWKS token verification (cloud identity adapter, KF_IDENTITY=oidc) |
+| pytesseract | Apache License 2.0 | OCR for images and scanned pages (T41) |
+| reportlab | BSD 3-Clause License | render backend used by svglib (T41) |
 | sentence-transformers | Apache License 2.0 | real embedder engine behind the Embedder contract (P3.2) |
 | silero-vad | MIT License | voice-activity detection (P8.1) |
 | soundfile | BSD 3-Clause License | audio I/O for the speech loop (P8) |
 | spacy | MIT License | named-entity recognition adapter (P3.5) |
+| svglib | BSD 3-Clause License | SVG rasterising for diagram understanding (T41) |
 | tiktoken | MIT License | provider-accurate tokenisation for pricing/limits (P4.5) |
 | torch | PyTorch BSD-3-Clause | tensor backend used by sentence-transformers and faster-whisper |
 | transformers | Apache License 2.0 | HuggingFace transformers used by embedder / NLLB (P3.4) |

@@ -18,6 +18,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from .. import fabric_views
 from ..adapters import cloud
 from ..answer.service import AnswerService
 from ..app import Platform
@@ -94,6 +95,63 @@ def _demo_delta(tenant: str, source: str) -> list[dict] | None:
     """The product fabric carries no synthetic connector records (L0.2), so
     'Sync now' runs the real connector (which pulls the live API). Returns
     None here; the continuous-refresh demo runs against a test fabric."""
+    return None
+
+
+def _github_rate_limit():
+    """``rate_limit_remaining()`` from the live GitHub connector when that
+    module ships it; ``None`` (shown as unknown) otherwise — never invented."""
+    try:
+        from ..connectors import github_live  # another track; optional
+    except Exception:
+        return None
+    fn = getattr(github_live, "rate_limit_remaining", None)
+    if not callable(fn):
+        return None
+    try:
+        return fn()
+    except Exception:
+        return None
+
+
+def _source_cards(p, tenant: str) -> dict:
+    """T47 — the GitHub / Jira / Confluence cards for ``GET /admin/sources``:
+    ``{last_run, next_run, counts, as_of}`` per source (+ ``rate_limit_remaining``
+    for GitHub). Runs come from the refresh scheduler's health; counts from
+    ``facts.json``."""
+    health = {h["source"]: h for h in scheduler.health(p, tenant)}
+    cards = fabric_views.source_counts()
+    out = {}
+    for source in ("github", "jira", "confluence"):
+        h = health.get(source) or {}
+        card = dict(cards.get(source) or {"counts": {}, "as_of": None})
+        card.update(
+            {
+                "last_run": h.get("last_run"),
+                "next_run": h.get("next_run"),
+                "last_status": h.get("last_status"),
+                "items": h.get("items", 0),
+                "enabled": h.get("enabled", False),
+            }
+        )
+        if source == "github":
+            card["rate_limit_remaining"] = _github_rate_limit()
+        out[source] = card
+    return out
+
+
+def _table_query_fn():
+    """The SELECT-only table runner from the T42/T43 tool API
+    (``answer.tools.run_table_query`` or ``answer.tables.run_table_query``),
+    or ``None`` when that track has not landed — the route answers 501."""
+    for mod in ("tools", "tables"):
+        try:
+            m = __import__(f"knowledge_fabric.answer.{mod}", fromlist=["run_table_query"])
+        except Exception:
+            continue
+        fn = getattr(m, "run_table_query", None)
+        if callable(fn):
+            return fn
     return None
 
 
@@ -425,6 +483,8 @@ class Handler(BaseHTTPRequestHandler):
             docs = p.documents.list(prin.tenant)
             nodes, edges = p.graph_repo.counts(prin.tenant)
             domains = len({d.get("source", "") for d in docs if d.get("source")})
+            # T47 — five more tiles (repositories, jira_projects,
+            # confluence_spaces, tables, images) read from the fabric-data files.
             return self._send(
                 200,
                 {
@@ -434,6 +494,7 @@ class Handler(BaseHTTPRequestHandler):
                     "entities": nodes,
                     "relationships": edges,
                     "domains": domains,
+                    **fabric_views.corpus_tiles(),
                 },
             )
         if u.path == "/api/usage":
@@ -510,7 +571,17 @@ class Handler(BaseHTTPRequestHandler):
             prin = self._require("curate")
             if not prin:
                 return
-            return self._send(200, {"sources": SyncManager(p).source_health(prin.tenant)})
+            # T47 — beside the cursor-level source health, one card each for
+            # GitHub / Jira / Confluence: last run + next run from the refresh
+            # scheduler, counts from facts.json, the live rate limit when the
+            # live GitHub connector exposes it.
+            return self._send(
+                200,
+                {
+                    "sources": SyncManager(p).source_health(prin.tenant),
+                    **_source_cards(p, prin.tenant),
+                },
+            )
         if u.path == "/curator/gaps":
             prin = self._require("curate")
             if not prin:
@@ -522,6 +593,28 @@ class Handler(BaseHTTPRequestHandler):
                     "contradictions": p.curation.list(prin.tenant, "contradiction"),
                     "review_queue": p.curation.list(prin.tenant, "low-confidence"),
                     "risk_register": health.risk_register(p, prin.tenant),
+                },
+            )
+        if u.path == "/curator/recommendations":
+            # T44 — documents whose generated questions FAILED in the bake
+            # (gap / clarify / no citations), from data/quality/bake_failures.json.
+            prin = self._require("curate")
+            if not prin:
+                return
+            from .. import baking as _baking
+
+            recs = _baking.recommendations(int(first("limit", "50") or 50))
+            return self._send(
+                200,
+                {
+                    "recommendations": recs,
+                    "documents": len(recs),
+                    "failed_questions": sum(r["failed"] for r in recs),
+                    "state": {
+                        k: {"baked_at": v.get("baked_at"), "kept": v.get("kept")}
+                        for k, v in _baking.load_state().items()
+                        if k.startswith(prin.tenant + ":")
+                    },
                 },
             )
         if u.path == "/curator/feedback":
@@ -645,6 +738,29 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, otel_export.export(p, prin.tenant, None))
             except TypeError:
                 return self._send(200, otel_export.export(p, prin.tenant))
+        if u.path == "/admin/models":
+            # T35/T36 — the provider card and API consumption, straight from the
+            # doctor's provider_status.json and the call ledger, so the numbers
+            # on screen are the ledger sums by construction.
+            prin = self._require("admin")
+            if not prin:
+                return
+            from ..adapters import model as _model
+            from ..telemetry import api_ledger
+
+            days = int(first("days", "7") or 7)
+            status = _model.provider_status()
+            mode = (os.environ.get("KF_MODEL_MODE") or "anthropic").lower()
+            return self._send(
+                200,
+                {
+                    "mode": mode,
+                    "allowed_models": list(_model.ALLOWED_MODELS),
+                    "provider": status,
+                    "key_present": bool(os.environ.get("ANTHROPIC_API_KEY", "").strip()),
+                    "consumption": api_ledger.consumption(days),
+                },
+            )
         if u.path == "/admin/doctor":
             prin = self._require("admin")
             if not prin:
@@ -663,6 +779,32 @@ class Handler(BaseHTTPRequestHandler):
                     pass
             report["selection"] = cloud.selection(dict(os.environ))
             return self._send(200, report)
+
+        # ---- T47: fabric-data views (repositories, tables, insights) -----
+        if u.path == "/curator/repositories":
+            prin = self._require("curate")
+            if not prin:
+                return
+            return self._send(200, fabric_views.repositories())
+        if u.path == "/curator/repository":
+            prin = self._require("curate")
+            if not prin:
+                return
+            repo = first("repo", "") or ""
+            card = fabric_views.repository(repo, p, prin.tenant)
+            if card is None:
+                return self._send(404, {"error": f"repository '{repo}' is not in facts.json"})
+            return self._send(200, card)
+        if u.path == "/curator/tables":
+            prin = self._require("curate")
+            if not prin:
+                return
+            return self._send(200, fabric_views.tables())
+        if u.path == "/curator/insights":
+            prin = self._require("curate")
+            if not prin:
+                return
+            return self._send(200, fabric_views.insights())
         return self._send(404, {"error": "not found"})
 
     # ------------------------------------------------------------ POST
@@ -952,6 +1094,71 @@ class Handler(BaseHTTPRequestHandler):
                     ],
                 },
             )
+
+        # ---- T47: repositories + tables ----------------------------------
+        if u.path == "/curator/repository/delete":
+            # Tombstone every document the GitHub connector ingested for the
+            # repository (uri prefix github://<repo>/) — the same path the
+            # curator's per-document Delete takes, so passages leave retrieval
+            # and the dataset version bumps.
+            prin = self._require("curate")
+            if not prin:
+                return
+            b = self._body()
+            repo = (b.get("repo") or "").strip().strip("/")
+            if not repo:
+                return self._send(400, {"error": "repo required (owner/name)"})
+            prefix = f"github://{repo}/"
+            docs = [
+                d for d in p.documents.list(prin.tenant) if (d.get("uri") or "").startswith(prefix)
+            ]
+            deleted = self._delete_docs(prin, docs, f"repository delete: {repo}")
+            self._audit(prin, "delete_repository", repo, f"{len(deleted)} document(s)")
+            return self._send(
+                200,
+                {
+                    "repo": repo,
+                    "deleted": len(deleted),
+                    "document_ids": deleted,
+                    "dataset_version": versioning.current_dataset(p, prin.tenant),
+                    "in_facts": repo in (fabric_views.facts().get("repositories") or {}),
+                },
+            )
+        if u.path == "/curator/tables/query":
+            prin = self._require("curate")
+            if not prin:
+                return
+            b = self._body()
+            doc_id, sheet, sql = (
+                str(b.get("doc_id") or ""),
+                str(b.get("sheet") or ""),
+                str(b.get("sql") or ""),
+            )
+            if not (doc_id and sheet and sql.strip()):
+                return self._send(400, {"error": "doc_id, sheet and sql are required"})
+            if not sql.lstrip().lower().startswith(("select", "with")):
+                return self._send(400, {"error": "only SELECT queries are allowed"})
+            run = _table_query_fn()
+            if run is None:
+                return self._send(
+                    501,
+                    {
+                        "error": "table query unavailable: knowledge_fabric.answer.tools."
+                        "run_table_query is not installed in this build",
+                        "doc_id": doc_id,
+                        "sheet": sheet,
+                    },
+                )
+            try:
+                out = run(doc_id, sheet, sql, max_rows=int(b.get("max_rows") or 200))
+            except TypeError:
+                out = run(doc_id, sheet, sql)
+            except (ValueError, PermissionError) as e:
+                return self._send(400, {"error": str(e)})
+            except FileNotFoundError as e:
+                return self._send(404, {"error": str(e)})
+            self._audit(prin, "table_query", f"{doc_id}/{sheet}", sql[:200])
+            return self._send(200, out if isinstance(out, dict) else {"result": out})
         return self._send(404, {"error": "not found"})
 
 

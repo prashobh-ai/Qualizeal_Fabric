@@ -137,6 +137,10 @@ class Document:
     current_version: int = 1
     # scope label used by permission-before-ranking (I6). A passage inherits it.
     acl: list[str] = field(default_factory=lambda: ["public"])
+    # T41 — persisted intake metadata: ``source_kind`` (document|table|image|jira|
+    # confluence|code|analysis), ``citation_url``, ``acl``, ``arrived_at`` plus any
+    # connector-specific keys (Jira fields, Confluence page version, …).
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------
