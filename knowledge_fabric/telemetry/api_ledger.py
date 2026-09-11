@@ -47,9 +47,10 @@ def data_root() -> str:
 
 
 def run_id() -> str:
-    """The Actions run id when present, else a per-process id — so a bake's
-    calls can be summed for its own run summary."""
-    rid = os.environ.get("GITHUB_RUN_ID") or os.environ.get("KF_RUN_ID")
+    """The id a bake's calls are summed under for its run summary. An explicit
+    ``KF_RUN_ID`` wins (a script or test scoping its own run); otherwise the
+    ambient Actions ``GITHUB_RUN_ID``; otherwise a per-process id."""
+    rid = os.environ.get("KF_RUN_ID") or os.environ.get("GITHUB_RUN_ID")
     if not rid:
         rid = os.environ["KF_RUN_ID"] = uuid.uuid4().hex[:12]
     return rid

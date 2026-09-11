@@ -301,15 +301,21 @@ class TestLedger(_Env):
     def test_build_summary_exit_7_when_anthropic_made_no_calls(self):
         import scripts.build_showcase as b
 
-        os.environ["KF_RUN_ID"] = "run-with-no-calls"
-        os.environ["KF_MODEL_MODE"] = "anthropic"
-        try:
+        # Scope the summary to a run that made no calls. Under Actions the
+        # ambient GITHUB_RUN_ID is set — the explicit KF_RUN_ID must win over
+        # it, or the summary would count every call the job has made so far.
+        env = {"KF_RUN_ID": "run-with-no-calls", "KF_MODEL_MODE": "anthropic"}
+        with mock.patch.dict(os.environ, env):
             self.assertEqual(b._api_summary(), 7)
             os.environ["KF_MODEL_MODE"] = "off"
             self.assertEqual(b._api_summary(), 0)
-        finally:
+
+    def test_explicit_run_id_wins_over_ambient_actions_id(self):
+        with mock.patch.dict(os.environ, {"GITHUB_RUN_ID": "999", "KF_RUN_ID": "mine"}):
+            self.assertEqual(api_ledger.run_id(), "mine")
+        with mock.patch.dict(os.environ, {"GITHUB_RUN_ID": "999"}, clear=False):
             os.environ.pop("KF_RUN_ID", None)
-            os.environ["KF_MODEL_MODE"] = "off"
+            self.assertEqual(api_ledger.run_id(), "999")
 
 
 if __name__ == "__main__":
