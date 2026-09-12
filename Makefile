@@ -13,7 +13,7 @@ export PYTHONPATH := .
 
 UV ?= uv
 
-.PHONY: help install up down health test lint fmt notices corpus showcase demo demo-answering demo-production quality-sets ingest bake analyse seed ask serve mcp demo-reset licences quality parity load ci compose-up compose-down
+.PHONY: help install up down health test lint fmt notices corpus showcase demo demo-answering demo-production quality-sets ingest bake analyse seed ask serve mcp demo-reset licences quality parity coverage load ci compose-up compose-down
 
 PROFILE ?= lite
 export KF_PROFILE := $(PROFILE)
@@ -104,6 +104,9 @@ quality: ## Answer-quality gate (T28): golden suite over the model-free path
 
 parity: ## Static parity (T32): the shipped engine.js answers like the server (needs node)
 	@$(PY) scripts/parity_check.py
+
+coverage: ## Audience coverage matrix (T83): every persona × data type, gated on no coral held cell
+	@$(PY) -m eval.coverage
 
 load: ## Load test (T33): the answer path under concurrent load, gated on SLOs
 	@$(PY) scripts/load_test.py

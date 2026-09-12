@@ -181,8 +181,28 @@ _SOURCES = card(
     right='<span class="muted small">last run · next run · counts · rate limit</span>',
 )
 
+# T83 — the audience coverage matrix as a heatmap: every data type (rows) ×
+# every persona (columns), green passing / amber weak / coral failing / grey
+# n/a. A cell opens its questions and last results below the grid.
+_COVERAGE = card(
+    "Coverage — every audience, every data type",
+    '<div class="muted small">Each cell asks that persona real questions of that '
+    "data type through the one governed answer path and checks the answer is "
+    "grounded and cited. The gate blocks a regression that turns a held cell "
+    "coral.</div>"
+    '<div id="coverage-summary" class="muted small" style="margin-top:6px"></div>'
+    '<div class="tablewrap" style="margin-top:8px"><table id="coverage-table">'
+    "<thead><tr><th>Data type</th></tr></thead>"
+    '<tbody id="coverage-rows"><tr><td class="empty">Sign in as an admin to load '
+    "the coverage matrix.</td></tr></tbody></table></div>"
+    '<div id="coverage-detail" class="muted small" style="margin-top:8px"></div>',
+    "coverage-panel",
+    right='<span class="pill" id="coverage-verdict"></span>',
+)
+
 _BODY = (
     _CONNECTORS
+    + f'<div style="margin-top:14px">{_COVERAGE}</div>'
     + f'<div style="margin-top:14px">{_SOURCES}</div>'
     + f'<div style="margin-top:14px">{_MODELS}</div>'
     + f'<div style="margin-top:14px">{_RUNS}</div>'

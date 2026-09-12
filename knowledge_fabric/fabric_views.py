@@ -36,6 +36,7 @@ __all__ = [
     "image_description",
     "query_facts",
     "citation",
+    "coverage_matrix",
 ]
 
 _SAMPLE_ROWS = 5
@@ -49,6 +50,36 @@ def facts() -> dict:
     """``data/facts.json`` or an empty skeleton."""
     f = fd.read_json(fd.data_path("facts.json"), {}) or {}
     return f if isinstance(f, dict) else {}
+
+
+def coverage_matrix() -> dict:
+    """T83 — the audience coverage matrix the Admin heatmap renders. Served from
+    the generated ``data/coverage.json`` when present; otherwise computed once
+    over the self-contained coverage corpus (``eval/coverage.py``) and written
+    there so later reads are cheap. Degrades to an empty matrix with an ``error``
+    if the eval package cannot run in this environment."""
+    rep = fd.read_json(fd.data_path("coverage.json"))
+    if isinstance(rep, dict) and rep.get("matrix"):
+        return rep
+    try:
+        from eval import coverage as _cov
+
+        rep = _cov.run()
+        try:
+            fd.write_json(fd.data_path("coverage.json", mkdir=True), rep)
+        except OSError:
+            pass
+        return rep
+    except Exception as e:  # noqa: BLE001 — surface, never crash the console
+        return {
+            "matrix": [],
+            "personas": [],
+            "data_types": [],
+            "summary": {"green": 0, "amber": 0, "coral": 0, "na": 0},
+            "coral_held": [],
+            "passed": True,
+            "error": f"coverage unavailable: {e}",
+        }
 
 
 def capabilities() -> list[dict]:

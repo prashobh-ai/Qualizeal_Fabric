@@ -219,6 +219,7 @@ ADMIN_GETS = [
     "/admin/connectors",
     "/admin/budget",
     "/admin/authority",
+    "/admin/coverage",  # T83 — the audience coverage matrix heatmap
     "/curator/quality",
     "/curator/gaps",
     "/curator/documents",

@@ -163,9 +163,32 @@ function srcCard(name,s){s=s||{};const counts=s.counts||{};
 async function loadSources(){try{const d=await api('/admin/sources');$('#sources-cards').innerHTML=['github','jira','confluence'].map(n=>srcCard(n,d[n])).join('')}
  catch(e){$('#sources-cards').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
 
+// ---------------------------------------------------------------- T83 coverage matrix
+const COV_COLOR={green:'#0CA678',amber:'#E8A23A',coral:'#F53E5A',na:'#C7CDD4'};
+let COVERAGE=null;
+function renderCoverage(rep){COVERAGE=rep;const personas=rep.personas||[];
+ const head='<tr><th>Data type</th>'+personas.map(p=>'<th class="small">'+esc(p)+'</th>').join('')+'</tr>';
+ const rows=(rep.matrix||[]).map(m=>{
+   const tds=personas.map(p=>{const c=(m.cells||{})[p];
+     if(!c)return '<td></td>';
+     const col=COV_COLOR[c.status]||'#C7CDD4';const t=c.status+' — '+(c.passed||0)+'/'+(c.n||0);
+     return '<td style="text-align:center"><span class="cov-cell" title="'+esc(t)+'" data-dt="'+esc(m.data_type)+'" data-p="'+esc(p)+'" style="background:'+col+'">'+(c.status==='na'?'·':(c.status[0].toUpperCase()))+'</span></td>'}).join('');
+   return '<tr><td>'+esc(m.label)+(m.held?'':' <span class="muted small">(not held)</span>')+'</td>'+tds+'</tr>'}).join('');
+ $('#coverage-table').querySelector('thead').innerHTML=head;
+ $('#coverage-rows').innerHTML=rows||'<tr><td class="empty">No coverage data.</td></tr>';
+ const s=rep.summary||{};$('#coverage-summary').textContent=(s.green||0)+' green · '+(s.amber||0)+' amber · '+(s.coral||0)+' coral · '+(s.na||0)+' n/a'+(rep.error?(' · '+rep.error):'');
+ const v=$('#coverage-verdict');v.textContent=rep.passed?'gate: pass':'gate: '+((rep.coral_held||[]).length)+' coral';v.className='pill '+(rep.passed?'good':'bad');
+ KF.$$('#coverage-rows .cov-cell').forEach(el=>el.onclick=()=>showCoverageCell(el.dataset.dt,el.dataset.p))}
+function showCoverageCell(dt,persona){if(!COVERAGE)return;
+ const m=(COVERAGE.matrix||[]).find(x=>x.data_type===dt);const c=m&&(m.cells||{})[persona];
+ if(!c){$('#coverage-detail').textContent='';return}
+ $('#coverage-detail').innerHTML='<b>'+esc(m.label)+' · '+esc(persona)+'</b> — '+esc(c.status)+' ('+(c.passed||0)+'/'+(c.n||0)+')<ul class="queue">'+
+   (c.questions||[]).map(q=>'<li><span class="pill '+(q.ok?'good':'bad')+'">'+(q.ok?'ok':q.kind)+'</span> '+esc(q.question)+(q.cited&&q.cited.length?' <span class="muted small">→ '+esc((q.cited||[]).join(', '))+'</span>':'')+'</li>').join('')+'</ul>'}
+async function loadCoverage(){try{renderCoverage(await api('/admin/coverage'))}catch(e){if(e.status!==404)toast(e.message,'bad')}}
+
 // ---------------------------------------------------------------- boot
 async function loadAll(){try{await loadConnectors()}catch(e){return}
- await Promise.all([loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources()]);
+ await Promise.all([loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources(),loadCoverage()]);
  if(await loadRuns())schedulePoll()}
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{$('#connectors').innerHTML='';gate({status:401,message:''},'admin')}};
 KF.initBar({preferRole:'admin'});

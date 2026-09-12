@@ -61,6 +61,7 @@ TOOL_NAMES = (
     "fabric_communities",
     "knowledge_gaps",
     "list_known_questions",
+    "coverage_status",
 )
 
 
@@ -426,6 +427,30 @@ def tool_list_known_questions(persona: str = "") -> dict:
                 for e in entries
             ],
             "suggestions": suggestions,
+        },
+        "citations": [],
+    }
+
+
+def tool_coverage_status() -> dict:
+    """T83/T89 — the audience coverage matrix for an admin caller: every data
+    type × persona with its pass/weak/fail status and the gate verdict, so an
+    agent can see where the fabric is thin for any audience."""
+    rep = fabric_views.coverage_matrix()
+    return {
+        "result": {
+            "summary": rep.get("summary", {}),
+            "passed": rep.get("passed", True),
+            "coral_held": rep.get("coral_held", []),
+            "matrix": [
+                {
+                    "data_type": m.get("data_type"),
+                    "label": m.get("label"),
+                    "held": m.get("held"),
+                    "cells": {aud: c.get("status") for aud, c in (m.get("cells") or {}).items()},
+                }
+                for m in rep.get("matrix", [])
+            ],
         },
         "citations": [],
     }
@@ -811,5 +836,16 @@ def build_server(platform=None, tenant: str | None = None):
                 general). Omit for the whole enabled registry.
         """
         return tool_list_known_questions(persona)
+
+    @server.tool(
+        description=(
+            "The audience coverage matrix — every data type × persona with its "
+            "pass / weak / fail status and the gate verdict — so you can see "
+            "where the fabric is thin for any audience across every data type."
+        )
+    )
+    def coverage_status() -> dict:
+        """The audience coverage matrix and its gate verdict."""
+        return tool_coverage_status()
 
     return server

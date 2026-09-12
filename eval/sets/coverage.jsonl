@@ -1,0 +1,26 @@
+{"id": "cov.website.1", "data_type": "website", "personas": ["business", "curator", "hr"], "question": "what quality engineering services does QualiZeal offer"}
+{"id": "cov.website.2", "data_type": "website", "personas": ["business", "curator", "hr"], "question": "what does the QualiZeal services page say about accessibility testing"}
+{"id": "cov.products.1", "data_type": "products", "personas": ["business", "developer", "tester", "architect", "curator"], "question": "what is QMentisAI"}
+{"id": "cov.products.2", "data_type": "products", "personas": ["business", "developer", "tester", "architect", "curator"], "question": "what does QMentisAI evaluate"}
+{"id": "cov.case_studies.1", "data_type": "case_studies", "personas": ["business", "architect", "curator"], "question": "what does the airline case study report"}
+{"id": "cov.case_studies.2", "data_type": "case_studies", "personas": ["business", "architect", "curator"], "question": "what did the airline modernise with QualiZeal"}
+{"id": "cov.code.1", "data_type": "code", "personas": ["developer", "tester", "architect", "curator"], "question": "what does the bm25 retrieval module define"}
+{"id": "cov.code.2", "data_type": "code", "personas": ["developer", "tester", "architect", "curator"], "question": "what does bm25_search do"}
+{"id": "cov.activity.1", "data_type": "activity", "personas": ["business", "developer", "tester", "architect", "curator"], "question": "what does the release runbook require before a pull request is merged"}
+{"id": "cov.activity.2", "data_type": "activity", "personas": ["business", "developer", "tester", "architect", "curator"], "question": "when does the release runbook say a release is cut"}
+{"id": "cov.architecture.1", "data_type": "architecture", "personas": ["developer", "tester", "architect", "curator"], "question": "what does the platform architecture separate"}
+{"id": "cov.architecture.2", "data_type": "architecture", "personas": ["developer", "tester", "architect", "curator"], "question": "what does the platform architecture say the answer service does"}
+{"id": "cov.dependencies.1", "data_type": "dependencies", "personas": ["developer", "architect", "curator"], "question": "what licence are the platform dependencies under"}
+{"id": "cov.dependencies.2", "data_type": "dependencies", "personas": ["developer", "architect", "curator"], "question": "what do the platform dependencies include"}
+{"id": "cov.jira.1", "data_type": "jira", "personas": ["business", "developer", "tester", "architect", "curator"], "question": "what is Jira issue REL-42 about"}
+{"id": "cov.jira.2", "data_type": "jira", "personas": ["business", "developer", "tester", "architect", "curator"], "question": "what is the priority of REL-42"}
+{"id": "cov.confluence.1", "data_type": "confluence", "personas": ["business", "developer", "tester", "architect", "curator", "hr"], "question": "what does the engineering onboarding page explain"}
+{"id": "cov.confluence.2", "data_type": "confluence", "personas": ["business", "developer", "tester", "architect", "curator", "hr"], "question": "when do new engineers complete onboarding"}
+{"id": "cov.tables.1", "data_type": "tables", "personas": ["business", "developer", "tester", "curator", "hr"], "question": "which requirement in the traceability matrix has a gap"}
+{"id": "cov.tables.2", "data_type": "tables", "personas": ["business", "developer", "tester", "curator", "hr"], "question": "what does the traceability matrix show for REQ-100"}
+{"id": "cov.documents.1", "data_type": "documents", "personas": ["business", "developer", "tester", "architect", "curator", "hr"], "question": "what must the test strategy achieve before promotion"}
+{"id": "cov.documents.2", "data_type": "documents", "personas": ["business", "developer", "tester", "architect", "curator", "hr"], "question": "what does the test strategy set as acceptance criteria for coverage"}
+{"id": "cov.images.1", "data_type": "images", "personas": ["developer", "architect", "curator"], "question": "what does the data flow diagram show"}
+{"id": "cov.images.2", "data_type": "images", "personas": ["developer", "architect", "curator"], "question": "what does the data flow diagram say feeds the answer service"}
+{"id": "cov.hr.1", "data_type": "hr", "personas": ["business", "curator", "hr"], "question": "how many days of annual leave does the leave policy grant"}
+{"id": "cov.hr.2", "data_type": "hr", "personas": ["business", "curator", "hr"], "question": "how does the leave policy say leave is requested"}
