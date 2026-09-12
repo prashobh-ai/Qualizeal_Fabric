@@ -26,8 +26,20 @@ function connCard(c){const h=c.health||{};const sched=h.interval_s||'';
    '<button class="btn sm" data-act="save">Save</button><button class="btn sm primary" data-act="sync" '+(c.enabled?'':'disabled')+'>Sync now</button></div>'+
   '</div>'}
 
+// T116 — a visible "Add source" affordance listing the five source types, so a
+// reviewer can jump straight to the right card and paste a URL without hunting.
+const SOURCE_TYPES=['website','files','github','jira','confluence'];
+const SOURCE_TITLE={website:'Website',files:'Files',github:'GitHub',jira:'Jira',confluence:'Confluence'};
+function addSourceBar(){
+ return '<div class="add-source"><span class="muted small">Add a source — paste a URL into its card:</span>'+
+  SOURCE_TYPES.map(s=>'<button class="btn sm" data-add="'+s+'">'+esc(SOURCE_TITLE[s])+'</button>').join('')+'</div>';}
+function focusCard(source){const card=$('#connectors .conn-card[data-source="'+source+'"]');if(!card)return;
+ card.scrollIntoView({behavior:'smooth',block:'center'});const inp=card.querySelector('[data-role=allow]');
+ if(inp){inp.focus();inp.classList.add('flash');setTimeout(()=>inp.classList.remove('flash'),1200)}}
+
 function renderConnectors(list){SOURCES=list.map(c=>c.source);
- $('#connectors').innerHTML=list.map(connCard).join('')||'<div class="empty">no connectors registered</div>';
+ $('#connectors').innerHTML=addSourceBar()+(list.map(connCard).join('')||'<div class="empty">no connectors registered</div>');
+ KF.$$('#connectors .add-source [data-add]').forEach(b=>b.onclick=()=>focusCard(b.dataset.add));
  KF.$$('#connectors .conn-card').forEach(card=>{const source=card.dataset.source;
   card.querySelector('[data-role=enabled]').onchange=e=>saveConnector(source,{enabled:e.target.checked});
   card.querySelector('[data-act=save]').onclick=()=>{const allow=card.querySelector('[data-role=allow]').value.split(',').map(s=>s.trim()).filter(Boolean);
@@ -275,9 +287,12 @@ async function openWaterfall(tid){const box=$('#obs-waterfall');box.hidden=false
  catch(e){box.innerHTML='<div class="muted small">'+esc(e.message)+'</div>'}}
 
 // ---------------------------------------------------------------- boot
-async function loadAll(){try{await loadConnectors()}catch(e){return}
- await Promise.all([loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources(),loadCoverage(),loadSLA(),loadOverview(),loadObservability()]);
- if(await loadRuns())schedulePoll()}
+async function loadAll(){
+ // T116 — every admin panel loads INDEPENDENTLY: one loader failing (e.g. a
+ // transient error on /admin/connectors) must never blank the others. Each
+ // loader catches and shows its own empty state; allSettled never short-circuits.
+ await Promise.allSettled([loadConnectors(),loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources(),loadCoverage(),loadSLA(),loadOverview(),loadObservability()]);
+ try{if(await loadRuns())schedulePoll()}catch(e){}}
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{$('#connectors').innerHTML='';gate({status:401,message:''},'admin')}};
 KF.initBar({preferRole:'admin'});
 $('#connectors-refresh').onclick=loadAll;$('#run-due-btn').onclick=runDue;
