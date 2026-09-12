@@ -54,7 +54,9 @@ TOOL_NAMES = (
     "explain_architecture",
     "run_table_query",
     "jira_search",
+    "jira_status",
     "confluence_search",
+    "corroborate",
     "describe_image",
     "ask_fabric",
     "provider_status",
@@ -267,6 +269,75 @@ def tool_confluence_search(cql: str) -> dict:
     return _via_tools("confluence_search", "confluence_search", cql)
 
 
+def tool_jira_status(project: str, board: str = "") -> dict:
+    """T97/T101 — the Jira status snapshot for a project from facts: totals,
+    the by-status breakdown, the board columns and the exact in-progress count,
+    the sprint, and freshness. Reads ``data/facts.json`` (no live call)."""
+    from .. import facts as factsmod
+
+    facts = factsmod.load_facts()
+    projects = facts.get("jira_projects") or {}
+    block = projects.get(project) or projects.get(project.upper()) or {}
+    if not block:
+        return {
+            "result": {
+                "found": False,
+                "project": project,
+                "note": "no Jira facts for this project",
+            },
+            "citations": [],
+        }
+    issues = block.get("issues") or {}
+    board_block = block.get("board") or {}
+    by_status = issues.get("by_status") or {}
+    in_progress = None
+    for col in board_block.get("columns") or []:
+        if str(col.get("name", "")).lower() == "in progress":
+            in_progress = sum(int(by_status.get(s, 0) or 0) for s in col.get("statuses") or [])
+    base = (os.environ.get("KF_JIRA_BASE_URL") or os.environ.get("JIRA_BASE_URL") or "").rstrip("/")
+    url = f"{base}/projects/{project}" if base else f"jira://projects/{project}"
+    return {
+        "result": {
+            "found": True,
+            "project": project,
+            "total": issues.get("total", 0),
+            "by_status": by_status,
+            "by_priority": issues.get("by_priority", {}),
+            "board": board_block,
+            "in_progress": in_progress,
+            "sprint": block.get("sprint"),
+            "as_of": block.get("as_of"),
+        },
+        "citations": [
+            {
+                "title": f"Jira {project}",
+                "url": url,
+                "document_id": f"jira:{project}",
+                "locator": {"project": project, "board": board or board_block.get("id")},
+            }
+        ],
+    }
+
+
+def tool_corroborate(claim: str, sources: str = "", platform=None, tenant: str = "") -> dict:
+    """T99/T101 — corroborate a claim across sources (Jira status vs the repo):
+    agreement or the specific discrepancy, citing both. Says 'tool unavailable'
+    when the answer tool API is not installed."""
+    tools = _answer_tools()
+    fn = getattr(tools, "corroborate", None) if tools else None
+    if not callable(fn):
+        return _unavailable(
+            "corroborate", "knowledge_fabric.answer.tools.corroborate not installed"
+        )
+    prin = _agent_principal(platform, tenant, "")
+    try:
+        out = fn(platform, prin, claim, getattr(platform, "live_jql", None))
+    except (ValueError, PermissionError, KeyError) as e:
+        return {"error": str(e), "tool": "corroborate", "result": None, "citations": []}
+    out.setdefault("citations", [])
+    return out
+
+
 def tool_describe_image(doc_id: str, name: str) -> dict:
     path = fd.path("images", doc_id, f"{name}.json")
     desc = fabric_views.image_description(doc_id, name)
@@ -328,10 +399,15 @@ def tool_ask_fabric(
         except Exception:
             pass
     steps = ((payload.get("why") or {}).get("steps")) if isinstance(payload, dict) else None
+    # T101 — answer-first ask_fabric names the provider that answered, so a
+    # keyless run is honestly labelled "Open-source LLM" (or the extractive core).
+    prov = tool_provider_status(platform, tenant).get("result", {}) or {}
     return {
         "result": {
             **payload,
             "engine": engine,
+            "provider": prov.get("provider"),
+            "provider_model": prov.get("model"),
             "previous_questions": [t["question"] for t in turns],
         },
         "citations": payload.get("citations") or [],
@@ -739,6 +815,40 @@ def build_server(platform=None, tenant: str | None = None):
             cql: The CQL query.
         """
         return tool_confluence_search(cql)
+
+    @server.tool(
+        description=(
+            "The Jira status snapshot for a project from facts (T97): totals, the "
+            "by-status breakdown, the board columns and the exact in-progress "
+            "count, the sprint, and freshness. Reads the pinned facts (no live call)."
+        )
+    )
+    def jira_status(project: str, board: str = "") -> dict:
+        """Jira status from facts.
+
+        Args:
+            project: The Jira project key (e.g. "V1").
+            board: Optional board id for the citation.
+        """
+        return tool_jira_status(project, board)
+
+    @server.tool(
+        description=(
+            "Cross-source verification (T99): given a claim naming a Jira issue key "
+            "(e.g. 'V1-42 is done — check the repo'), report whether the repository "
+            "corroborates the Jira status — agreement or the specific discrepancy — "
+            "citing BOTH sources. Says 'tool unavailable' when the answer tool API "
+            "is not installed."
+        )
+    )
+    def corroborate(claim: str, sources: str = "") -> dict:
+        """Corroborate a claim across sources.
+
+        Args:
+            claim: The claim to verify, naming a Jira issue key.
+            sources: Optional comma-separated source hint (e.g. "jira,repo").
+        """
+        return tool_corroborate(claim, sources, platform, tenant)
 
     @server.tool(
         description="The stored description of one image of a document (images/<doc>/<name>.json)."

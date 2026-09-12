@@ -13,7 +13,7 @@ export PYTHONPATH := .
 
 UV ?= uv
 
-.PHONY: help install up down health test lint fmt notices corpus showcase demo demo-answering demo-production quality-sets ingest bake analyse seed ask serve mcp demo-reset licences quality parity coverage load ci compose-up compose-down
+.PHONY: help install up down health test lint fmt notices corpus showcase demo demo-v2 demo-answering demo-production quality-sets ingest bake analyse seed ask serve mcp demo-reset licences quality parity coverage load ci compose-up compose-down
 
 PROFILE ?= lite
 export KF_PROFILE := $(PROFILE)
@@ -51,11 +51,15 @@ corpus: ## Ingest the QualiZeal corpus into the product fabric (see load-corpus 
 showcase: ## Build the self-contained static showcase snapshot for GitHub Pages
 	@$(UV) run python scripts/build_showcase.py
 
-demo: ## Run every demo: fundamentals, answering, knowledge-intelligence, production (T50/T62)
+demo: ## Run every demo: fundamentals, answering, knowledge-intelligence, production, v2 capstone
 	@$(PY) scripts/demo.py
 	@$(PY) scripts/demo_answering.py
 	@$(PY) scripts/demo_intelligence.py
 	@$(PY) scripts/demo_production.py --fixture
+	@$(PY) scripts/demo_v2.py
+
+demo-v2: ## Run the v2 capstone demo (T102): keyless answer → citation → code → Jira board → cross-source → ROI → galaxy
+	@$(PY) scripts/demo_v2.py
 
 demo-production: ## Production-on-GitHub demo (T50): provider, consumption, facts, tables, images, queue
 	@$(PY) scripts/demo_production.py $(if $(FIXTURE),--fixture,)
