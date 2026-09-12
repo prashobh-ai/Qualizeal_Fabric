@@ -146,7 +146,12 @@ main{max-width:none;padding:0;display:flex;flex-direction:column}
 .enode .et{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--qz-blue-deep);font-weight:700}
 .enode .ev{font-size:14px;margin-top:2px;color:var(--qz-ink)}
 .earrow{align-self:center;color:var(--qz-soft);font-size:16px;line-height:1.2}
-.samples{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;justify-content:center}
+.samples{display:flex;flex-direction:column;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:stretch}
+/* T82 — the Home samples strip groups the persona known questions above the
+   corpus suggestions, each under a small label. */
+.samples-group{margin-top:12px}
+.samples-label{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--qz-soft);margin-bottom:6px;text-align:center}
+.samples-row{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
 .chip{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:4px 11px;font-size:12px;cursor:pointer;color:var(--fg)}
 .chip:hover{border-color:var(--accent)}
 

@@ -195,6 +195,7 @@ CURATOR_GETS = [
     "/curator/curation-modes",  # T53: per-source + global curation mode settings
     "/curator/review",  # T53: the manual-mode review queue
     "/curator/timeline",  # T54: the ingestion timeline (per-month stacks)
+    "/curator/registry",  # T82: the governed known-question registry
 ]
 # T45 — the Workspace's "Get full answer" opens an `ask` issue on this repo.
 KF_REPO = os.environ.get("GITHUB_REPOSITORY") or "prashobh-ai/QualiZeal_Fabric"
@@ -554,6 +555,17 @@ def _bake(client, p=None) -> dict:
         _, s = client.call("GET", "/api/suggestions", token=tok)
         snap["suggestions"][key] = s
         for item in s.get("suggestions") or []:
+            q = item.get("question")
+            if q:
+                EXTRA_Q.append(q)
+    # T82 — bake /api/suggestions per role (keyed by subject) so each persona's
+    # Home shows its own known questions; the engine serves by subject, then
+    # falls back to scope. The known examples are added to the answer bake so a
+    # known chip resolves in the static demo, model-free.
+    for subject, tok in tokens.items():
+        _, s = client.call("GET", "/api/suggestions", token=tok)
+        snap["suggestions"][subject] = s
+        for item in s.get("known") or []:
             q = item.get("question")
             if q:
                 EXTRA_Q.append(q)

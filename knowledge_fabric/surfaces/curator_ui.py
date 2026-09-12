@@ -183,6 +183,46 @@ _TIMELINE = card(
     "rejected &middot; deleted &middot; auto-kept</span>",
 )
 
+# T82 — the governed known-question registry the curator maintains: view the
+# per-persona set (with freshness target and the persona it serves), add or edit
+# a known question, and disable one without deleting it. Each change is audited
+# and takes effect for its persona immediately (a matched known question always
+# takes the fast path).
+_REGISTRY = card(
+    "Known-question registry",
+    '<div class="muted small">The governed questions the fabric answers '
+    "instantly, per persona. A known question always takes the fast path; add, "
+    "edit or disable one below — every change is audited and takes effect for its "
+    "persona immediately.</div>"
+    '<div class="tablewrap" style="margin-top:8px"><table id="registry-table">'
+    "<thead><tr><th>Question pattern</th><th>Personas</th><th>Kind</th><th>Source</th>"
+    "<th>Freshness</th><th>State</th><th>Actions</th></tr></thead>"
+    '<tbody id="registry-rows"><tr><td colspan="7" class="empty">Sign in as a '
+    "curator to load the registry.</td></tr></tbody></table></div>"
+    '<form id="registry-form" class="col" style="margin-top:10px">'
+    '<div class="row"><input id="reg-id" placeholder="id, e.g. biz.top_clients" '
+    'style="flex:1" required>'
+    '<input id="reg-pattern" placeholder="pattern, e.g. how many demos for &lt;client&gt;" '
+    'style="flex:2" required></div>'
+    '<div class="row"><input id="reg-personas" placeholder="personas (comma-separated): '
+    'business, delivery" style="flex:2">'
+    '<select id="reg-kind"><option value="facts">facts</option>'
+    '<option value="definition">definition</option><option value="table">table</option>'
+    '<option value="list">list</option></select>'
+    '<input id="reg-source" placeholder="source, e.g. facts" style="flex:1"></div>'
+    '<div class="row"><input id="reg-examples" placeholder="example questions '
+    '(comma-separated)" style="flex:2">'
+    '<input id="reg-fresh" type="number" min="1" value="3" title="freshness target (s)" '
+    'style="width:96px"></div>'
+    '<div class="row"><button class="btn primary" id="reg-add-btn" type="submit">Add / '
+    "update known question</button>"
+    '<span class="muted small" id="reg-status">Persisted to the governed registry and '
+    "audited.</span></div>"
+    "</form>",
+    "registry-card",
+    right='<span class="pill" id="registry-count"></span>',
+)
+
 _DRAWER = _read_asset("curator_ui__drawer.html")
 
 _FEEDBACK = card(
@@ -260,6 +300,7 @@ _BODY = (
     f'<div class="grid" style="grid-template-columns:2fr 1fr">{_QUALITY}{_RISK}</div>'
     f'<div style="margin-top:14px">{_QUEUES}</div>'
     f'<div style="margin-top:14px">{_CURATION}</div>'
+    f'<div style="margin-top:14px">{_REGISTRY}</div>'
     f'<div style="margin-top:14px">{_TIMELINE}</div>'
     f'<div style="margin-top:14px">{_GRAPH}</div>'
     f'<div style="margin-top:14px">{_FEEDBACK}</div>'

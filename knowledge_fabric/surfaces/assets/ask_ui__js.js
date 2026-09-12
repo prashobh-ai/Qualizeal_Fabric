@@ -419,10 +419,18 @@ function renderUsage(){const box=$('#usage-body');if(!USAGE){return}
  $$('#usage-body .win button').forEach(bt=>bt.onclick=()=>{USE_WIN=bt.dataset.w;renderUsage()})}
 
 // ===================== ask ==========================================
-async function samples(){if(!$('#samples'))return;let qs=[];
- if(KF.session){try{const j=await api('/api/suggestions');qs=(j.suggestions||[]).map(s=>s.question).slice(0,6)}catch(e){}}
- if(!qs.length)qs=(KF.DIR.questions&&KF.DIR.questions['qualizeal'])||[];
- $('#samples').innerHTML=qs.map(q=>'<span class="chip" data-q="'+esc(q)+'">'+esc(q)+'</span>').join('');
+async function samples(){if(!$('#samples'))return;let qs=[],known=[],persona='';
+ // T82 — a reader's Home leads with the questions the fabric answers INSTANTLY
+ // for their persona (the known-question registry), then the corpus suggestions.
+ if(KF.session){try{const j=await api('/api/suggestions');
+   qs=(j.suggestions||[]).map(s=>s.question).slice(0,6);
+   known=(j.known||[]).map(s=>s.question).slice(0,6);persona=j.persona||''}catch(e){}}
+ if(!qs.length&&!known.length)qs=(KF.DIR.questions&&KF.DIR.questions['qualizeal'])||[];
+ const chip=q=>'<span class="chip" data-q="'+esc(q)+'">'+esc(q)+'</span>';
+ const group=(label,list)=>list.length?'<div class="samples-group"><div class="samples-label">'+esc(label)+
+   '</div><div class="samples-row">'+list.map(chip).join('')+'</div></div>':'';
+ $('#samples').innerHTML=group('Answered instantly'+(persona?' · '+persona:''),known)+
+   group(known.length?'More from your corpus':'Try asking',qs);
  $$('#samples .chip').forEach(c=>c.onclick=()=>{$('#question').value=c.dataset.q;$('#question').focus()})}
 async function ask(){const q=$('#question').value.trim();if(!q)return;
  if(!KF.session){gate({status:401,message:''},'asker');return}
