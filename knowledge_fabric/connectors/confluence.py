@@ -348,6 +348,10 @@ def sync(platform, tenant: str, transport=None) -> dict:
     cfg = admin.effective_config(platform, tenant, "confluence", {})
     if not cfg.get("spaces") and os.environ.get("CONFLUENCE_SPACES"):
         cfg["spaces"] = [s.strip() for s in os.environ["CONFLUENCE_SPACES"].split(",") if s.strip()]
+    # T124 — individual pages also connectable from the environment (the ingest
+    # workflow sets CONFLUENCE_PAGES from data/showcase_sources.json).
+    if not cfg.get("pages") and os.environ.get("CONFLUENCE_PAGES"):
+        cfg["pages"] = [p.strip() for p in os.environ["CONFLUENCE_PAGES"].split(",") if p.strip()]
     have = all(
         cfg.get(k) or os.environ.get(env)
         for k, env in (("url", "CONFLUENCE_URL"), ("token", "CONFLUENCE_TOKEN"))
