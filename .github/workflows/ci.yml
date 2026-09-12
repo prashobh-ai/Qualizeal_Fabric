@@ -93,7 +93,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install with db extra
-        run: uv sync --extra dev --extra db
+        run: uv sync --extra dev --extra db --extra graph
       - name: Licence gate (I14)
         run: uv run python scripts/licence_gate.py
       - name: Corpus policy

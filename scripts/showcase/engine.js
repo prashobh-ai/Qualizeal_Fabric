@@ -781,7 +781,10 @@
     if (path === "/api/corpus") return respond(SNAP.corpus || {});
     if (path === "/api/suggestions") return respond((SNAP.suggestions || {})[scopeKey(subject)] || { suggestions: [] });
     if (path === "/api/usage") return respond(STATE.usage[subject] || emptyUsage(subject));
-    if (path === "/api/galaxy") { var t = q.get("trace_id"); return respond((SNAP.galaxy || {})[t] || { trace_id: t, nodes: [], edges: [], stats: {} }); }
+    if (path === "/api/galaxy") { var t = q.get("trace_id"); return respond((SNAP.galaxy || {})[t] || { trace_id: t, nodes: [], edges: [], activated_ids: [], halo_ids: [], stats: {} }); }
+    if (path === "/api/galaxy/node") { var nid = q.get("id"); var nd = (SNAP.galaxy_nodes || {})[nid]; return nd ? respond(nd) : respond({ error: "unknown node" }, 404); }
+    if (path === "/api/galaxy/full") return respond(SNAP.galaxy_full || { nodes: [], edges: [], activated_ids: [], halo_ids: [], stats: {} });
+    if (path === "/api/provider") return respond(SNAP.provider || { provider: "Extractive", model: "core", dot: "#5A6B7C", label: "Extractive core" });
     if (path === "/api/analytics") { var w = q.get("window") || "7d"; return respond((SNAP.analytics || {})[w] || (SNAP.analytics || {})["7d"] || {}); }
     if (path === "/api/events") return respond({ events: SNAP.events || [] });
     if (path === "/api/trace") return respond({ spans: [] });

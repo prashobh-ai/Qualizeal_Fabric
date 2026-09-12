@@ -22,7 +22,7 @@ dependencies: inline CSS/JS/SVG only (``ui_common.shell``).
 
 from __future__ import annotations
 
-from .ui_common import _read_asset, shell
+from .ui_common import GALAXY_HEAD, _read_asset, shell
 
 __all__ = ["ASK_HTML"]
 
@@ -32,4 +32,6 @@ _BODY = _read_asset("ask_ui__body.html")
 
 _JS = _read_asset("ask_ui__js.js")
 
-ASK_HTML = shell("Workspace", "", _BODY, _JS, "Workspace", _CSS)
+# The Workspace right rail renders the answer galaxy with the real-physics
+# vis-network view (T51), so it pulls the vendored scripts in <head>.
+ASK_HTML = shell("Workspace", "", _BODY, _JS, "Workspace", _CSS, head=GALAXY_HEAD)

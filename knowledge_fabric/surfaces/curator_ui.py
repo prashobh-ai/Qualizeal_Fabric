@@ -71,6 +71,14 @@ _CSS = r"""
 #repo-body h4{margin:14px 0 6px;font-size:13px}
 .tq textarea{width:100%;min-height:70px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
 .cap-group{margin:6px 0}
+/* T54 — ingestion timeline stacked bars */
+.tl-bars{display:flex;align-items:flex-end;gap:6px;height:160px;padding-top:8px}
+.tl-col{flex:1;display:flex;flex-direction:column;align-items:center;height:100%;justify-content:flex-end}
+.tl-stack{width:70%;min-height:2px;display:flex;flex-direction:column-reverse;
+ border-radius:3px 3px 0 0;overflow:hidden;background:var(--panel2)}
+.tl-stack i{display:block;width:100%}
+.tl-m{font-size:11px;color:var(--mut);margin-top:4px}
+.tl-n{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
 """
 
 _QUALITY = card(
@@ -94,6 +102,25 @@ _QUEUES = card(
     'class="queue" id="review-list"></ul></div>'
     "</div>",
     "queues-card",
+)
+
+# T57 — knowledge-graph insights: communities with cohesion, surprising
+# cross-domain connections, and knowledge gaps with suggested tags.
+_GRAPH = card(
+    "Knowledge graph insights",
+    '<div class="muted small">Communities the fabric clusters into, surprising '
+    "cross-domain links, and where the knowledge base is thin — the four-signal "
+    "graph analysis (see docs/CONCEPTS.md).</div>"
+    '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));'
+    'margin-top:8px">'
+    '<div><b>Communities</b> <span class="pill" id="graph-comm-count">0</span>'
+    '<div id="graph-communities" class="empty">—</div></div>'
+    '<div><b>Surprising connections</b> <span class="pill violet" id="graph-surp-count">0</span>'
+    '<div id="graph-surprising" class="empty">—</div></div>'
+    '<div><b>Knowledge gaps</b> <span class="pill warn" id="graph-gaps-count">0</span>'
+    '<div id="graph-gaps" class="empty">—</div></div>'
+    "</div>",
+    "graph-card",
 )
 
 _DOCS = _read_asset("curator_ui__docs.html")
@@ -121,6 +148,39 @@ _AUTHORITY = card(
     "by this weight (read-only here — admins change ranks).</div>"
     '<div id="authority-ranks" class="row" style="margin-top:8px"></div>',
     "authority-card",
+)
+
+# T53 — curation modes (per source + global default) and the manual-review
+# queue; T54 — the ingestion timeline (per-month stacks for a chosen year).
+_CURATION = card(
+    "Curation modes &amp; review",
+    '<div class="muted small">Automated sources keep new documents live on '
+    "ingest; manual sources hold them in review until a curator accepts. Change "
+    "a source&#39;s mode, or the global default, below.</div>"
+    '<div id="curation-modes" class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px">'
+    '<span class="empty">—</span></div>'
+    '<div class="section-title" style="margin-top:12px">Review queue '
+    '<span class="pill info" id="review-queue-count">0</span>'
+    '<span class="muted small">manual-mode items waiting for a decision</span></div>'
+    '<div class="tablewrap"><table id="review-queue-table">'
+    "<thead><tr><th>Document</th><th>Source</th><th>Score</th><th>Recommendation</th>"
+    "<th>Actions</th></tr></thead>"
+    '<tbody id="review-queue-rows"><tr><td colspan="5" class="empty">Nothing in '
+    "review — every source is on automated, or all items are decided.</td></tr>"
+    "</tbody></table></div>",
+    "curation-card",
+)
+
+# T54 — ingestion timeline: one stacked bar per month of the chosen year.
+_TIMELINE = card(
+    "Ingestion timeline",
+    '<div class="filterbar"><label class="muted small">Year</label>'
+    '<select id="timeline-year"></select>'
+    '<span class="muted small" id="timeline-meta"></span></div>'
+    '<div id="timeline-chart" class="empty">No curation events recorded yet.</div>',
+    "timeline-card",
+    right='<span class="muted small">ingested &middot; accepted &middot; '
+    "rejected &middot; deleted &middot; auto-kept</span>",
 )
 
 _DRAWER = _read_asset("curator_ui__drawer.html")
@@ -199,6 +259,9 @@ _TABLES = card(
 _BODY = (
     f'<div class="grid" style="grid-template-columns:2fr 1fr">{_QUALITY}{_RISK}</div>'
     f'<div style="margin-top:14px">{_QUEUES}</div>'
+    f'<div style="margin-top:14px">{_CURATION}</div>'
+    f'<div style="margin-top:14px">{_TIMELINE}</div>'
+    f'<div style="margin-top:14px">{_GRAPH}</div>'
     f'<div style="margin-top:14px">{_FEEDBACK}</div>'
     f"{_DOCS}"
     f"{_REPOS}"

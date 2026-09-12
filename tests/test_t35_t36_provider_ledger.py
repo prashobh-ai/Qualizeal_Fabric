@@ -17,12 +17,34 @@ import unittest
 import urllib.error
 from unittest import mock
 
+import pytest
+
 _TMP = tempfile.mkdtemp(prefix="kf-t35-")
 os.environ["KF_DATA_ROOT"] = _TMP
 os.environ.setdefault("KF_MODEL_MODE", "off")
 
 from knowledge_fabric.adapters import model  # noqa: E402
 from knowledge_fabric.telemetry import api_ledger  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _pin_data_root():
+    """Own KF_DATA_ROOT at RUNTIME for every test here, not just at import.
+
+    Another test module (e.g. the OSS fallback suite) sets KF_DATA_ROOT to its
+    own tempdir at import; whichever module imports last wins the process env.
+    The doctor and ledger read/write ``provider_status.json`` and the ledger DB
+    under whatever KF_DATA_ROOT points to when they run, so re-assert ours
+    around each test to stay robust to collection order."""
+    prev = os.environ.get("KF_DATA_ROOT")
+    os.environ["KF_DATA_ROOT"] = _TMP
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop("KF_DATA_ROOT", None)
+        else:
+            os.environ["KF_DATA_ROOT"] = prev
 
 
 class _Resp:

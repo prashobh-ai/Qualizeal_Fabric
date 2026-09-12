@@ -51,9 +51,10 @@ corpus: ## Ingest the QualiZeal corpus into the product fabric (see load-corpus 
 showcase: ## Build the self-contained static showcase snapshot for GitHub Pages
 	@$(UV) run python scripts/build_showcase.py
 
-demo: ## Run every demo: fundamentals, answering intelligence, and production (T50)
+demo: ## Run every demo: fundamentals, answering, knowledge-intelligence, production (T50/T62)
 	@$(PY) scripts/demo.py
 	@$(PY) scripts/demo_answering.py
+	@$(PY) scripts/demo_intelligence.py
 	@$(PY) scripts/demo_production.py --fixture
 
 demo-production: ## Production-on-GitHub demo (T50): provider, consumption, facts, tables, images, queue
@@ -61,6 +62,9 @@ demo-production: ## Production-on-GitHub demo (T50): provider, consumption, fact
 
 demo-answering: ## Run the answering-intelligence demo (T24–T33 capstone; model-free)
 	@$(PY) scripts/demo_answering.py
+
+demo-intelligence: ## Knowledge-intelligence demo (T51–T60: galaxy, fallback, curation, graph, MCP)
+	@$(PY) scripts/demo_intelligence.py
 
 seed: ## Seed synthetic demo tenants (identifier-safety validated)
 	@$(PY) -m knowledge_fabric.cli seed

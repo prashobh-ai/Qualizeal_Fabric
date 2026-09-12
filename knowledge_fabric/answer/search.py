@@ -30,6 +30,8 @@ import re
 import urllib.request
 from dataclasses import dataclass, field
 
+from .. import curation
+
 _TOKEN = re.compile(r"[a-z0-9]+")
 # Capability / asset-discovery intent: the question asks whether something
 # EXISTS to find or reuse, rather than asking for a fact.
@@ -131,15 +133,20 @@ class IndexedSourceSearcher(SourceSearcher):
 
     def search(self, tenant, query, accessible, k=6) -> list[SearchHit]:
         acc = list(accessible)
+        # T53 — manual-mode items are held in state 'review' until a curator
+        # accepts them; their passages must never surface, even in discovery.
+        review = curation.review_doc_ids(self.p, tenant)
         by_pid: dict[str, SearchHit] = {}
         for pid, score in self.p.lindex.search(tenant, query, 40, acc):
             pas = self.p.passages.get(tenant, pid)
-            if pas:
+            if pas and pas.document_id not in review:
                 by_pid[pid] = self._hit(tenant, pas, score)
         qtok = [t for t in _tok(query) if len(t) >= 3]
         if qtok:
             for pas in self.p.passages.for_tenant(tenant):
                 if pas.coordinate.kind.value != "symbol_line":
+                    continue
+                if pas.document_id in review:
                     continue
                 if not (set(self.p.passages.acl_of(tenant, pas.id)) & set(acc)):
                     continue

@@ -149,10 +149,12 @@ class GateTests(unittest.TestCase):
         self.assertTrue(rep["ok"], rep["violations"])
         # the only third-party imports in shipped code are guarded optional deps:
         # the cloud drivers (boto3, pg8000), OIDC verification (jwt), the MCP
-        # server (mcp, T31) and the T41 document engines (docling, openpyxl,
-        # pytesseract, PIL, svglib, reportlab) plus pydantic (declared runtime,
-        # used for the image-description schema) — each imported inside a
-        # function, never at module load.
+        # server (mcp, T31), the T41 document engines (docling, openpyxl,
+        # pytesseract, PIL, svglib, reportlab), the graph community maths
+        # (networkx, T57) and the open-source fallback stack (spacy, tiktoken,
+        # transformers, T52) plus pydantic (declared runtime, used for the
+        # image-description schema) — each imported inside a function, never at
+        # module load.
         self.assertEqual(
             rep["summary"]["third_party_imports"],
             [
@@ -161,12 +163,16 @@ class GateTests(unittest.TestCase):
                 "docling",
                 "jwt",
                 "mcp",
+                "networkx",
                 "openpyxl",
                 "pg8000",
                 "pydantic",
                 "pytesseract",
                 "reportlab",
+                "spacy",
                 "svglib",
+                "tiktoken",
+                "transformers",
             ],
         )
         self.assertIn("RESULT: PASS", gate.render(rep))

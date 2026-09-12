@@ -139,11 +139,21 @@ CREATE TABLE IF NOT EXISTS rate_limit (
     tenant TEXT NOT NULL, subject TEXT NOT NULL, window_start REAL, count INTEGER,
     PRIMARY KEY (tenant, subject)
 );
+CREATE TABLE IF NOT EXISTS curation_settings (
+    tenant TEXT NOT NULL, source TEXT NOT NULL, mode TEXT,
+    PRIMARY KEY (tenant, source)
+);
+CREATE TABLE IF NOT EXISTS curation_log (
+    id TEXT PRIMARY KEY, tenant TEXT NOT NULL, ts INTEGER, action TEXT, mode TEXT,
+    source TEXT, document_id TEXT, title TEXT, score TEXT, recommendation TEXT,
+    reason TEXT, actor TEXT, review_id TEXT
+);
 CREATE INDEX IF NOT EXISTS ix_passages_tenant ON passages(tenant, index_version);
 CREATE INDEX IF NOT EXISTS ix_docs_tenant ON documents(tenant);
 CREATE INDEX IF NOT EXISTS ix_edges_tenant ON graph_edges(tenant, src);
 CREATE INDEX IF NOT EXISTS ix_spans_trace ON spans(trace_id);
 CREATE INDEX IF NOT EXISTS ix_audit_tenant ON audit_log(tenant);
+CREATE INDEX IF NOT EXISTS ix_curation_log_tenant ON curation_log(tenant, review_id);
 """
 
 

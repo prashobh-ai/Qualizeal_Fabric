@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 # Developer + CI extras.
 dev = [
+  "networkx>=3.0",                      # BSD-3 (graph insights; tested in every job)
   "ruff>=0.6",                          # MIT
   "pytest>=8.0",                        # MIT
   "pytest-asyncio>=0.24",               # Apache-2.0
@@ -45,6 +46,12 @@ documents = [
   "Pillow>=10.0",                       # MIT-CMU (HPND)
   "svglib>=1.5",                        # BSD-3
   "reportlab>=4.0",                     # BSD-3
+]
+
+# Concept-graph analytics (T57): community detection over the tenant graph.
+# The import is guarded; without it graph insights fall back to components.
+graph = [
+  "networkx>=3.0",                      # BSD-3
 ]
 
 # Postgres + pgvector engines behind the same repository API. pg8000 is BSD-3.

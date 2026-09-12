@@ -30,6 +30,7 @@ import math
 import os
 import re
 
+from .. import curation
 from ..adapters.embedder import cosine
 from ..adapters.model import model_for_tier
 from ..contracts.types import (
@@ -45,6 +46,7 @@ from ..contracts.types import (
 )
 from ..governance import authority
 from ..stores import versioning
+from ..telemetry import timing
 from . import lang as langmod
 from . import personas, reasoning
 from . import selector as sel
@@ -377,6 +379,10 @@ class AnswerService:
                 "context_resolved": 1 if context_resolved else 0,
             },
         ) as span:
+            # T56 — phase / active-idle stopwatch for this answer. Retrieval is
+            # wall time (active=False → idle); model composition is active. The
+            # collected block rides on the answer span and the Answer object.
+            timer = timing.PhaseTimer()
             # A. policy + rate limit (the parent request already did this for steps)
             if not _nested:
                 if not p.policy.rate_check(tenant, principal.subject):
@@ -461,8 +467,12 @@ class AnswerService:
                 p.cache.put_embedding(rq, qvec)
 
             # D. hybrid retrieval + RRF (retrieval cache) + authority boost
-            with p.telemetry.span(
-                "answer.retrieve", {"tenant": tenant, "trace_id": trace_id, "stage": "retrieve"}
+            with (
+                p.telemetry.span(
+                    "answer.retrieve",
+                    {"tenant": tenant, "trace_id": trace_id, "stage": "retrieve"},
+                ),
+                timer.phase("retrieve", active=False),
             ):
                 fused = p.cache.get_retrieval(tenant, rq, accessible)
                 if fused is None:
@@ -474,10 +484,13 @@ class AnswerService:
                 fused = self._subject_boost(tenant, rq, fused, accessible)
                 fused = self._persona_boost(principal, tenant, fused)  # T27 emphasis
 
+            # T53 — documents in manual-review are held out of every answer;
+            # their passages must never reach an asker's trace.
+            review = curation.review_doc_ids(p, tenant)
             candidates: list[Candidate] = []
             for pid, fscore in fused[: k * 3]:
                 pas = p.passages.get(tenant, pid)
-                if pas:
+                if pas and pas.document_id not in review:
                     candidates.append(Candidate(passage=pas, fused_score=fscore))
 
             # E. graph expansion -----------------------------------------
@@ -637,8 +650,12 @@ class AnswerService:
                     }
 
             # I. compose from passages only + citation post-check -------
-            with p.telemetry.span(
-                "answer.compose", {"tenant": tenant, "trace_id": trace_id, "stage": "compose"}
+            with (
+                p.telemetry.span(
+                    "answer.compose",
+                    {"tenant": tenant, "trace_id": trace_id, "stage": "compose"},
+                ),
+                timer.phase("summarise"),
             ):
                 text, citations, cost, tin, tout, saved, model_name = self._compose(
                     principal, rq, selected, tier
@@ -655,9 +672,10 @@ class AnswerService:
                 tier = decision["tier"]
                 est = self._estimate_cost(question, selected, tier)
                 if p.policy.try_spend(tenant, est, principal.subject if principal.agent else None):
-                    text, citations, cost, tin, tout, saved, model_name = self._compose(
-                        principal, rq, selected, tier
-                    )
+                    with timer.phase("summarise"):
+                        text, citations, cost, tin, tout, saved, model_name = self._compose(
+                            principal, rq, selected, tier
+                        )
                     confidence = self._confidence(g, citations, selected)
 
             # L2.3 — surface the five grounding signals (the Trust bars) and the
@@ -700,9 +718,11 @@ class AnswerService:
                     dataset_version=dsv,
                 )
 
-            text = self._localize(text, qlang, principal, tier)
+            with timer.phase("translate", active=qlang not in ("", "en")):
+                text = self._localize(text, qlang, principal, tier)
             sources = [c.document_title for c in citations]
             auth = self._authority_card(tenant, citations)
+            tblock = timer.timing()  # T56 — phase / active-idle for this answer
 
             answer = Answer(
                 AnswerKind.ANSWER,
@@ -725,6 +745,7 @@ class AnswerService:
                 complexity=complexity,
                 authoritative_source=auth,
                 dataset_version=dsv,
+                timing=tblock,
             )
             p.cache.put_answer(tenant, question, answer_scope, answer.to_dict(), cost)
 
@@ -748,6 +769,7 @@ class AnswerService:
                 model_name=model_name,
                 complexity=complexity,
                 dataset_version=dsv,
+                timing=tblock,
             )
             return answer
 
@@ -985,8 +1007,11 @@ class AnswerService:
             node_keys = sorted(node_keys)
             self.p.cache.put_graph(tenant, question, accessible, node_keys)
         traj["graph_node_keys"] = node_keys
+        review = curation.review_doc_ids(self.p, tenant)  # T53 hold-out
         for pas in self.p.passages.for_tenant(tenant):
             if pas.id in have:
+                continue
+            if pas.document_id in review:
                 continue
             if not (set(self.p.passages.acl_of(tenant, pas.id)) & set(accessible)):
                 continue
@@ -1271,9 +1296,12 @@ class AnswerService:
         subj = self._subject_of(tenant, rq)
         if any(not self._is_code_doc(tenant, did) for did in subj.values()):
             return None
+        review = curation.review_doc_ids(self.p, tenant)  # T53 hold-out
         scored = []
         for pas in self.p.passages.for_tenant(tenant):
             if pas.coordinate.kind.value != "symbol_line":
+                continue
+            if pas.document_id in review:
                 continue
             if not (set(self.p.passages.acl_of(tenant, pas.id)) & set(accessible)):
                 continue

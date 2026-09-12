@@ -382,11 +382,23 @@ PROVIDER_ORDER = ("anthropic", "openai", "bedrock", "vllm")
 KEYLESS_MODES = ("extractive", "off")  # `off` is the legacy alias of `extractive`
 
 
+def _oss_client() -> object:
+    """Build the open-source fallback, imported lazily to avoid an import cycle
+    (``oss_model`` writes to the ledger, which resolves ``data_root`` from here)."""
+    from .oss_model import OSSModelClient
+
+    return OSSModelClient()
+
+
 def build_model_client() -> object:
     """Construct the configured provider or raise — never a silent mock.
 
     * ``anthropic`` (the default when unset) — requires ``ANTHROPIC_API_KEY``.
-    * ``extractive`` / ``off`` — the only keyless mode; must be explicit.
+    * ``auto`` — anthropic when its key verifies, else the open-source fallback,
+      else the extractive core; a ``ProviderUnavailable`` from anthropic falls
+      through rather than raising, so ``auto`` always yields a usable client.
+    * ``oss`` — the always-available open-source fallback (T52), shown honestly.
+    * ``extractive`` / ``off`` — the keyless extractive core; must be explicit.
     * ``mock`` — an explicit test double.
     * ``openai`` / ``hosted`` — requires the hosted endpoint + key.
     """
@@ -395,6 +407,17 @@ def build_model_client() -> object:
         return DisabledModelClient()
     if mode == "mock":
         return MockModelClient()
+    if mode == "oss":
+        return _oss_client()
+    if mode == "auto":
+        try:
+            client = AnthropicModelClient()
+            if not client.available():
+                raise ProviderUnavailable("KF_MODEL_MODE=auto: ANTHROPIC_API_KEY not set")
+            return client
+        except ProviderUnavailableError:
+            oss = _oss_client()
+            return oss if oss.available() else DisabledModelClient()
     if mode == "anthropic":
         client = AnthropicModelClient()
         if not client.available():

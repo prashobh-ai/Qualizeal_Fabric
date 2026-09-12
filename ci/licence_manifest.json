@@ -1204,6 +1204,49 @@
       ],
       "why": "svglib's rendering backend; only imported alongside svglib; guarded import.",
       "evidence": "knowledge_fabric/ingestion/images.py"
+    },
+    {
+      "name": "networkx",
+      "role": "concept-graph community detection (T57)",
+      "linkage": "optional-runtime",
+      "licence": "BSD-3-Clause",
+      "licence_name": "BSD 3-Clause License",
+      "approved": true,
+      "status": "optional",
+      "import_names": [
+        "networkx"
+      ],
+      "distributions": [
+        "networkx"
+      ],
+      "why": "Louvain community detection over the tenant concept graph; guarded import, connected-components fallback without it.",
+      "evidence": "pyproject.toml [graph]"
+    },
+    {
+      "name": "vis-network",
+      "role": "physics galaxy renderer, vendored browser asset (T51)",
+      "linkage": "optional-runtime",
+      "licence": "Apache-2.0",
+      "licence_name": "Apache License 2.0 OR MIT",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Vendored standalone UMD build at surfaces/static/vendor/vis-network.min.js; served same-origin under /static/vendor/, no CDN, no python import; renders the force-directed knowledge graph.",
+      "evidence": "knowledge_fabric/surfaces/static/vendor/vis-network.min.js"
+    },
+    {
+      "name": "token-meter",
+      "role": "telemetry concepts reference (T55)",
+      "linkage": "optional-runtime",
+      "licence": "MIT",
+      "licence_name": "MIT License",
+      "approved": true,
+      "status": "reference",
+      "import_names": [],
+      "distributions": [],
+      "why": "Cost breakdown, active/idle, waste, efficiency, burn rate, quota snapshot and percentile timing concepts were reimplemented in telemetry/insights.py; no code vendored.",
+      "evidence": "knowledge_fabric/telemetry/insights.py"
     }
   ]
 }

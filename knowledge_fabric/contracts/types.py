@@ -231,6 +231,7 @@ class Answer:
     understood_as: str | None = None  # T26 — the rewritten question, when context resolved one
     suggestions: list[str] | None = None  # T26 — clarify-back chips
     role_view: dict | None = None  # T27 — role-conditioned lens (asker/curator/admin/agent)
+    timing: dict | None = None  # T56 — phase / active-idle block ({phase_ms, active_ms, idle_ms…})
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -251,6 +252,7 @@ class Answer:
             "authoritative_source": self.authoritative_source,
             "dataset_version": self.dataset_version,
             "reasoning": self.reasoning,
+            "timing": self.timing,
             "citations": [
                 {
                     "document_id": c.document_id,
