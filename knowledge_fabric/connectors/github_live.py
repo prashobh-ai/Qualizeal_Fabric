@@ -232,13 +232,19 @@ class GitHubLiveConnector(BaseConnector):
         data, _h = self._request("GET", url, ok_missing=ok_missing)
         return data
 
-    def _rest_paged(self, path: str, params: dict | None = None, cap: int = 1000) -> list:
+    def _rest_paged(
+        self, path: str, params: dict | None = None, cap: int = 1000, *, ok_missing: bool = False
+    ) -> list:
         out: list = []
         page = 1
         while len(out) < cap:
             q = dict(params or {})
             q.update({"per_page": 100, "page": page})
-            data, headers = self._request("GET", API + path + "?" + urllib.parse.urlencode(q))
+            data, headers = self._request(
+                "GET", API + path + "?" + urllib.parse.urlencode(q), ok_missing=ok_missing
+            )
+            if data is None:  # 404 with ok_missing — the listing does not exist
+                break
             batch = data if isinstance(data, list) else []
             out.extend(batch)
             link = str(headers.get("link", ""))
@@ -260,13 +266,17 @@ class GitHubLiveConnector(BaseConnector):
     def list_repositories(self) -> list[str]:
         repos: list[str] = []
         if self.org:
+            # ``org`` may be an organisation OR a personal user (T118 — a pasted
+            # ``github.com/<owner>`` URL). Try the org listing first; a personal
+            # user 404s there, so fall back to the user listing (both tolerate a
+            # 404 rather than raising, so the fallback can actually run).
             rows = self._rest_paged(
-                f"/orgs/{self.org}/repos", {"type": "all", "sort": "pushed"}, 500
+                f"/orgs/{self.org}/repos", {"type": "all", "sort": "pushed"}, 500, ok_missing=True
             )
             if not rows:
-                data = self._rest(f"/orgs/{self.org}", ok_missing=True)
-                if data is None:
-                    rows = self._rest_paged(f"/users/{self.org}/repos", {"sort": "pushed"}, 500)
+                rows = self._rest_paged(
+                    f"/users/{self.org}/repos", {"sort": "pushed"}, 500, ok_missing=True
+                )
             repos += [r["full_name"] for r in rows if r.get("full_name") and not r.get("fork")]
         repos += self.extra_repos
         seen, out = set(), []

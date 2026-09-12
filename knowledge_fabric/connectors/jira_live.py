@@ -569,8 +569,13 @@ class JiraLiveConnector(BaseConnector):
                 newest = max(newest, flat["updated"])
                 items.append(self._record(flat, as_of))
         # T118 — dashboards (name + gadgets/filters) and boards (their issues +
-        # columns), each connectable directly from a pasted URL.
-        for did in self.dashboards:
+        # columns), each connectable directly from a pasted URL. A ``*`` in the
+        # allow-list (the pasted ``/jira/dashboards`` index) means "every
+        # dashboard the token can see", resolved via list_dashboards().
+        dashboards = self.dashboards
+        if "*" in dashboards:
+            dashboards = [d["id"] for d in self.list_dashboards() if d.get("id")]
+        for did in dashboards:
             detail = self.dashboard_detail(did)
             if detail is None:
                 continue

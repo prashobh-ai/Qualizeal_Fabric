@@ -85,9 +85,10 @@ def _parse_atlassian(u, segs: list[str], low: str) -> dict:
     frag = {"source": "jira", "url": site}
     if "dashboards" in segs or "Dashboard.jspa" in low:
         did = _first_num(segs[segs.index("dashboards") + 1 :]) if "dashboards" in segs else None
-        if did:
-            frag["dashboards"] = [did]
-            return frag
+        # ``.../jira/dashboards`` (the index, no id) means "every dashboard the
+        # token can see" — the connector resolves ``*`` via list_dashboards().
+        frag["dashboards"] = [did] if did else ["*"]
+        return frag
     if "boards" in segs:
         bid = _first_num(segs[segs.index("boards") + 1 :])
         if bid:
