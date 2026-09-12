@@ -50,6 +50,8 @@ __all__ = [
     "check_scopes",
     "effective_config",
     "allow_key",
+    "credentials",
+    "CREDENTIALS",
 ]
 
 # T115 — one source key per connector, everywhere.
@@ -276,7 +278,16 @@ def check_scopes(platform, tenant: str, source: str) -> dict:
 def effective_config(platform, tenant: str, source: str, base: dict | None = None) -> dict:
     """Config handed to the connector: stored admin config, overlaid with
     ``base`` (a schedule's or request's config), with the admin allow-list
-    written last into the connector's allow-list key when one is set."""
+    parsed (T118, URL-aware) into the connector's own config keys last.
+
+    The allow-list is folded through :func:`url_parse.config_from_allow`, so a
+    pasted GitHub/Jira/Confluence/website URL becomes ``org``/``repos``,
+    ``dashboards``/``boards``/``projects``, ``pages``/``spaces`` or ``urls``.
+    Plain identifiers still map to the native allow-list key, so an allow-list
+    written before T118 is unchanged. A parsed site ``url`` only fills in when
+    the admin has not configured one explicitly."""
+    from . import url_parse
+
     rec = get(platform, tenant, source)
     merged: dict[str, Any] = dict(rec["config"]) if rec else {}
     if base:
@@ -284,5 +295,62 @@ def effective_config(platform, tenant: str, source: str, base: dict | None = Non
             raise TypeError("base config must be a dict")
         merged.update(base)
     if rec and rec["allow"]:
-        merged[allow_key(source)] = list(rec["allow"])
+        frag = url_parse.config_from_allow(source, rec["allow"])
+        for key, val in frag.items():
+            if key == "url":
+                merged.setdefault("url", val)  # never override a configured site
+            else:
+                merged[key] = val
     return merged
+
+
+#: required credential env vars per source (``optional`` are used when present
+#: but never block a sync — GitHub reads public repos without a token).
+CREDENTIALS: dict[str, dict[str, list[str]]] = {
+    "github": {"required": [], "optional": ["KF_GITHUB_TOKEN"]},
+    "jira": {"required": ["JIRA_URL", "JIRA_EMAIL", "JIRA_TOKEN"], "optional": []},
+    "confluence": {
+        "required": ["CONFLUENCE_URL", "CONFLUENCE_EMAIL", "CONFLUENCE_TOKEN"],
+        "optional": [],
+    },
+    "website": {"required": [], "optional": []},
+    "files": {"required": [], "optional": []},
+}
+
+#: the connector config key an env credential can also be supplied through, so a
+#: secret set in Admin config (not the environment) counts as present.
+_CONFIG_ALIAS = {
+    "JIRA_URL": "url",
+    "JIRA_EMAIL": "email",
+    "JIRA_TOKEN": "token",
+    "CONFLUENCE_URL": "url",
+    "CONFLUENCE_EMAIL": "email",
+    "CONFLUENCE_TOKEN": "token",
+    "KF_GITHUB_TOKEN": "token",
+}
+
+
+def credentials(platform, tenant: str, source: str) -> dict:
+    """T118 — which secrets a source needs and whether they are present (env or
+    connector config). ``configured`` is false only when a *required* secret is
+    missing, so the Admin card can show ``not configured · add <secrets>``
+    instead of a fake success."""
+    import os
+
+    spec = CREDENTIALS.get(source, {"required": [], "optional": []})
+    cfg = (get(platform, tenant, source) or {}).get("config", {}) if platform else {}
+
+    def present(name: str) -> bool:
+        alias = _CONFIG_ALIAS.get(name)
+        return bool(os.environ.get(name) or (alias and cfg.get(alias)))
+
+    missing = [n for n in spec["required"] if not present(n)]
+    optional_missing = [n for n in spec["optional"] if not present(n)]
+    return {
+        "source": source,
+        "required": list(spec["required"]),
+        "optional": list(spec["optional"]),
+        "missing": missing,
+        "optional_missing": optional_missing,
+        "configured": not missing,
+    }

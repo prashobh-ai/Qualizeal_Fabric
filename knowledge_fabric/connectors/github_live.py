@@ -174,18 +174,19 @@ class GitHubLiveConnector(BaseConnector):
 
     # -- transport ----------------------------------------------------------
     def _require(self) -> None:
-        if not self.token:
-            raise ConnectorConfigError(
-                "github_live needs GITHUB_TOKEN (or KF_GITHUB_TOKEN / connector config token)"
-            )
+        # T118 — the token is OPTIONAL: public repos ingest unauthenticated
+        # (rate-limited); a token unlocks private/org repos and a higher limit.
+        return None
 
     def _headers(self, accept: str = "application/vnd.github+json") -> dict:
-        return {
-            "Authorization": f"Bearer {self.token}",
+        headers = {
             "Accept": accept,
             "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "QualiZeal-Knowledge-Fabric/1.0",
         }
+        if self.token:  # unauthenticated for public repos when absent
+            headers["Authorization"] = f"Bearer {self.token}"
+        return headers
 
     def _request(self, method: str, url: str, body: dict | None = None, ok_missing=False):
         self._require()
@@ -912,9 +913,9 @@ def sync(platform, tenant: str, transport=None, runner=None) -> dict:
     from . import admin
 
     cfg = admin.effective_config(platform, tenant, "github", {})
-    token = cfg.get("token") or os.environ.get("KF_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if not token:
-        return {"status": "skipped", "reason": "GITHUB_TOKEN / KF_GITHUB_TOKEN not set"}
+    # T118 — the token is OPTIONAL: without it, public repos of the pasted
+    # user/org still ingest (rate-limited); with an org-scoped token, private
+    # org repos too. Only a missing scope (no org / no repo) skips.
     scope = (
         cfg.get("org")
         or os.environ.get("GITHUB_ORG")
@@ -922,7 +923,7 @@ def sync(platform, tenant: str, transport=None, runner=None) -> dict:
         or os.environ.get("GITHUB_EXTRA_REPOS")
     )
     if not scope:
-        return {"status": "skipped", "reason": "GITHUB_ORG / GITHUB_EXTRA_REPOS not set"}
+        return {"status": "skipped", "reason": "no GitHub org/user or repo connected (paste a URL)"}
     kwargs = {}
     if transport is not None:
         kwargs["transport"] = transport
