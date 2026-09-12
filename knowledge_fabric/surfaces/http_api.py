@@ -16,7 +16,7 @@ import json
 import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from .. import curation, fabric_views
 from ..adapters import cloud
@@ -93,6 +93,50 @@ def platform() -> Platform:
                 _platform.policy.set_budget(t.tenant, float(cap))
         _svc = AnswerService(_platform)
     return _platform
+
+
+# T117 — sign-in helpers. A verified user (password or SSO) is minted the SAME
+# internal JWT; the subject is the user's email and roles/scopes/designation are
+# the user's real grants.
+_SSO_STATE: dict[str, str] = {}  # state -> pkce verifier (short-lived, in-process)
+
+
+def _auth_token_response(p, user: dict) -> dict:
+    from ..contracts.types import Principal
+
+    prin = Principal(
+        subject=user["email"],
+        tenant=user.get("tenant") or "qualizeal",
+        roles=list(user.get("roles") or ["asker"]),
+        scopes=list(user.get("scopes") or ["public"]),
+        agent="agent" in (user.get("roles") or []),
+        designation=user.get("designation") or "",
+    )
+    return {
+        "token": p.idp.mint(prin),
+        "subject": prin.subject,
+        "roles": prin.roles,
+        "scopes": prin.scopes,
+        "designation": prin.designation,
+        "tenant": prin.tenant,
+    }
+
+
+def _oidc_flow():
+    from ..auth.oidc import OIDCFlow
+
+    return OIDCFlow()
+
+
+def _auth_config() -> dict:
+    """What the sign-in page needs to render: password by default, an SSO button
+    when OIDC is configured, and a dev sign-in only under KF_DEV_LOGIN."""
+    flow = _oidc_flow()
+    return {
+        "mode": "sso" if flow.configured() else "password",
+        "sso": {"enabled": flow.configured(), "label": flow.label},
+        "dev_login": os.environ.get("KF_DEV_LOGIN") == "1",
+    }
 
 
 def _demo_delta(tenant: str, source: str) -> list[dict] | None:
@@ -356,6 +400,48 @@ class Handler(BaseHTTPRequestHandler):
         if u.path.startswith("/static/"):
             return self._serve_static(u.path[len("/static/") :])
 
+        # T117 — sign-in configuration (public): tells the page whether to show
+        # password, an SSO button, or the dev sign-in.
+        if u.path == "/api/auth/config":
+            return self._send(200, _auth_config())
+        # T117 — OIDC / OAuth2 authorization-code-with-PKCE flow.
+        if u.path == "/api/auth/sso/login":
+            flow = _oidc_flow()
+            if not flow.configured():
+                return self._send(400, {"error": "SSO is not configured"})
+            from ..auth import oidc as _oidc
+
+            state = _oidc.new_state()
+            verifier, challenge = _oidc.pkce_pair()
+            _SSO_STATE[state] = verifier
+            try:
+                url = flow.authorize_url(state, challenge)
+            except Exception as e:  # noqa: BLE001 — discovery/config problem, report it
+                return self._send(502, {"error": f"SSO discovery failed: {e}"})
+            self.send_response(302)
+            self.send_header("Location", url)
+            self.end_headers()
+            return None
+        if u.path == "/api/auth/sso/callback":
+            return self._sso_callback(p, first("code"), first("state"))
+        if u.path == "/api/auth/whoami":
+            # T117 — resolve the bearer token to the signed-in identity, so a
+            # client that only holds a token (e.g. after an SSO redirect) can
+            # fill in its roles/designation.
+            try:
+                prin = self._principal()
+            except PermissionError as e:
+                return self._send(401, {"error": str(e)})
+            return self._send(
+                200,
+                {
+                    "subject": prin.subject,
+                    "roles": prin.roles,
+                    "scopes": prin.scopes,
+                    "designation": getattr(prin, "designation", ""),
+                    "tenant": prin.tenant,
+                },
+            )
         # pages
         if u.path == "/signin":
             return self._send(200, SIGNIN_HTML, "text/html; charset=utf-8")
@@ -994,10 +1080,63 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     # ------------------------------------------------------------ POST
+    def _sso_callback(self, p, code, state):
+        """T117 — exchange the OIDC code, validate the id_token (issuer/audience/
+        signature via the IdP JWKS), map the verified email + groups to roles, and
+        mint the internal JWT — then redirect to the sign-in page carrying the
+        token so the SPA can store it."""
+        flow = _oidc_flow()
+        if not flow.configured():
+            return self._send(400, {"error": "SSO is not configured"})
+        verifier = _SSO_STATE.pop(state or "", None)
+        if not code or not verifier:
+            return self._send(400, {"error": "invalid or expired SSO state"})
+        try:
+            tokens = flow.exchange_code(code, verifier)
+            from ..adapters.identity import OIDCIdentity
+
+            claims = OIDCIdentity(flow.issuer, flow.audience)._decode(tokens.get("id_token", ""))
+        except Exception as e:  # noqa: BLE001 — verification failure is a 401, reported
+            return self._send(401, {"error": f"SSO verification failed: {e}"})
+        import json as _json
+
+        gmap = None
+        raw = os.environ.get("OIDC_GROUP_MAP", "").strip()
+        if raw:
+            try:
+                gmap = _json.loads(raw)
+            except ValueError:
+                gmap = None
+        ident = flow.identity(claims, group_map=gmap)
+        if not ident["email"]:
+            return self._send(401, {"error": "SSO token has no email claim"})
+        resp = _auth_token_response(p, {**ident, "tenant": "qualizeal"})
+        base = os.environ.get("KF_BASE", "")
+        self.send_response(302)
+        self.send_header("Location", f"{base}/signin#token=" + quote(resp["token"]))
+        self.end_headers()
+        return None
+
     def do_POST(self):
         u = urlparse(self.path)
         p = platform()
+        if u.path == "/api/auth/login":
+            # T117 — real password login: verify the PBKDF2 hash and mint the
+            # internal JWT for the user's real roles/scopes/designation. No
+            # free-entry path; an unknown user or wrong password is 401.
+            b = self._body()
+            user = p.users.verify(b.get("email", ""), b.get("password", ""))
+            if not user:
+                return self._send(401, {"error": "invalid credentials"})
+            return self._send(200, _auth_token_response(p, user))
         if u.path == "/login":
+            # T117 — the old open-door {tenant, subject} path is DEV-ONLY, gated
+            # behind KF_DEV_LOGIN. The deployed build has no passwordless entry.
+            if os.environ.get("KF_DEV_LOGIN") != "1":
+                return self._send(
+                    403,
+                    {"error": "passwordless login is disabled; use POST /api/auth/login"},
+                )
             b = self._body()
             try:
                 prin = demo.principal_for(p, b["tenant"], b["subject"])
@@ -1400,9 +1539,37 @@ class Handler(BaseHTTPRequestHandler):
             if not prin:
                 return
             b = self._body()
+            # T117 — an email payload creates a real CREDENTIAL user (PBKDF2) in
+            # the users store; a temporary password is generated when none is
+            # given and returned exactly once so the admin can hand it over.
+            email = (b.get("email") or "").strip().lower()
+            if email and b.get("action") != "delete":
+                import secrets as _secrets
+
+                roles = list(b.get("roles") or ["asker"])
+                given = b.get("password")
+                temp = given or _secrets.token_urlsafe(9)
+                user = p.users.create(
+                    email,
+                    temp,
+                    roles,
+                    tenant=prin.tenant,
+                    designation=(b.get("designation") or "").strip(),
+                )
+                self._audit(prin, "add_credential_user", email, ",".join(roles))
+                return self._send(
+                    200,
+                    {
+                        "ok": True,
+                        "email": email,
+                        "roles": user["roles"],
+                        "designation": user["designation"],
+                        "temp_password": None if given else temp,
+                    },
+                )
             subject = (b.get("subject") or "").strip()
             if not subject:
-                return self._send(400, {"error": "subject required"})
+                return self._send(400, {"error": "subject or email required"})
             rows = demo.DEMO_USERS.setdefault(prin.tenant, list(demo._ROLE_USERS))
             existing = {r[0] for r in rows}
             if b.get("action") == "delete":

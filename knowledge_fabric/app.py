@@ -22,6 +22,7 @@ from .adapters.queue import SqlQueue
 from .adapters.telemetry import SqlTelemetry
 from .adapters.vectorindex import SqlVectorIndex
 from .answer.cache import Cache
+from .auth.users import UserStore
 from .governance.policy import PolicyEngine
 from .stores.db import Database
 from .stores.relationships import RelationshipRepo
@@ -70,6 +71,7 @@ class Platform:
         self.documents = DocumentRepo(self.db)
         self.passages = PassageRepo(self.db)
         self.relationships = RelationshipRepo(self.db)  # T99 cross-source edges
+        self.users = UserStore(self.db)  # T117 credential store (real login)
         self.graph_repo = GraphRepo(self.db)
         self.graph = SqlGraphStore(self.graph_repo)
         self.audit = AuditRepo(self.db)

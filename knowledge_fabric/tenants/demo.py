@@ -94,6 +94,17 @@ def seed(platform, tenants: list[str] | None = None) -> dict:
             continue
         platform.policy.set_budget(cfg.tenant, cfg.budget)
         summary[cfg.tenant] = {"documents": 0, "ingested": 0, "passages": 0}
+    # T117 — seed the real credential users from the KF_SEED_USERS secret (a
+    # no-op when it is absent, so a keyless/dev run needs no seed). Only these
+    # seeded accounts can sign in through /api/auth/login.
+    try:
+        from ..auth.users import seed_from_env
+
+        seeded = seed_from_env(platform.users, tenant=DEMO_TENANTS[0].tenant)
+        if seeded and DEMO_TENANTS[0].tenant in summary:
+            summary[DEMO_TENANTS[0].tenant]["users_seeded"] = seeded
+    except Exception:  # seeding is best-effort; never blocks a boot
+        pass
     return summary
 
 

@@ -34,6 +34,17 @@ const KF=(()=>{
   return j}
  const FABRIC='qualizeal';   // single in-house fabric (no tenant selector, D5)
  async function login(subject,password){const j=await api('/login',{method:'POST',body:{tenant:FABRIC,subject,password:password||''}});save(j);renderWho();return j}
+ // T117 — real password login: POST /api/auth/login {email,password}; the server
+ // verifies the PBKDF2 hash and returns the internal token + real roles.
+ async function authLogin(email,password){const j=await api('/api/auth/login',{method:'POST',body:{email,password:password||''}});save(j);renderWho();return j}
+ async function whoami(){return api('/api/auth/whoami')}
+ async function authConfig(){try{return await api('/api/auth/config')}catch(e){return{mode:'password',sso:{enabled:false},dev_login:false}}}
+ // T117 — after an SSO redirect the token arrives in the URL fragment; store it
+ // and resolve the identity so roles/nav are correct.
+ async function ssoFromHash(){const h=(location.hash||'').replace(/^#/,'');if(h.indexOf('token=')<0)return null;
+  const tok=decodeURIComponent((h.split('token=')[1]||'').split('&')[0]);if(!tok)return null;
+  save({token:tok});try{const me=await whoami();save({token:tok,...me});renderWho()}catch(e){}
+  try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}return session}
  function logout(){save(null);renderWho();nav('/signin')}
  function hasRole(){const roles=(session&&session.roles)||[];for(const r of arguments)if(roles.indexOf(r)>=0)return true;return false}
  let toastTimer=null;
@@ -58,5 +69,5 @@ const KF=(()=>{
  function initBar(opts){opts=opts||{};load();applyBase();renderWho()}
  function bar(pctv,color){const v=Math.max(0,Math.min(1,Number(pctv)||0));return '<div class="trk"><i style="width:'+(v*100).toFixed(0)+'%;background:'+(color||'var(--accent)')+'"></i></div>'}
  function level(x,good,warn){x=Number(x)||0;return x>=good?'good':x>=warn?'warn':'bad'}
- return {DIR,$,$$,esc,num,pct,money,ms,when,ago,api,login,logout,hasRole,toast,gate,initBar,applyBase,nav,base:()=>BASE,bar,level,get session(){return session}};
+ return {DIR,$,$$,esc,num,pct,money,ms,when,ago,api,login,authLogin,whoami,authConfig,ssoFromHash,logout,hasRole,toast,gate,initBar,applyBase,nav,base:()=>BASE,bar,level,get session(){return session}};
 })();
