@@ -157,3 +157,11 @@ main{max-width:none;padding:0;display:flex;flex-direction:column}
 /* T56 — the phase / active-idle bar in the card details */
 .phasebar{display:flex;height:8px;border-radius:5px;overflow:hidden;background:var(--panel2);margin-top:4px}
 .phasebar i{display:block;height:100%}
+
+/* T85/T81 — governance line + Explain affordance under each answer */
+.govline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 2px;font-size:12px}
+.govline.stale .fresh{color:var(--bad)}
+.explainbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0}
+.explainbar .explain-out{flex-basis:100%}
+.explanation{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;
+ font-size:13px;line-height:1.5;margin-top:4px;white-space:normal}

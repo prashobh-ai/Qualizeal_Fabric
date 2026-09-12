@@ -33,6 +33,7 @@ PURPOSES = frozenset(
         "table_sql",
         "quality_harness",
         "doctor_ping",
+        "explain",  # T81 — the on-demand "explain" step, ledgered separately
     }
 )
 

@@ -74,6 +74,52 @@ PROFILE: dict[str, dict] = {
 DEPTH_CAP = {"headline": 1, "brief": 2, "full": 3}
 
 # --------------------------------------------------------------------------
+# T84 — the per-persona *answer contract*. The same cited evidence lands
+# differently: the ``lead`` says what the direct ``result`` leads with, and
+# ``offers`` are the persona-appropriate ``Explain`` follow-ups the card and
+# chatbot present (each fires POST /api/explain as a separate ledgered step,
+# T81). The citations never change — only the shape of the result and what the
+# reader can ask next.
+# --------------------------------------------------------------------------
+CONTRACT: dict[str, dict] = {
+    "developer": {
+        "lead": "the direct technical answer and the cited symbol/file",
+        "offers": ["How it works", "Callers", "Dependencies"],
+    },
+    "quality": {
+        "lead": "the behaviour and where it is tested",
+        "offers": ["Edge cases", "Coverage gaps"],
+    },
+    "delivery": {
+        "lead": "the status headline and one proof point",
+        "offers": ["Why?", "Break down", "Compare"],
+    },
+    "executive": {
+        "lead": "the headline number or outcome and one proof point",
+        "offers": ["Why?", "Break down"],
+    },
+    "curation": {
+        "lead": "the fact and its governance state (source, freshness, authority)",
+        "offers": ["Audit trail", "Show working"],
+    },
+    "operations": {
+        "lead": "the fact plus the level, model and cost that produced it",
+        "offers": ["Audit trail", "Cost & level"],
+    },
+    "general": {
+        "lead": "the plain cited answer",
+        "offers": ["Why?", "Show working"],
+    },
+}
+
+
+def contract_for(designation: str) -> dict:
+    """The T84 answer contract for a designation: the ``result`` lead and the
+    persona-appropriate ``Explain`` offers."""
+    return CONTRACT[persona_for(designation)]
+
+
+# --------------------------------------------------------------------------
 # Designation → persona. Titles are matched case-insensitively by keyword, most
 # specific first, so "QA lead" resolves to quality and "delivery head" to
 # delivery. Unknown or empty designations fall through to "general".

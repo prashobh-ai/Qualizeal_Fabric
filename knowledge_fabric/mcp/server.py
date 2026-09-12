@@ -287,16 +287,22 @@ def tool_ask_fabric(
     designation: str = "",
     previous_questions: list[str] | None = None,
     svc: AnswerService | None = None,
+    explain: bool = False,
 ) -> dict:
     """Run the agent (``answer.agent.run``) as the caller's role profile with the
     two previous questions as context; when the agent module is not installed
     the same governed ``AnswerService`` path answers (real, cited, never a
-    stub) and the result says which engine ran."""
+    stub) and the result says which engine ran.
+
+    T81 — answer-first: the payload always carries the direct ``result`` and a
+    ``explanation`` that stays null unless ``explain=True`` is passed, in which
+    case the on-demand narrative is produced as a separate ledgered step."""
     prin = _agent_principal(platform, tenant, designation)
     turns = [{"question": q} for q in (previous_questions or [])[-2:] if q]
     context = {"turns": turns, "history": [t["question"] for t in turns]} if turns else None
     engine = "answer_service"
     answer = None
+    svc = svc or AnswerService(platform)
     try:
         from ..answer import agent as _agent  # optional at this stage
     except Exception:
@@ -312,9 +318,13 @@ def tool_ask_fabric(
             # NOT caught here — that raises loudly (T35).
             answer = None
     if answer is None:
-        svc = svc or AnswerService(platform)
         answer = svc.ask(prin, question, context=context)
     payload = answer.to_dict() if hasattr(answer, "to_dict") else dict(answer)
+    if explain and isinstance(payload, dict) and payload.get("trajectory_id"):
+        try:
+            payload["explanation"] = svc.explain(prin, payload["trajectory_id"]).get("explanation")
+        except Exception:
+            pass
     steps = ((payload.get("why") or {}).get("steps")) if isinstance(payload, dict) else None
     return {
         "result": {
@@ -684,11 +694,17 @@ def build_server(platform=None, tenant: str | None = None):
         description=(
             "Ask the fabric through the agent: it checks the facts, code, tables "
             "and live sources it needs and answers with citations, framed for "
-            "the caller's designation, with the previous questions as context."
+            "the caller's designation, with the previous questions as context. "
+            "Answer-first: the direct 'result' comes back immediately; pass "
+            "explain=true to also get the narrative 'explanation' (a separate, "
+            "ledgered step)."
         )
     )
     def ask_fabric(
-        question: str, designation: str = "", previous_questions: list[str] | None = None
+        question: str,
+        designation: str = "",
+        previous_questions: list[str] | None = None,
+        explain: bool = False,
     ) -> dict:
         """Ask the fabric via the agent.
 
@@ -698,8 +714,13 @@ def build_server(platform=None, tenant: str | None = None):
                 that frames the answer; it never widens what is retrievable.
             previous_questions: Up to two previous questions of this
                 conversation, oldest first, used as context.
+            explain: When true, also produce the on-demand narrative
+                ``explanation`` (the working) as a separate ledgered step; the
+                direct ``result`` is always returned regardless.
         """
-        return tool_ask_fabric(platform, tenant, question, designation, previous_questions, svc)
+        return tool_ask_fabric(
+            platform, tenant, question, designation, previous_questions, svc, explain=explain
+        )
 
     @server.tool(
         description=(

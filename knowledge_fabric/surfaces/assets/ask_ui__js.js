@@ -83,7 +83,9 @@ function renderMessages(){const box=$('#messages');const t=curThread();
      ?'<div class="understood">understood as: '+esc(tn.a.understood_as)+'</div>':'')+
    aiBlock(tn.a,i)+'</div>').join('');
  $$('#messages .msg.ai').forEach(el=>el.onclick=()=>selectAnswer(t.turns[+el.dataset.i]));
- wireCites();wireFeedback();wireClarify();wireQueue();box.scrollTop=box.scrollHeight}
+ wireCites();wireFeedback();wireClarify();wireQueue();wireExplain();box.scrollTop=box.scrollHeight}
+// T81 — the Explain affordance buttons fire POST /api/explain on click.
+function wireExplain(){$$('#messages .explain-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();runExplain(b)})}
 // a reader clicks one of the clarify's offered questions -> ask it straight away.
 function wireClarify(){$$('#messages .clarify-chips .chip').forEach(c=>c.onclick=e=>{e.stopPropagation();
  $('#question').value=c.dataset.cq;autosize();$('#question').focus();ask()})}
@@ -105,7 +107,33 @@ function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
   '<button class="fbbtn down" title="Not helpful — flag for the curators">&#128078;</button>'+
   '<span class="fbmsg muted small"></span></div>';
  const baked=a.baked?'<span class="pill info" title="'+esc(a.baked.asked_at||'')+'">'+(a.baked.source==='queue'?'full answer':'baked')+'</span>':'';
- return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+baked+'</div>'+stepsHtml(a)+body+roleLens(a)+queueBar(a,i)+fb+'</div>'}
+ const gov=a.kind==='answer'?govLine(a):'';
+ const explain=a.kind==='answer'?explainBar(a,i):'';
+ return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+baked+'</div>'+stepsHtml(a)+body+gov+explain+roleLens(a)+queueBar(a,i)+fb+'</div>'}
+// T85 — the governance line under every answer: source kind, authority, and
+// freshness; amber + a "show newer sources" nudge when the source is stale.
+function govLine(a){const g=a.governance;if(!g)return '';
+ return '<div class="govline'+(g.stale?' stale':'')+'">'+
+  '<span class="pill">'+esc(g.source_kind||'source')+'</span>'+
+  '<span class="muted small">'+esc(g.authority||'cited')+'</span>'+
+  '<span class="fresh muted small">'+esc(g.freshness||'')+'</span>'+
+  (g.stale?'<span class="pill warn">stale</span>':'')+'</div>'}
+// T81 — the Explain affordance: persona-appropriate offers (Why? / Show working
+// / Break down …) that fire POST /api/explain as a separate ledgered step and
+// append the narrative to the turn.
+function explainBar(a,i){const ex=a.explain;if(!ex||!ex.available||!(ex.offers||[]).length)return '';
+ const btns=ex.offers.map(o=>'<button class="btn sm explain-btn" data-tr="'+esc(ex.trace_id)+'" data-i="'+i+'">'+esc(o)+'</button>').join('');
+ return '<div class="explainbar" data-i="'+i+'">'+btns+'<div class="explain-out" hidden></div></div>'}
+async function runExplain(btn){const bar=btn.closest('.explainbar');const out=bar.querySelector('.explain-out');
+ const tr=btn.dataset.tr;bar.querySelectorAll('.explain-btn').forEach(b=>b.disabled=true);
+ out.hidden=false;out.innerHTML='<span class="muted small">working…</span>';
+ try{const r=await api('/api/explain',{method:'POST',body:{trace_id:tr}});
+  if(r.error){out.innerHTML='<span class="muted small">'+esc(r.error)+'</span>'}
+  else{out.innerHTML='<div class="explanation">'+esc(r.explanation||'').replace(/\n/g,'<br>')+'</div>'+
+   '<div class="muted small">explained by '+esc(r.model_name||'')+(r.cost?' &middot; '+money(r.cost):'')+'</div>';
+   const t=curThread&&curThread();if(t&&t.turns&&t.turns[+bar.dataset.i])t.turns[+bar.dataset.i].explained=true;}}
+ catch(e){out.innerHTML='<span class="muted small">explain failed</span>'}
+ finally{bar.querySelectorAll('.explain-btn').forEach(b=>b.disabled=false)}}
 // T47 — the agent's tool steps (why.steps on an agent-run answer): one line per
 // tool checked, "Checked <tool> · <n> results". KF.streamStep(step) appends the
 // same line live while the answer is in flight (the streaming route belongs to
