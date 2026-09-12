@@ -798,6 +798,17 @@ class Handler(BaseHTTPRequestHandler):
             rep = fabric_views.coverage_matrix()
             return self._send(200, rep)
 
+        if u.path == "/admin/service-levels":
+            # T86 — the business SLA & path panel: median/p95 time-to-answer, the
+            # fast-vs-agent split, explain-request rate and cost per answer, per
+            # persona and per data type, plus the headline SLA line.
+            prin = self._require("admin")
+            if not prin:
+                return
+            from ..telemetry import sla
+
+            return self._send(200, sla.service_levels(p, prin.tenant))
+
         # ---- T47: fabric-data views (repositories, tables, insights) -----
         if u.path == "/curator/repositories":
             prin = self._require("curate")

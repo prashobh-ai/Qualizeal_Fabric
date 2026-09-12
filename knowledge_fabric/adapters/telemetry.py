@@ -319,6 +319,11 @@ class SqlTelemetry:
                     "scope": a.get("scope") or "public",
                     "context": "resolved" if a.get("context_resolved") else "direct",
                     "level": why.get("level_name") or r["level"] or "—",
+                    # T86 — the routing tier (none/fast/deep/escalation) and the
+                    # lead-citation source kind, so the Service-levels panel can
+                    # split fast-path vs agent and group by data type.
+                    "tier": a.get("tier") or r["tier"] or "none",
+                    "source_kind": a.get("source_kind") or "",
                     "model": r["model_name"] or "demo model",
                     "lang": (r["lang"] or "en").upper(),
                     "complexity": r["complexity"] or "simple",

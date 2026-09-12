@@ -208,6 +208,15 @@ class AnswerService:
             "document_id": cites[0].document_id,
         }
 
+    def _lead_source_kind(self, tenant, citations) -> str:
+        """The source of the answer's lead citation (internal / github / jira /
+        confluence / …) — the answer's *data type* for the Service-levels panel
+        (T86). Empty when the answer carried no citation."""
+        if not citations:
+            return ""
+        doc = self.p.documents.get(tenant, citations[0].document_id) or {}
+        return (doc.get("source") or "internal").lower()
+
     def _question_of_trace(self, trace_id: str, tenant: str) -> str:
         """Recover the resolved question the answer span stored (T81)."""
         import json as _json
@@ -272,6 +281,7 @@ class AnswerService:
                     "tenant": tenant,
                     "trace_id": trace_id,
                     "stage": "explain",
+                    "persona": personas.persona_for(principal.designation),
                     "subject": principal.subject,
                     "cost": a.cost,
                     "tokens": a.tokens,
@@ -920,6 +930,7 @@ class AnswerService:
                 cache_technique="prompt_memory" if saved else "",
                 cache_hit=1 if saved else 0,
                 sources=sources,
+                source_kind=self._lead_source_kind(tenant, citations),  # T86 data type
                 trajectory=traj,
                 model_name=model_name,
                 complexity=complexity,
@@ -1103,6 +1114,7 @@ class AnswerService:
             cache_hit=1 if saved else 0,
             cache_technique="prompt_memory" if saved else "",
             sources=[c.document_title for c in citations],
+            source_kind=self._lead_source_kind(tenant, citations),  # T86 data type
             grounding=grounding,
             model_name=model_name,
             complexity=complexity,

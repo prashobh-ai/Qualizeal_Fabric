@@ -220,6 +220,7 @@ ADMIN_GETS = [
     "/admin/budget",
     "/admin/authority",
     "/admin/coverage",  # T83 — the audience coverage matrix heatmap
+    "/admin/service-levels",  # T86 — the business SLA & path panel
     "/curator/quality",
     "/curator/gaps",
     "/curator/documents",
