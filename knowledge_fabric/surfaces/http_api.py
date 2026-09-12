@@ -757,7 +757,11 @@ class Handler(BaseHTTPRequestHandler):
             out = []
             for c in conn_admin.list_all(p, prin.tenant):
                 c = dict(c)
-                c["health"] = hmap.get(c["source"], {})
+                h = hmap.get(c["source"], {})
+                c["health"] = h
+                # T116 — every card row carries its refresh interval, so the card
+                # renders the "Refresh every" value even for a never-synced source.
+                c["interval_s"] = h.get("interval_s")
                 out.append(c)
             return self._send(
                 200, {"connectors": out, "schedules": scheduler.schedules(p, prin.tenant)}

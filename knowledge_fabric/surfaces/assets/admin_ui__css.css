@@ -46,3 +46,7 @@
 .wf-bar{flex:1;background:var(--panel2);border-radius:5px;height:12px;overflow:hidden}
 .wf-bar i{display:block;height:100%;background:var(--qz-blue);border-radius:5px}
 .wf-ms{flex:0 0 64px;text-align:right;color:var(--mut)}
+/* T116 — Add-source affordance + a brief focus flash on the target card's input */
+.add-source{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 12px;padding:10px 12px;background:var(--panel2);border:1px dashed var(--line);border-radius:12px}
+.add-source .btn.sm{white-space:nowrap}
+.conn-card input.flash{outline:2px solid var(--qz-blue);outline-offset:1px;transition:outline .2s}
