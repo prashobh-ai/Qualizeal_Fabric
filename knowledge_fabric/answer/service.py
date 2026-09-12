@@ -47,8 +47,8 @@ from ..contracts.types import (
 from ..governance import authority
 from ..stores import versioning
 from ..telemetry import timing
+from . import aggregate, personas, reasoning
 from . import lang as langmod
-from . import personas, reasoning
 from . import selector as sel
 from .search import discover, is_discovery
 
@@ -161,7 +161,135 @@ class AnswerService:
         # the result. Skipped for nested sub-asks (internal, not user-facing).
         if not _nested:
             answer.role_view = self._persona_view(principal, answer)
+            self._answer_first(principal, answer)
         return answer
+
+    def _answer_first(self, principal, answer) -> None:
+        """T81/T84/T85 — the answer-first contract. The composed answer is the
+        direct ``result``, rendered immediately (a facts/KPI answer already
+        costs no model tokens); the persona's ``Explain`` offers (T84) call
+        ``POST /api/explain`` as a separate ledgered step to produce the
+        narrative on demand; and every answer carries a governance line (T85)."""
+        answer.result = answer.answer_text
+        answered = answer.kind == AnswerKind.ANSWER
+        contract = personas.contract_for(principal.designation)
+        answer.explain = {
+            "available": answered,
+            "offers": list(contract["offers"]) if answered else [],
+            "trace_id": answer.trajectory_id,
+        }
+        answer.governance = self._governance_line(principal.tenant, answer)
+
+    def _governance_line(self, tenant, answer) -> dict | None:
+        """T85 — source kind, authority and freshness for the answer's lead
+        citation, so a leader sees it is governed and a curator sees it is
+        current without opening the card. ``stale`` when the source has not been
+        refreshed within the freshness window (90 days)."""
+        cites = answer.citations
+        if not cites:
+            return None
+        doc = self.p.documents.get(tenant, cites[0].document_id) or {}
+        ingested = doc.get("ingested_at")
+        fresh = aggregate.as_of_text({"as_of": ingested} if ingested else None)
+        stale = False
+        if ingested:
+            try:
+                age_ms = now_ms() - int(ingested)
+                stale = age_ms > 90 * 24 * 3600 * 1000
+            except (TypeError, ValueError):
+                stale = False
+        auth = answer.authoritative_source or {}
+        return {
+            "source_kind": doc.get("source") or "internal",
+            "authority": auth.get("source") or ("authoritative" if auth else "cited"),
+            "freshness": fresh,
+            "stale": bool(stale),
+            "document_id": cites[0].document_id,
+        }
+
+    def _question_of_trace(self, trace_id: str, tenant: str) -> str:
+        """Recover the resolved question the answer span stored (T81)."""
+        import json as _json
+
+        try:
+            spans = self.p.telemetry.trace(trace_id)
+        except Exception:
+            return ""
+        for s in spans:
+            if s.get("name") == "answer" and s.get("tenant") == tenant:
+                try:
+                    return (_json.loads(s.get("attrs") or "{}") or {}).get("question") or ""
+                except Exception:
+                    return ""
+        return ""
+
+    def explain(self, principal, trace_id: str) -> dict:
+        """T81 — the on-demand narrative for a prior answer, produced as a
+        SEPARATE ledgered step (``purpose=explain``). Recovers the question from
+        the trace, re-answers it at full machinery (which may run the model —
+        ledgered — or the extractive core), and returns the working: the
+        selector's reasoning, the direct answer, and the numbered evidence. Emits
+        ``kf.explain.requested`` so Admin can see when the direct answer was
+        insufficient."""
+        from ..telemetry import api_ledger
+
+        p, tenant = self.p, principal.tenant
+        question = self._question_of_trace(trace_id, tenant)
+        if not question:
+            return {"trace_id": trace_id, "explanation": "", "error": "unknown or expired trace"}
+        t0 = now_ms()
+        a = self.ask(principal, question, allow_model=True, _nested=True)
+        lines = []
+        w = a.why or {}
+        if w.get("explain"):
+            lines.append(f"Answered by “{w.get('level_name', '')}” — {w['explain']}")
+        if a.answer_text:
+            lines.append(a.answer_text)
+        if a.reasoning and (a.reasoning.get("steps") or []):
+            for st in a.reasoning["steps"]:
+                q = st.get("question") or st.get("id") or ""
+                ans = st.get("answer_text") or st.get("reason") or ""
+                lines.append(f"• {q} — {ans}")
+        if a.citations:
+            lines.append("Working — the evidence this rests on:")
+            for i, c in enumerate(a.citations, 1):
+                lines.append(f"[{i}] {c.document_title} · {c.coordinate.render()}: {c.snippet}")
+        explanation = "\n".join(x for x in lines if x).strip()
+        # A separate ledger row for the explain step ($0 on the extractive floor).
+        api_ledger.record(
+            purpose="explain",
+            model=a.model_name or "extractive",
+            usage={"input_tokens": a.tokens_in, "output_tokens": a.tokens_out},
+            latency_ms=float(now_ms() - t0),
+            question_hash=trace_id,
+        )
+        # A first-class signal: the share of answers a reader asked to explain.
+        try:
+            p.telemetry.record(
+                "kf.explain.requested",
+                {
+                    "tenant": tenant,
+                    "trace_id": trace_id,
+                    "stage": "explain",
+                    "subject": principal.subject,
+                    "cost": a.cost,
+                    "tokens": a.tokens,
+                    "model_name": a.model_name or "extractive",
+                },
+            )
+        except Exception:
+            pass
+        return {
+            "trace_id": trace_id,
+            "explanation": explanation,
+            "model_name": a.model_name or "extractive",
+            "cost": round(a.cost, 6),
+            "tokens": a.tokens,
+            "citations": [
+                {"document_title": c.document_title, "document_id": c.document_id}
+                for c in a.citations
+            ],
+        }
 
     def _persona_view(self, principal, answer) -> dict:
         """The designation-conditioned lens (T27): the same grounded answer,
@@ -368,6 +496,9 @@ class AnswerService:
                 "subject": principal.subject,
                 "roles": principal.roles,
                 "lang": qlang,
+                # T81 — the resolved question, so POST /api/explain can recover it
+                # from the trace and produce the narrative as a separate step.
+                "question": rq,
                 # T30 — first-class telemetry for the answering features shipped
                 # since the spine was last extended: the reader's persona and
                 # designation (T27), the access scope, and whether a follow-up was

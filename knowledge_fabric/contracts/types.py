@@ -232,6 +232,12 @@ class Answer:
     suggestions: list[str] | None = None  # T26 — clarify-back chips
     role_view: dict | None = None  # T27 — role-conditioned lens (asker/curator/admin/agent)
     timing: dict | None = None  # T56 — phase / active-idle block ({phase_ms, active_ms, idle_ms…})
+    # T81 — answer-first: the direct answer (`result`) is rendered immediately; the
+    # narrative `explanation` is populated only when the reader asks (POST /api/explain).
+    result: str = ""  # the direct answer (headline/number/definition + citation)
+    explanation: str | None = None  # the working, filled in on demand
+    explain: dict | None = None  # {available, offers[], trace_id} — the Explain affordances (T84)
+    governance: dict | None = None  # T85 — {source_kind, authority, freshness, stale} line
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -253,6 +259,11 @@ class Answer:
             "dataset_version": self.dataset_version,
             "reasoning": self.reasoning,
             "timing": self.timing,
+            # T81/T84/T85 — answer-first contract
+            "result": self.result or self.answer_text,
+            "explanation": self.explanation,
+            "explain": self.explain,
+            "governance": self.governance,
             "citations": [
                 {
                     "document_id": c.document_id,

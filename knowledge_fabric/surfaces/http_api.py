@@ -873,6 +873,16 @@ class Handler(BaseHTTPRequestHandler):
                 200,
                 _svc.ask(prin, body.get("question", ""), context=body.get("context")).to_dict(),
             )
+        if u.path == "/api/explain":
+            # T81 — the on-demand narrative for a prior answer, a separate
+            # ledgered step (purpose=explain). The direct answer already cost no
+            # model tokens for a KPI; pressing "Why?" runs this.
+            try:
+                prin = self._principal()
+            except PermissionError as e:
+                return self._send(401, {"error": str(e)})
+            b = self._body()
+            return self._send(200, _svc.explain(prin, b.get("trace_id", "")))
         if u.path == "/feedback":
             # L3/L6 — a reader flags an answer (👎). Negative feedback lands in
             # the curator review queue as a 'negative-feedback' item; anyone
