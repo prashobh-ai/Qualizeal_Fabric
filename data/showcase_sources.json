@@ -1,0 +1,33 @@
+{
+  "_comment": "T124 — the four company sources the preflight verifies live and the ingest pulls. Non-secret config only; credentials live in the environment (GitHub Actions secrets).",
+  "sources": [
+    {
+      "key": "website",
+      "kind": "website",
+      "url": "https://qualizeal.com",
+      "required_secrets": []
+    },
+    {
+      "key": "github_qualizeal",
+      "kind": "github",
+      "org": "Qualizeal",
+      "required_secrets": ["KF_GITHUB_TOKEN"]
+    },
+    {
+      "key": "jira",
+      "kind": "jira",
+      "site_env": "JIRA_URL",
+      "dashboards": ["10001"],
+      "boards": ["34"],
+      "projects": ["V1"],
+      "required_secrets": ["JIRA_URL", "JIRA_EMAIL", "JIRA_TOKEN"]
+    },
+    {
+      "key": "confluence",
+      "kind": "confluence",
+      "site_env": "CONFLUENCE_URL",
+      "pages": ["1703938"],
+      "required_secrets": ["CONFLUENCE_URL", "CONFLUENCE_EMAIL", "CONFLUENCE_TOKEN"]
+    }
+  ]
+}

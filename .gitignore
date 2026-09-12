@@ -1,6 +1,10 @@
 __pycache__/
 *.py[cod]
-data/
+# runtime fabric data is ignored, but the source-of-truth config the preflight
+# reads (T124) is tracked — a parent dir ignored as `data/` can't re-include a
+# file, so ignore data/ contents with `data/*` and un-ignore that one file.
+data/*
+!data/showcase_sources.json
 *.db
 *.db-wal
 *.db-shm
