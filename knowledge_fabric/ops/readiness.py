@@ -644,9 +644,15 @@ def check_secrets(target: str, repo_root: Path) -> dict:
     hits = scan_secrets(repo_root)
     items = list(hits)
     gi = repo_root / ".gitignore"
-    ignored = gi.read_text(encoding="utf-8").splitlines() if gi.exists() else []
-    for needed in (".env", "data/"):
-        if needed not in [s.strip() for s in ignored]:
+    ignored = [
+        s.strip() for s in (gi.read_text(encoding="utf-8").splitlines() if gi.exists() else [])
+    ]
+    # ``data/`` may be written as ``data/*`` (T124 — so one tracked config file
+    # can be un-ignored while the rest of the runtime data dir stays ignored);
+    # both forms keep the data directory's contents out of git.
+    requirements = {".env": (".env",), "data/": ("data/", "data/*")}
+    for needed, accepted in requirements.items():
+        if not any(a in ignored for a in accepted):
             items.append(f".gitignore does not list {needed}")
     dotenv = repo_root / ".env"
     if dotenv.exists() and dotenv.stat().st_size > 0:

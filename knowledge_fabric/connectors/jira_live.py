@@ -678,6 +678,14 @@ def sync(platform, tenant: str, transport=None) -> dict:
     cfg = admin.effective_config(platform, tenant, "jira", {})
     if not cfg.get("projects") and os.environ.get("JIRA_PROJECTS"):
         cfg["projects"] = [p.strip() for p in os.environ["JIRA_PROJECTS"].split(",") if p.strip()]
+    # T124 — dashboards/boards also connectable from the environment (the ingest
+    # workflow sets JIRA_DASHBOARDS / JIRA_BOARDS from data/showcase_sources.json).
+    if not cfg.get("dashboards") and os.environ.get("JIRA_DASHBOARDS"):
+        cfg["dashboards"] = [
+            d.strip() for d in os.environ["JIRA_DASHBOARDS"].split(",") if d.strip()
+        ]
+    if not cfg.get("boards") and os.environ.get("JIRA_BOARDS"):
+        cfg["boards"] = [b.strip() for b in os.environ["JIRA_BOARDS"].split(",") if b.strip()]
     have = all(
         cfg.get(k) or os.environ.get(env)
         for k, env in (("url", "JIRA_URL"), ("token", "JIRA_TOKEN"))

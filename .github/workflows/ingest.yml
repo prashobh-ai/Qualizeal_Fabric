@@ -34,6 +34,23 @@ jobs:
       KF_DATA_ROOT: ${{ github.workspace }}/fabric-data/data
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # T124 — the live-source secrets and the scope ids the connectors read.
+      # Without these in the job env the connectors never see the tokens, so the
+      # sources silently produce nothing; the preflight step below fails loudly
+      # per source if any is wrong before an ingest is spent.
+      KF_GITHUB_TOKEN: ${{ secrets.KF_GITHUB_TOKEN }}
+      GITHUB_ORG: Qualizeal
+      JIRA_URL: ${{ secrets.JIRA_URL }}
+      JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+      JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+      JIRA_PROJECTS: V1
+      JIRA_DASHBOARDS: "10001"
+      JIRA_BOARDS: "34"
+      CONFLUENCE_URL: ${{ secrets.CONFLUENCE_URL }}
+      CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+      CONFLUENCE_TOKEN: ${{ secrets.CONFLUENCE_TOKEN }}
+      CONFLUENCE_PAGES: "1703938"
+      KF_WEBSITE_URL: https://qualizeal.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -43,6 +60,15 @@ jobs:
       - name: Check out fabric-data (clone, or create the orphan branch)
         run: python -m knowledge_fabric.fabric_data_git checkout --root fabric-data
 
+      - name: Preflight — prove each source's credential against a live call (T124)
+        # Runs BEFORE the Anthropic provider check on purpose: the four source
+        # credentials (GitHub/Jira/Confluence/website) are independent of the
+        # Anthropic key, so a rejected/expired ANTHROPIC_API_KEY must not hide
+        # whether the source keys pull. One authenticated call per source; a
+        # set-but-failing secret stops the build with the exact reason
+        # (401/403/404/network) before an ingest is spent.
+        run: python scripts/preflight_sources.py
+
       - name: Provider check — pin the models and prove the key (T35)
         run: python scripts/doctor.py --require anthropic
 
@@ -50,6 +76,14 @@ jobs:
         run: >
           python scripts/ingest.py --website --github --jira --confluence --files --analysis --bake
           ${{ github.event.inputs.limit && format('--limit {0}', github.event.inputs.limit) || '' }}
+
+      - name: Post-ingest assertion — each source produced real documents (T124b)
+        # Fails the build if a source whose preflight passed produced 0
+        # documents (connector bug, named as such — not a credential fault).
+        run: python scripts/verify_showcase.py --fabric
+
+      - name: Smoke demo — one cited answer per source (T124c)
+        run: python scripts/smoke_demo.py
 
       - name: Commit and push fabric-data
         run: >
