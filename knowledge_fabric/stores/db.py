@@ -148,12 +148,19 @@ CREATE TABLE IF NOT EXISTS curation_log (
     source TEXT, document_id TEXT, title TEXT, score TEXT, recommendation TEXT,
     reason TEXT, actor TEXT, review_id TEXT
 );
+CREATE TABLE IF NOT EXISTS relationships (
+    id TEXT PRIMARY KEY, tenant TEXT NOT NULL,
+    subject_kind TEXT, subject_id TEXT, relation TEXT, object_kind TEXT, object_id TEXT,
+    evidence_kind TEXT, evidence_id TEXT, evidence_url TEXT, evidence_title TEXT, at INTEGER
+);
 CREATE INDEX IF NOT EXISTS ix_passages_tenant ON passages(tenant, index_version);
 CREATE INDEX IF NOT EXISTS ix_docs_tenant ON documents(tenant);
 CREATE INDEX IF NOT EXISTS ix_edges_tenant ON graph_edges(tenant, src);
 CREATE INDEX IF NOT EXISTS ix_spans_trace ON spans(trace_id);
 CREATE INDEX IF NOT EXISTS ix_audit_tenant ON audit_log(tenant);
 CREATE INDEX IF NOT EXISTS ix_curation_log_tenant ON curation_log(tenant, review_id);
+CREATE INDEX IF NOT EXISTS ix_rel_object ON relationships(tenant, object_kind, object_id);
+CREATE INDEX IF NOT EXISTS ix_rel_subject ON relationships(tenant, subject_kind, subject_id);
 """
 
 
