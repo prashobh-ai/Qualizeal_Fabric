@@ -10,18 +10,27 @@ function healthBadge(h){if(!h||h.last_run==null&&!h.interval_s)return '<span cla
  if(h.error_count>0)return '<span class="pill warn">'+h.error_count+' error(s)</span>';
  return '<span class="pill good">healthy</span>'}
 
+// T118 — the credential badge: a source missing a required secret shows
+// "not configured · add <secrets>" instead of a fake-healthy card.
+function credBadge(cr){if(!cr)return '';
+ if(cr.missing&&cr.missing.length)return '<span class="pill bad" title="required secrets missing">not configured · add '+esc(cr.missing.join(', '))+'</span>';
+ if(cr.optional_missing&&cr.optional_missing.length)return '<span class="pill warn" title="works without, but a token unlocks private/org">public only · add '+esc(cr.optional_missing.join(', '))+'</span>';
+ return '<span class="pill good" title="credentials present">configured</span>'}
+
 function connCard(c){const h=c.health||{};const sched=h.interval_s||'';
+ // T118 — URL-aware allow-list: paste a GitHub/Jira/Confluence/website URL.
+ const ph=c.placeholder||'comma separated projects / repos / paths';
  return '<div class="conn-card'+(h.sla_breach?' breach':'')+(c.enabled?'':' off')+'" data-source="'+esc(c.source)+'">'+
   '<h4>'+esc(c.source)+(c.registered?'':' <span class="pill warn" title="configured but no connector module registered">unregistered</span>')+
-   '<span style="margin-left:auto">'+healthBadge(h)+'</span>'+
+   '<span style="margin-left:auto">'+credBadge(c.credentials)+' '+healthBadge(h)+'</span>'+
    '<label class="switch" title="enable / disable"><input type="checkbox" data-role="enabled" '+(c.enabled?'checked':'')+'><i></i></label></h4>'+
   '<div class="hl"><span>freshness</span><span class="mono">'+(h.freshness_minutes==null?'—':h.freshness_minutes+' min')+'</span>'+
    '<span>last status</span><span class="mono">'+esc(h.last_status||'—')+'</span>'+
    '<span>items</span><span class="mono">'+num(h.items)+'</span><span>errors</span><span class="mono">'+num(h.error_count)+'</span>'+
    '<span>next run</span><span class="mono">'+(h.next_run?esc(when(h.next_run)):'not scheduled')+'</span>'+
    '<span>scopes</span><span class="mono">'+esc((c.scopes||[]).join(', ')||'—')+'</span></div>'+
-  '<label>Allow-list (comma separated projects / repos / paths; empty = everything the scopes permit)</label>'+
-  '<input type="text" data-role="allow" value="'+esc((c.allow||[]).join(', '))+'">'+
+  '<label>Allow-list — paste a URL, or comma-separated ids (empty = everything the scopes permit)</label>'+
+  '<input type="text" data-role="allow" value="'+esc((c.allow||[]).join(', '))+'" placeholder="'+esc(ph)+'">'+
   '<div class="row" style="margin-top:8px"><label>Refresh every</label><input type="number" data-role="interval" min="30" step="30" value="'+esc(sched)+'" placeholder="seconds"><span class="muted small">s</span>'+
    '<button class="btn sm" data-act="save">Save</button><button class="btn sm primary" data-act="sync" '+(c.enabled?'':'disabled')+'>Sync now</button></div>'+
   '</div>'}

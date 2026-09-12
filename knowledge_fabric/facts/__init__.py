@@ -20,6 +20,8 @@ from .build import build_documents_facts, write_documents_facts
 EMPTY_FACTS: dict = {
     "repositories": {},
     "jira_projects": {},
+    "jira_dashboards": {},  # T118 — dashboards connected from a pasted URL
+    "jira_boards": {},  # T118 — boards connected from a pasted URL
     "confluence_spaces": {},
     "documents": {"by_area": {}, "by_type": {}, "total": 0},
     "tables": [],

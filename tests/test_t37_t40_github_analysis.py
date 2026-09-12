@@ -369,10 +369,15 @@ class TestGitHubLive(_Fabric):
         self.assertEqual(res2["pulled"], 0)
 
     def test_sync_is_explicit_when_unconfigured(self):
+        # T118 — the token is optional (public repos ingest keyless), so the
+        # gate is the SCOPE: with no org/user or repo connected, sync skips.
         os.environ.pop("GITHUB_TOKEN", None)
+        os.environ.pop("KF_GITHUB_TOKEN", None)
+        os.environ.pop("GITHUB_ORG", None)
+        os.environ.pop("GITHUB_EXTRA_REPOS", None)
         res = github_live.sync(self.p, T)
         self.assertEqual(res["status"], "skipped")
-        self.assertIn("GITHUB_TOKEN", res["reason"])
+        self.assertIn("connected", res["reason"])
 
     def test_rate_limit_exhaustion_raises_not_skips(self):
         def transport(url, headers, timeout=30, method="GET", body=None):

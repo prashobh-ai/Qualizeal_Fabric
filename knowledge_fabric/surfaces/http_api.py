@@ -841,6 +841,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             hmap = {h["source"]: h for h in scheduler.health(p, prin.tenant)}
             out = []
+            from ..connectors import url_parse
+
             for c in conn_admin.list_all(p, prin.tenant):
                 c = dict(c)
                 h = hmap.get(c["source"], {})
@@ -848,6 +850,11 @@ class Handler(BaseHTTPRequestHandler):
                 # T116 — every card row carries its refresh interval, so the card
                 # renders the "Refresh every" value even for a never-synced source.
                 c["interval_s"] = h.get("interval_s")
+                # T118 — the URL-aware allow-list placeholder and the credential
+                # status, so a card without its required secret shows
+                # "not configured · add <secrets>" instead of a fake success.
+                c["placeholder"] = url_parse.PLACEHOLDERS.get(c["source"], "")
+                c["credentials"] = conn_admin.credentials(p, prin.tenant, c["source"])
                 out.append(c)
             return self._send(
                 200, {"connectors": out, "schedules": scheduler.schedules(p, prin.tenant)}

@@ -237,6 +237,24 @@ def write_project_facts(project: str, facts: dict) -> str:
     return p
 
 
+def write_dashboard_facts(dashboard_id: str, facts: dict) -> str:
+    """T118 — ``facts.json["jira_dashboards"][id] = {name, gadgets, owner, as_of}``."""
+    p = fd.data_path("facts.json", mkdir=True)
+    all_facts = fd.read_json(p, {}) or {}
+    all_facts.setdefault("jira_dashboards", {})[str(dashboard_id)] = facts
+    fd.write_json(p, all_facts)
+    return p
+
+
+def write_board_facts(board_id: str, facts: dict) -> str:
+    """T118 — ``facts.json["jira_boards"][id] = {name, type, issues, columns, as_of}``."""
+    p = fd.data_path("facts.json", mkdir=True)
+    all_facts = fd.read_json(p, {}) or {}
+    all_facts.setdefault("jira_boards", {})[str(board_id)] = facts
+    fd.write_json(p, all_facts)
+    return p
+
+
 # ---------------------------------------------------------------------------
 # the connector
 # ---------------------------------------------------------------------------
@@ -249,6 +267,10 @@ class JiraLiveConnector(BaseConnector):
         self.email = config.get("email") or os.environ.get("JIRA_EMAIL", "")
         self.token = config.get("token") or os.environ.get("JIRA_TOKEN", "")
         self.projects = [str(p).upper() for p in config.get("projects", [])]
+        # T118 — dashboards and boards can be connected directly from a pasted
+        # URL, independent of a project allow-list.
+        self.dashboards = [str(d) for d in config.get("dashboards", []) if str(d).strip()]
+        self.boards = [str(b) for b in config.get("boards", []) if str(b).strip()]
         self.interval = str(config.get("interval", "7d"))
         self.acl = list(config.get("acl", ["public"]))
         self.page_size = int(config.get("page_size", 100))
@@ -364,6 +386,90 @@ class JiraLiveConnector(BaseConnector):
             }
         return None
 
+    # -- dashboards (T118) --------------------------------------------------
+    def list_dashboards(self, cap: int = 1000) -> list[dict]:
+        """Every dashboard the authenticated user can see (``GET /rest/api/3/
+        dashboard``), **including private ones they own or are shared on** — the
+        token's own visibility is the boundary. ``[{id, name, view, owner}]``."""
+        out: list[dict] = []
+        start = 0
+        while len(out) < cap:
+            data = self._get(
+                "/rest/api/3/dashboard", {"startAt": start, "maxResults": 50}, ok_missing=True
+            )
+            rows = (data or {}).get("dashboards") or []
+            for d in rows:
+                out.append(
+                    {
+                        "id": str(d.get("id", "")),
+                        "name": str(d.get("name", "")),
+                        "view": str(d.get("view", "")),
+                        "owner": _name(d.get("owner"), "displayName"),
+                    }
+                )
+            start += len(rows)
+            if not rows or start >= int((data or {}).get("total", start)):
+                break
+        return out[:cap]
+
+    def dashboard_detail(self, dashboard_id) -> dict | None:
+        """One dashboard with its gadgets (``/rest/api/3/dashboard/{id}`` +
+        ``/gadget``). ``None`` when not served (404/410) so a missing dashboard
+        never fails the sync."""
+        meta = self._get(f"/rest/api/3/dashboard/{dashboard_id}", ok_missing=True)
+        if not meta:
+            return None
+        gdata = self._get(f"/rest/api/3/dashboard/{dashboard_id}/gadget", ok_missing=True) or {}
+        gadgets = [
+            {"title": str(g.get("title", "")), "type": str(g.get("moduleKey") or g.get("uri", ""))}
+            for g in (gdata.get("gadgets") or [])
+        ]
+        return {
+            "id": str(meta.get("id", dashboard_id)),
+            "name": str(meta.get("name", "")),
+            "owner": _name(meta.get("owner"), "displayName"),
+            "view": str(meta.get("view", "")),
+            "gadgets": gadgets,
+        }
+
+    # -- boards (T118) ------------------------------------------------------
+    def board_detail(self, board_id) -> dict | None:
+        """A board's name/type/project (``/rest/agile/1.0/board/{id}``)."""
+        data = self._get(f"/rest/agile/1.0/board/{board_id}", ok_missing=True)
+        if not data:
+            return None
+        loc = data.get("location") or {}
+        return {
+            "id": str(data.get("id", board_id)),
+            "name": str(data.get("name", "")),
+            "type": str(data.get("type", "")),
+            "project": str(loc.get("projectKey") or loc.get("projectName") or ""),
+        }
+
+    def board_issues(self, board_id, cap: int | None = None):
+        """Every issue on a board (``/rest/agile/1.0/board/{id}/issue``), flattened."""
+        cap = cap or self.max_issues
+        sf = self.sprint_field()
+        fields = _FIELDS + (f",{sf}" if sf else "")
+        out: list[dict] = []
+        start = 0
+        while len(out) < cap:
+            data = self._get(
+                f"/rest/agile/1.0/board/{board_id}/issue",
+                {
+                    "startAt": start,
+                    "maxResults": min(self.page_size, cap - len(out)),
+                    "fields": fields,
+                },
+                ok_missing=True,
+            )
+            page = (data or {}).get("issues") or []
+            out.extend(flatten_issue(i, self.base, sf) for i in page)
+            start += len(page)
+            if not page or start >= int((data or {}).get("total", start)):
+                break
+        return out[:cap]
+
     def search(self, jql: str, fields: str, max_results: int = 100, cap: int | None = None):
         """Every issue matching ``jql`` (paginated), up to ``cap``."""
         out: list[dict] = []
@@ -422,8 +528,11 @@ class JiraLiveConnector(BaseConnector):
 
     def pull(self, cursor: str | None) -> tuple[list[RawItem], str | None]:
         self._require()
-        if not self.projects:
-            raise ConnectorConfigError("jira_live needs an allow-list: config projects=[KEY, …]")
+        if not (self.projects or self.dashboards or self.boards):
+            raise ConnectorConfigError(
+                "jira_live needs an allow-list: config projects=[KEY, …], "
+                "dashboards=[id, …] or boards=[id, …]"
+            )
         sf = self.sprint_field()
         fields = _FIELDS + (f",{sf}" if sf else "")
         census_fields = _CENSUS_FIELDS + (f",{sf}" if sf else "")
@@ -459,8 +568,61 @@ class JiraLiveConnector(BaseConnector):
                     continue  # already landed by an earlier pull (idempotent anyway)
                 newest = max(newest, flat["updated"])
                 items.append(self._record(flat, as_of))
+        # T118 — dashboards (name + gadgets/filters) and boards (their issues +
+        # columns), each connectable directly from a pasted URL.
+        for did in self.dashboards:
+            detail = self.dashboard_detail(did)
+            if detail is None:
+                continue
+            if self.write_facts:
+                write_dashboard_facts(detail["id"], {**detail, "as_of": as_of})
+            items.append(self._dashboard_record(detail, as_of))
+        for bid in self.boards:
+            detail = self.board_detail(bid)
+            if detail is None:
+                continue
+            issues = self.board_issues(bid)
+            columns = self.board_config(bid)
+            if self.write_facts:
+                write_board_facts(
+                    detail["id"],
+                    {
+                        **detail,
+                        "issues": len(issues),
+                        "columns": (columns or {}).get("columns", []),
+                        "as_of": as_of,
+                    },
+                )
+            for flat in issues:
+                newest = max(newest, flat.get("updated") or "")
+                items.append(self._record(flat, as_of))
         self.last_tombstones = []
         return items, (newest or cursor)
+
+    def _dashboard_record(self, detail: dict, as_of: str) -> RawItem:
+        gadgets = detail.get("gadgets") or []
+        owner = detail.get("owner") or "unknown"
+        lines = [f"# {detail['name']}", f"Owner: {owner}", "", "Gadgets:"]
+        lines += [f"- {g['title']}" for g in gadgets if g.get("title")] or ["- (none reported)"]
+        url = f"{self.base}/jira/dashboards/{detail['id']}"
+        return RawItem(
+            tenant=self.tenant,
+            source=self.source_name,
+            source_version=as_of,
+            uri=f"jira://dashboard/{detail['id']}",
+            mime="text/markdown",
+            title=f"Jira dashboard · {detail['name']}",
+            bytes_="\n".join(lines).encode("utf-8"),
+            meta={
+                "acl": list(self.acl),
+                "source_kind": "jira",
+                "citation_url": url,
+                "arrived_at": now_ms(),
+                "as_of": as_of,
+                "provenance": {"dashboard": detail["id"]},
+                "jira": {"kind": "dashboard", "gadgets": [g["title"] for g in gadgets]},
+            },
+        )
 
     def _record(self, flat: dict, as_of: str) -> RawItem:
         return RawItem(
@@ -517,8 +679,12 @@ def sync(platform, tenant: str, transport=None) -> dict:
     )
     if not have:
         return {"status": "skipped", "reason": "JIRA_URL / JIRA_EMAIL / JIRA_TOKEN not set"}
-    if not cfg.get("projects"):
-        return {"status": "skipped", "reason": "no Jira projects allow-listed (JIRA_PROJECTS)"}
+    # T118 — a dashboard or board URL is a valid allow-list on its own.
+    if not (cfg.get("projects") or cfg.get("dashboards") or cfg.get("boards")):
+        return {
+            "status": "skipped",
+            "reason": "no Jira project, dashboard or board allow-listed (JIRA_PROJECTS)",
+        }
     res = SyncManager(platform).sync(tenant, "jira", cfg, transport=transport)
     res["status"] = "ran"
     return res

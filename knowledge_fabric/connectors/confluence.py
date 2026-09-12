@@ -45,6 +45,9 @@ class ConfluenceConnector(BaseConnector):
         self.email = config.get("email") or os.environ.get("CONFLUENCE_EMAIL", "")
         self.token = config.get("token") or os.environ.get("CONFLUENCE_TOKEN", "")
         self.spaces = [str(s).upper() for s in config.get("spaces", [])]
+        # T118 — individual pages connectable directly from a pasted page URL,
+        # independent of a whole-space allow-list.
+        self.pages = [str(p) for p in config.get("pages", []) if str(p).strip()]
         self.acl = list(config.get("acl", ["public"]))
         self.attachments = bool(config.get("attachments", True))
         self.max_attachment_bytes = int(config.get("max_attachment_bytes", _DEFAULT_MAX_ATTACHMENT))
@@ -141,6 +144,26 @@ class ConfluenceConnector(BaseConnector):
     def list_attachments(self, page_id: str) -> list[dict]:
         return self._paged(f"/wiki/api/v2/pages/{page_id}/attachments", {"limit": 50}, 500)
 
+    def get_space(self, space_id: str) -> dict:
+        """One space by id (``/wiki/api/v2/spaces/{id}``) → ``{id, key, name}``.
+        Used to label a directly-connected page with its space key."""
+        s = self._get(f"/wiki/api/v2/spaces/{space_id}") or {}
+        return {
+            "id": str(s.get("id", space_id)),
+            "key": str(s.get("key", "") or "").upper() or "SPACE",
+            "name": s.get("name", ""),
+        }
+
+    def pull_page(self, page_id: str) -> dict:
+        """One page in storage format (``/wiki/api/v2/pages/{id}?body-format=
+        storage``) — T118, so a pasted page URL ingests that page directly, not
+        only whole spaces. Includes the page's own space id so the record is
+        cited under the right space key."""
+        return self._get(
+            f"/wiki/api/v2/pages/{page_id}",
+            {"body-format": "storage"},
+        )
+
     def live_cql(self, cql: str, limit: int = 25) -> list[dict]:
         """Ad-hoc CQL for the agent → ``[{id, title, type, url, excerpt, last_modified}]``."""
         data = self._get("/wiki/rest/api/search", {"cql": cql, "limit": limit})
@@ -170,13 +193,32 @@ class ConfluenceConnector(BaseConnector):
     # -- pull ---------------------------------------------------------------
     def pull(self, cursor: str | None) -> tuple[list[RawItem], str | None]:
         self._require()
-        if not self.spaces:
-            raise ConnectorConfigError("confluence needs an allow-list: config spaces=[KEY, …]")
+        if not (self.spaces or self.pages):
+            raise ConnectorConfigError(
+                "confluence needs an allow-list: config spaces=[KEY, …] or pages=[id, …]"
+            )
         as_of = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         items: list[RawItem] = []
         newest = cursor or ""
         self.skipped = []
-        for space in self.list_spaces():
+        # T118 — directly-connected pages (from a pasted page URL) first.
+        space_cache: dict[str, dict] = {}
+        for page_id in self.pages:
+            page = self.pull_page(page_id)
+            if not page:
+                continue
+            space_id = str(page.get("spaceId", ""))
+            space = space_cache.get(space_id)
+            if space is None:
+                space = self.get_space(space_id) if space_id else {"id": "", "key": "SPACE"}
+                space_cache[space_id] = space
+            version = page.get("version") or {}
+            modified = str(version.get("createdAt", ""))
+            newest = max(newest, modified)
+            items.append(self._page_record(space, page, as_of))
+            if self.attachments:
+                items.extend(self._attachment_records(space, page, as_of))
+        for space in self.list_spaces() if self.spaces else []:
             if space["key"] not in self.spaces:
                 continue
             pages = self.list_pages(space["id"])
@@ -315,10 +357,11 @@ def sync(platform, tenant: str, transport=None) -> dict:
             "status": "skipped",
             "reason": "CONFLUENCE_URL / CONFLUENCE_EMAIL / CONFLUENCE_TOKEN not set",
         }
-    if not cfg.get("spaces"):
+    # T118 — a page URL is a valid allow-list on its own.
+    if not (cfg.get("spaces") or cfg.get("pages")):
         return {
             "status": "skipped",
-            "reason": "no Confluence spaces allow-listed (CONFLUENCE_SPACES)",
+            "reason": "no Confluence space or page allow-listed (CONFLUENCE_SPACES)",
         }
     res = SyncManager(platform).sync(tenant, "confluence", cfg, transport=transport)
     res["status"] = "ran"
