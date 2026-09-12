@@ -77,13 +77,41 @@ services:
       - "16686:16686"  # UI
 
   prometheus:
-    profiles: ["full"]
+    profiles: ["full", "obs"]
     image: prom/prometheus:v2.54.0
     command: ["--config.file=/etc/prometheus/prometheus.yml"]
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "9090:9090"
+
+  # --- OBS profile (T96): optional external observability, fed by the SAME OTel
+  # pipeline. Grafana reads the Prometheus metrics + Jaeger traces the collector
+  # already exports; Langfuse ingests the OTLP spans for LLM-trace analytics. The
+  # built-in Admin -> Observability page needs none of this — it reads the spine
+  # directly — so `obs` is purely additive. Run: make compose-up PROFILE=obs
+  #   (bring `full` up too for the collector/jaeger/prometheus it feeds from).
+  grafana:
+    profiles: ["obs"]
+    image: grafana/grafana:11.2.0
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+    ports:
+      - "3000:3000"  # Grafana UI (Prometheus + Jaeger datasources)
+
+  langfuse:
+    profiles: ["obs"]
+    image: langfuse/langfuse:2
+    environment:
+      # LLM-trace analytics over the same OTLP spans; secrets are dev-only here.
+      - DATABASE_URL=${LANGFUSE_DB_URL:-postgresql://fabric:fabric@postgres:5432/fabric}
+      - NEXTAUTH_SECRET=${LANGFUSE_SECRET:-local-dev-secret-change-me}
+      - NEXTAUTH_URL=${LANGFUSE_URL:-http://localhost:3001}
+      - SALT=${LANGFUSE_SALT:-local-dev-salt-change-me}
+    ports:
+      - "3001:3000"  # Langfuse UI
 
 volumes:
   fabric-data:

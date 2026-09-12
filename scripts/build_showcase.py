@@ -225,6 +225,9 @@ ADMIN_GETS = [
     "/admin/authority",
     "/admin/coverage",  # T83 — the audience coverage matrix heatmap
     "/admin/service-levels",  # T86 — the business SLA & path panel
+    "/admin/overview",  # T96 — leadership ROI (value, cost, ROI ratio, adoption, quality)
+    "/admin/observability",  # T96 — OTel trace list + error rate + reconciliation
+    "/admin/settings",  # T96 — the ROI knobs (minutes saved, loaded rate)
     "/curator/quality",
     "/curator/gaps",
     "/curator/documents",

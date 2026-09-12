@@ -231,9 +231,49 @@ _SLA = card(
     right='<span class="muted small">median · p95 · fast/agent · explain rate · cost</span>',
 )
 
+# T96 — the leadership ROI page: value (hours saved), cost + cost avoided, the
+# ROI ratio, adoption, quality and the service SLA line. Two Settings knobs drive
+# the money math. Everything reconciles with the panels below.
+_OVERVIEW = card(
+    "Overview — value &amp; ROI",
+    '<div class="row" id="roi-settings" style="gap:10px;flex-wrap:wrap;margin-bottom:6px">'
+    '<label class="muted small">Minutes saved / question <input type="number" id="roi-minutes" '
+    'min="0" step="1" style="width:70px"></label>'
+    '<label class="muted small">Loaded rate $/h <input type="number" id="roi-rate" min="0" '
+    'step="5" style="width:80px"></label>'
+    '<button class="btn sm" id="roi-save" type="button">Save</button>'
+    '<span class="hint" id="roi-status"></span></div>'
+    '<div id="roi-tiles" class="kpi-row"><div class="empty">Sign in as an admin to load '
+    "the ROI overview.</div></div>"
+    '<div class="grid two" style="margin-top:10px">'
+    '<div><div class="section-title">Adoption</div>'
+    '<div id="roi-adoption" class="muted small"></div></div>'
+    '<div><div class="section-title">Quality &amp; service</div><div id="roi-quality" '
+    'class="muted small"></div></div></div>',
+    "overview-panel",
+    right='<span class="muted small">hours saved &middot; cost avoided &middot; ROI ratio</span>',
+)
+
+# T96 — the technical OTel view: a recent-trace list (click for the span
+# waterfall), error rate, latency percentiles and the reconciliation check.
+_OBSERVABILITY = card(
+    "Observability — traces &amp; OTel",
+    '<div id="obs-kpis" class="kpi-row"><div class="empty">Sign in as an admin to load '
+    "observability.</div></div>"
+    '<div class="tablewrap" style="margin-top:8px"><table id="obs-traces">'
+    "<thead><tr><th>Trace</th><th>Subject</th><th>Level</th><th>Latency</th><th>Cost</th>"
+    '<th>Status</th></tr></thead><tbody id="obs-rows"></tbody></table></div>'
+    '<div id="obs-waterfall" class="waterfall" hidden></div>'
+    '<div id="obs-recon" class="muted small" style="margin-top:8px"></div>',
+    "observability-panel",
+    right='<span class="muted small">error rate &middot; p50/p95 &middot; recon ±1%</span>',
+)
+
 _BODY = (
-    _CONNECTORS
+    f"<div>{_OVERVIEW}</div>"
+    + f'<div style="margin-top:14px">{_CONNECTORS}</div>'
     + f'<div style="margin-top:14px">{_SLA}</div>'
+    + f'<div style="margin-top:14px">{_OBSERVABILITY}</div>'
     + f'<div style="margin-top:14px">{_COVERAGE}</div>'
     + f'<div style="margin-top:14px">{_SOURCES}</div>'
     + f'<div style="margin-top:14px">{_MODELS}</div>'

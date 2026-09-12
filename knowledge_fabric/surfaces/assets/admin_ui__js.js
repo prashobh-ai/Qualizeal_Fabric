@@ -225,9 +225,49 @@ function renderSLA(rep){const h=rep.headline||{};
  $('#sla-datatype').querySelector('tbody').innerHTML=dr||'<tr><td colspan="7" class="empty">No answers recorded yet.</td></tr>'}
 async function loadSLA(){try{renderSLA(await api('/admin/service-levels'))}catch(e){if(e.status!==404)toast(e.message,'bad')}}
 
+// ---------------------------------------------------------------- T96: ROI overview
+function kpi(label,value,sub,cls){return '<div class="kpi'+(cls?' '+cls:'')+'"><div class="l">'+label+'</div><div class="v">'+value+'</div>'+(sub?'<div class="d muted small">'+sub+'</div>':'')+'</div>'}
+function pctOf(x){return (x==null)?'—':Math.round(x*100)+'%'}
+function renderOverview(o){const v=o.value||{},c=o.cost||{},r=o.roi||{},ad=o.adoption||{},ql=o.quality||{},sv=o.service||{},d=o.definitions||{};
+ $('#roi-minutes').value=(o.settings||{}).minutes_saved_per_question;$('#roi-rate').value=(o.settings||{}).loaded_rate_per_hour;
+ $('#roi-tiles').innerHTML=[
+  kpi('Questions answered',num(v.questions_answered),v.by_persona?Object.keys(v.by_persona).length+' personas':'',''),
+  kpi('Hours saved',num(v.hours_saved),d.hours_saved,''),
+  kpi('Value delivered',usd(r.value_delivered_usd),d.value_delivered_usd,'good'),
+  kpi('Model spend',usd(c.total_spend_usd),'cost avoided '+usd(c.cost_avoided_usd),''),
+  kpi('ROI ratio',(r.ratio==null?'—':r.ratio+'×'),d.ratio,r.ratio&&r.ratio>=1?'good':(r.ratio!=null?'warn':'')),
+  kpi('Cost / answer',usd(c.cost_per_answer_usd),'projected '+usd(c.projected_monthly_usd)+'/mo','')].join('');
+ $('#roi-adoption').innerHTML='<b>'+num(ad.active_users)+'</b> active users &middot; <b>'+num(ad.questions_per_user)+'</b> questions/user &middot; WoW '+pctOf(ad.wow_growth);
+ $('#roi-quality').innerHTML='trust '+pctOf(ql.trust_avg)+' &middot; citation coverage '+pctOf(ql.citation_coverage)+' &middot; negative feedback '+pctOf(ql.negative_feedback_rate)+'<br>'+esc(sv.sla_line||'')+' &middot; fast '+pctOf(sv.fast_share)+' / agent '+pctOf(sv.agent_share)}
+async function loadOverview(){try{renderOverview(await api('/admin/overview'))}catch(e){if(e.status!==404&&e.status!==401)toast(e.message,'bad')}}
+async function saveSettings(){try{const out=await api('/admin/settings',{method:'POST',body:{minutes_saved_per_question:+$('#roi-minutes').value,loaded_rate_per_hour:+$('#roi-rate').value}});
+  $('#roi-status').textContent='saved';toast('ROI settings saved','good');await loadOverview()}catch(e){$('#roi-status').textContent=e.message;toast(e.message,'bad')}}
+
+// ---------------------------------------------------------------- T96: observability (OTel)
+function renderObservability(o){const rc=o.reconciliation||{};
+ $('#obs-kpis').innerHTML=[
+  kpi('Traces',num(o.answers),'',''),
+  kpi('Error rate',pctOf(o.error_rate),'gap or clarify',o.error_rate>0.2?'warn':''),
+  kpi('Latency p50',pctm(o.latency_p50_ms),'',''),
+  kpi('Latency p95',pctm(o.latency_p95_ms),'',''),
+  kpi('Reconciliation',rc.ok?'✓ ±1%':'✗ drift',(rc.cost?('cost Δ'+(rc.cost.delta_pct||0)+'%'):''),rc.ok?'good':'warn')].join('');
+ $('#obs-rows').innerHTML=(o.traces||[]).map(t=>'<tr data-tid="'+esc(t.trace_id)+'" style="cursor:pointer"><td class="mono small">'+esc(String(t.trace_id).slice(0,16))+'</td><td>'+esc(t.subject)+'</td><td><span class="pill">'+esc(t.level||'—')+'</span></td><td class="mono">'+pctm(t.latency_ms)+'</td><td class="mono">'+usd(t.cost_usd)+'</td><td>'+(t.error?'<span class="pill warn">'+esc(t.kind||'declined')+'</span>':'<span class="pill good">answer</span>')+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">no traces yet</td></tr>';
+ KF.$$('#obs-rows tr[data-tid]').forEach(row=>row.onclick=()=>openWaterfall(row.dataset.tid));
+ const rr=[];if(rc.answers)rr.push('answers: analytics '+rc.answers.analytics+' vs metrics '+rc.answers.metrics+' (Δ'+rc.answers.delta_pct+'%)');
+ if(rc.cost)rr.push('cost: analytics '+usd(rc.cost.analytics)+' vs metrics '+usd(rc.cost.metrics)+' (Δ'+rc.cost.delta_pct+'%)');
+ $('#obs-recon').innerHTML='<b>Reconciliation</b> (dashboard vs raw counters, tolerance ±1%): '+esc(rr.join(' · '))+' — '+(rc.ok?'<span class="pill good">consistent</span>':'<span class="pill warn">drift</span>')}
+async function loadObservability(){try{renderObservability(await api('/admin/observability?limit=20'))}catch(e){if(e.status!==404&&e.status!==401)toast(e.message,'bad')}}
+async function openWaterfall(tid){const box=$('#obs-waterfall');box.hidden=false;box.innerHTML='<div class="muted small">loading trace '+esc(String(tid).slice(0,16))+'…</div>';
+ try{const w=await api('/admin/observability?trace_id='+encodeURIComponent(tid));const tot=w.total_ms||1;
+  box.innerHTML='<div class="section-title">Span waterfall <span class="muted small">'+esc(String(tid).slice(0,24))+' · '+ms(w.total_ms)+'</span></div>'+
+   (w.spans||[]).map(s=>'<div class="wf-row"><span class="wf-name">'+esc(s.name)+(s.stage?' <span class="muted">'+esc(s.stage)+'</span>':'')+'</span>'+
+    '<span class="wf-bar"><i style="margin-left:'+(s.offset_ms/tot*100).toFixed(1)+'%;width:'+Math.max(1,s.duration_ms/tot*100).toFixed(1)+'%"></i></span>'+
+    '<span class="wf-ms mono">'+ms(s.duration_ms)+'</span></div>').join('')||'<div class="muted small">no spans for this trace</div>'}
+ catch(e){box.innerHTML='<div class="muted small">'+esc(e.message)+'</div>'}}
+
 // ---------------------------------------------------------------- boot
 async function loadAll(){try{await loadConnectors()}catch(e){return}
- await Promise.all([loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources(),loadCoverage(),loadSLA()]);
+ await Promise.all([loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources(),loadCoverage(),loadSLA(),loadOverview(),loadObservability()]);
  if(await loadRuns())schedulePoll()}
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{$('#connectors').innerHTML='';gate({status:401,message:''},'admin')}};
 KF.initBar({preferRole:'admin'});
@@ -236,4 +276,5 @@ $('#upload-add').onclick=addToBatch;$('#upload-btn').onclick=upload;$('#delete-b
 $('#upload-files').onchange=e=>{addFilesToBatch(Array.from(e.target.files||[]));e.target.value=''};
 $('#budget-btn').onclick=setBudget;$('#authority-btn').onclick=setAuthority;$('#audit-refresh').onclick=loadAudit;$('#doctor-btn').onclick=doctor;$('#models-refresh').onclick=loadModels;$('#models-days').onchange=loadModels;
 $('#add-user-btn').onclick=addUser;
+$('#roi-save').onclick=saveSettings;
 if(KF.session)loadAll();else gate({status:401,message:''},'admin');

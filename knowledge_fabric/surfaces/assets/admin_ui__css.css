@@ -31,3 +31,18 @@
 #models-telemetry .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--mut)}
 #models-telemetry .legend .sw{display:inline-block;width:10px;height:10px;border-radius:2px;
  margin-right:4px;vertical-align:middle}
+
+/* T96 — ROI overview + OTel observability */
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;
+ animation:kfrise .5s ease both}
+.kpi .l{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.3px}
+.kpi .v{font-size:22px;font-weight:800;margin-top:2px}
+.kpi.good .v{color:var(--good)}.kpi.warn .v{color:var(--warn)}
+@keyframes kfrise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.waterfall{margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--panel)}
+.wf-row{display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12px}
+.wf-name{flex:0 0 190px;color:var(--qz-ink)}
+.wf-bar{flex:1;background:var(--panel2);border-radius:5px;height:12px;overflow:hidden}
+.wf-bar i{display:block;height:100%;background:var(--qz-blue);border-radius:5px}
+.wf-ms{flex:0 0 64px;text-align:right;color:var(--mut)}
