@@ -120,6 +120,10 @@ def record(
         "output_tokens": int(usage.get("output_tokens", 0) or 0),
         "cache_read_input_tokens": int(usage.get("cache_read_input_tokens", 0) or 0),
         "cache_creation_input_tokens": int(usage.get("cache_creation_input_tokens", 0) or 0),
+        # T95 — reasoning/thinking tokens a single call reports (extended-thinking
+        # output, or the open-source summariser's intermediate tokens). A subset of
+        # output_tokens; 0 when the call did no separable thinking.
+        "thinking_tokens": int(usage.get("thinking_tokens", 0) or 0),
         "latency_ms": round(float(latency_ms), 2),
         "cost_usd": cost_for(model, usage),
         "request_id": request_id or "",
@@ -164,6 +168,7 @@ def summary(items: list[dict], run: str | None = None) -> dict:
         "calls": len(sel),
         "input_tokens": sum(r.get("input_tokens", 0) for r in sel),
         "output_tokens": sum(r.get("output_tokens", 0) for r in sel),
+        "thinking_tokens": sum(r.get("thinking_tokens", 0) for r in sel),
         "cache_read": sum(r.get("cache_read_input_tokens", 0) for r in sel),
         "cache_write": sum(r.get("cache_creation_input_tokens", 0) for r in sel),
         "cost_usd": round(sum(float(r.get("cost_usd", 0.0)) for r in sel), 6),

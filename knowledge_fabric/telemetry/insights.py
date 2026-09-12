@@ -44,6 +44,49 @@ _PHASE_ORDER = ("retrieval", "summary", "agent_step", "translate", "image_descri
 # efficiency ratio). Bookkeeping calls (classify, question_gen, ...) are not.
 _ANSWER_PURPOSES = frozenset({"answer_bake", "agent_step"})
 
+# Purposes that are pure reasoning/tool-loop turns before the final synthesis:
+# their whole token spend counts as "thinking" (token-meter's reasoning class).
+_THINKING_PURPOSES = frozenset({"agent_step"})
+
+
+# --------------------------------------------------------------------------- #
+# Token classes (input / thinking / output / cache)                           #
+# --------------------------------------------------------------------------- #
+def token_classes(days: int = 7) -> dict:
+    """The five billed token classes over ``days`` — ``input``, ``thinking``,
+    ``output``, ``cache_read`` and ``cache_write`` — for the Admin stacked bar.
+
+    Thinking is the reasoning spend: the whole token count of tool-loop turns
+    (``agent_step``), plus any per-call ``thinking_tokens`` a synthesis call
+    reports (extended thinking, or the open-source summariser's intermediate
+    tokens). Output excludes that reported thinking so the classes never
+    double-count. The five stack to ``total`` by construction, reconciling with
+    the ledger's own input/output/cache sums.
+    """
+    items = api_ledger.rows(days)
+    tin = think = tout = cread = cwrite = 0
+    for r in items:
+        cread += int(r.get("cache_read_input_tokens", 0) or 0)
+        cwrite += int(r.get("cache_creation_input_tokens", 0) or 0)
+        it = int(r.get("input_tokens", 0) or 0)
+        ot = int(r.get("output_tokens", 0) or 0)
+        tk = int(r.get("thinking_tokens", 0) or 0)
+        if r.get("purpose", "") in _THINKING_PURPOSES:
+            think += it + ot  # a reasoning turn: all of it is thinking
+        else:
+            think += min(tk, ot)  # thinking reported inside a synthesis call
+            tin += it
+            tout += max(0, ot - tk)
+    total = tin + think + tout + cread + cwrite
+    return {
+        "input": tin,
+        "thinking": think,
+        "output": tout,
+        "cache_read": cread,
+        "cache_write": cwrite,
+        "total": total,
+    }
+
 
 # --------------------------------------------------------------------------- #
 # Cost split by phase                                                         #
@@ -319,6 +362,8 @@ def burn_rate(days: int = 1) -> dict:
 def definitions() -> dict:
     """One-line definition per metric for the ``?`` help sheet (T29 style)."""
     return {
+        "token_classes": "Billed tokens split into input, thinking, output and cache.",
+        "thinking": "Reasoning/tool-loop tokens spent before the final answer synthesis.",
         "cost_breakdown": "Model spend split by answer phase; retrieval is always zero.",
         "active_ms": "Time spent doing model and tool work on an answer.",
         "idle_ms": "Wall-clock time from ask to answer minus the active time.",
@@ -344,11 +389,17 @@ def overview(days: int = 7, events: list[dict] | None = None) -> dict:
     when answer ``events`` are supplied.
     """
     items = api_ledger.rows(days)
+    tc = token_classes(days)
+    eff = efficiency(days)
     payload = {
         "days": days,
         "totals": api_ledger.summary(items),
+        "token_classes": tc,
         "cost_breakdown": cost_breakdown(days),
-        "efficiency": efficiency(days),
+        "efficiency": eff,
+        # aggregate prompt-token waste: the prompt/thinking tokens the fabric paid
+        # for that reached no cited sentence (the standalone waste() is exact math).
+        "waste": waste(tc["input"] + tc["thinking"], eff["cited_output_tokens"]),
         "per_dimension": per_dimension(days),
         "provider_quota": provider_quota(),
         "burn_rate": burn_rate(1),
@@ -373,5 +424,6 @@ __all__ = [
     "percentiles",
     "provider_quota",
     "timing_percentiles",
+    "token_classes",
     "waste",
 ]

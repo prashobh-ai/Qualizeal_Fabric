@@ -269,7 +269,7 @@ function card(a){const box=$('#answer-card');const w=a.why||{};const lw=levelWor
  det.push(['Sources',found+' found &middot; '+cited+' cited']);
  det.push(['Trust','<span class="trust-num">'+trust+'</span> '+bars(w.signals)+' <span class="muted small" title="grounding score">g '+pct(a.grounding_score)+'</span>']);
  det.push(['Language','<span class="pill">'+esc((a.lang||'en').toUpperCase())+'</span>']);
- det.push(['Tokens',num(a.tokens_in)+' in &middot; '+num(a.tokens_out)+' out &middot; cache read —']);
+ det.push(['Tokens',num(a.tokens_in)+' in &middot; '+(a.thinking_tokens?num(a.thinking_tokens)+' thinking &middot; ':'')+num(a.tokens_out)+' out &middot; cache read —']);
  det.push(['Cost',money(a.cost)+' &middot; top '+money(topCost)+' &middot; saved '+money(a.cost_saved)]);
  det.push(['Cache',a.cache_hit?'<span class="pill good">hit</span>':'<span class="pill">miss</span>']);
  det.push(['Timing',a._ms!=null?ms(a._ms):'—']);

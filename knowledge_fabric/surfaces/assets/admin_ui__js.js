@@ -132,16 +132,26 @@ function usd(x){return '$'+(Number(x)||0).toFixed(4)}
 // T55/T56 — the token-meter overview chips: efficiency, active-vs-idle, cost
 // by phase, burn rate and the provider quota. Everything reconciles with the
 // ledger totals above; absent telemetry simply renders nothing.
+// T95 — the input/thinking/output/cache stacked bar. Each class links back to
+// the ledger (the five sum to the total), so the bar reconciles with the totals
+// card above; a `?` sheet defines each class.
+const TC_CLASSES=[['input','var(--qz-blue)'],['thinking','var(--qz-purple)'],['output','var(--good)'],
+ ['cache_read','var(--qz-blue-deep)'],['cache_write','var(--mut)']];
+function renderTokenClasses(tc,defs){if(!tc||!tc.total)return '';
+ const segs=TC_CLASSES.filter(([k])=>tc[k]).map(([k,c])=>'<i style="width:'+(tc[k]/tc.total*100).toFixed(1)+'%;background:'+c+'" title="'+k.replace('_',' ')+' '+num(tc[k])+' tokens'+(defs&&defs[k]?' — '+esc(defs[k]):'')+'"></i>').join('');
+ const legend=TC_CLASSES.filter(([k])=>tc[k]).map(([k,c])=>'<span class="k"><span class="sw" style="background:'+c+'"></span>'+k.replace('_',' ')+' '+num(tc[k])+'</span>').join('');
+ return '<div class="tokbar" title="'+(defs&&defs.token_classes?esc(defs.token_classes):'billed tokens by class')+'">'+segs+'</div><div class="legend">'+legend+'</div>'}
 function renderModelsTelemetry(tel){const box=$('#models-telemetry');if(!box)return;
  if(!tel||tel.error||!tel.totals){box.innerHTML=tel&&tel.error?'<span class="muted small">telemetry unavailable</span>':'';return}
- const eff=tel.efficiency||{},burn=tel.burn_rate||{},quota=tel.provider_quota||{};
+ const eff=tel.efficiency||{},burn=tel.burn_rate||{},quota=tel.provider_quota||{},waste=tel.waste||{},defs=tel.definitions||{};
  const phases=(tel.cost_breakdown||[]).filter(p=>p.calls||p.cost_usd);
  const chips=[];
- if(eff.efficiency!=null)chips.push('<span class="pill" title="cited output tokens / total tokens">efficiency '+Math.round((eff.efficiency||0)*100)+'%</span>');
+ if(eff.efficiency!=null)chips.push('<span class="pill" title="'+esc(defs.efficiency||'cited output tokens / total tokens')+'">efficiency '+Math.round((eff.efficiency||0)*100)+'%</span>');
+ if(waste.waste_pct!=null)chips.push('<span class="pill'+(waste.waste_pct>waste.target_pct?' warn':'')+'" title="'+esc(defs.waste_pct||'prompt tokens that reached no cited sentence')+'">waste '+waste.waste_pct+'% <span class="muted">(≤'+waste.target_pct+'%)</span></span>');
  if(quota.provider)chips.push('<span class="pill" title="provider quota">'+esc(quota.provider)+' · '+esc(quota.limit||'')+'</span>');
  if(burn.cost_per_hour!=null)chips.push('<span class="pill">burn '+usd(burn.cost_per_hour)+'/h · ~'+usd(burn.projected_per_day)+'/day</span>');
  phases.forEach(p=>chips.push('<span class="pill" title="'+esc(p.calls||0)+' calls · '+esc(p.tokens||0)+' tokens">'+esc(p.phase)+' '+usd(p.cost_usd)+'</span>'));
- box.innerHTML=chips.join(' ')||'<span class="muted small">no model activity in this window</span>'}
+ box.innerHTML=renderTokenClasses(tel.token_classes,defs)+'<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px">'+(chips.join(' ')||'<span class="muted small">no model activity in this window</span>')+'</div>'}
 async function loadModels(){try{const days=$('#models-days')?$('#models-days').value:'7';const d=await api('/admin/models?days='+encodeURIComponent(days));
  const p=d.provider||{};const c=d.consumption||{};const t=c.totals||{};
  const prov=p.provider?('<span class="pill good">'+esc(p.provider)+'</span> <span class="pill">key …'+esc(String(p.key_fingerprint||'').slice(-4))+'</span> <span class="pill">small '+esc(p.model_small)+'</span> <span class="pill">large '+esc(p.model_large)+'</span> <span class="muted small">verified '+esc(p.verified_at||'')+' · ping '+esc(((p.ping_usage||{}).input_tokens||0)+'/'+((p.ping_usage||{}).output_tokens||0))+' tokens</span>')
