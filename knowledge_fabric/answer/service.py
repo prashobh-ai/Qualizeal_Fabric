@@ -49,6 +49,7 @@ from ..stores import versioning
 from ..telemetry import timing
 from . import aggregate, personas, reasoning
 from . import lang as langmod
+from . import registry as known
 from . import selector as sel
 from .search import discover, is_discovery
 
@@ -485,6 +486,11 @@ class AnswerService:
         qlang = langmod.detect(question)
         rq = langmod.translate_query_to_en(question, qlang, p.model, tenant)  # retrieve on English
         plan = reasoning.plan(rq)
+        # T82 — a governed known question (the per-persona registry) is answered
+        # on the fast path by design: it never decomposes and never escalates, so
+        # its time-to-answer stays a commitment. The match is persona-agnostic (a
+        # curated question is instant for anyone) and skipped for nested sub-asks.
+        known_hit = None if _nested else known.Registry.load().match(rq)
         span_name = "answer.step" if _nested else "answer"
 
         with p.telemetry.span(
@@ -569,7 +575,8 @@ class AnswerService:
                 return self._from_cache(pay, trace_id, tenant, qlang, saved)
 
             # C. multistep / conditional / compare → decompose, run each step governed
-            if not _nested and plan["mode"] != "single":
+            # (a known question stays single-shot on the fast path — T82).
+            if not _nested and plan["mode"] != "single" and not known_hit:
                 return self._ask_reasoned(
                     principal, question, plan, trace_id, span, qlang, k, allow_model
                 )
@@ -745,6 +752,22 @@ class AnswerService:
                     doc_titles[did] = (d or {}).get("title", "")
             decision = sel.classify(rq, selected, g, graph_used, doc_titles=doc_titles)
             tier = decision["tier"]
+            # T82 — fast-path lock: a governed known question is capped at the
+            # fast path (never reason/escalation), so a curated question is
+            # instant by design. The reason rides on the why-card and telemetry,
+            # so Admin can see the fast-path share these questions preserve.
+            if known_hit:
+                if decision["level"] > 2:
+                    nm, tr = sel.LEVELS[2]
+                    decision = {**decision, "level": 2, "level_name": nm, "tier": tr}
+                decision["reasons"] = decision["reasons"] + [
+                    {
+                        "code": "known_question",
+                        "detail": f"registry known question ({known_hit['id']})",
+                        "signal": known_hit["pattern"],
+                    }
+                ]
+                tier = decision["tier"]
             # complexity describes the QUERY (form + evidence spread), so it is fixed here from
             # the selector's level and never lowered by a later budget/model-off degradation
             complexity = _max_cx(plan["complexity"], _LEVEL_CX.get(decision["level"], "simple"))
@@ -794,7 +817,8 @@ class AnswerService:
             confidence = self._confidence(g, citations, selected)
 
             if (
-                decision["level"] < 4
+                not known_hit  # T82 — a known question never escalates off the fast path
+                and decision["level"] < 4
                 and confidence < _ESCALATE_FLOOR
                 and tier != "none"
                 and p.model.available()

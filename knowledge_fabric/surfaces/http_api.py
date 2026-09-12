@@ -20,6 +20,8 @@ from urllib.parse import parse_qs, urlparse
 
 from .. import curation, fabric_views
 from ..adapters import cloud
+from ..answer import personas
+from ..answer import registry as known_registry
 from ..answer.service import AnswerService
 from ..app import Platform
 from ..connectors import admin as conn_admin
@@ -415,8 +417,20 @@ class Handler(BaseHTTPRequestHandler):
                 out.append({"question": r["question"], "family": fam or "", "docs": len(uris)})
                 if fam:
                     seen_family.add(fam)
+            # T82 — the reader's persona-drawn known questions from the registry,
+            # so Home offers "the questions the fabric answers instantly" for this
+            # audience alongside the tenant bank's ACL-gated suggestions.
+            persona = personas.persona_for(prin.designation)
+            reg = known_registry.Registry.load()
             return self._send(
-                200, {"tenant": prin.tenant, "suggestions": out, "families": sorted(seen_family)}
+                200,
+                {
+                    "tenant": prin.tenant,
+                    "suggestions": out,
+                    "families": sorted(seen_family),
+                    "persona": persona,
+                    "known": reg.suggestions(persona),
+                },
             )
         if u.path == "/api/corpus":
             # Five-tile "corpus at a glance" for the Ask console header (P1.2).
@@ -841,6 +855,17 @@ class Handler(BaseHTTPRequestHandler):
             if not prin:
                 return
             return self._send(200, curation.modes(p, prin.tenant))
+        if u.path == "/curator/registry":
+            # T82 — the governed known-question registry the Curator maintains:
+            # every entry with its personas, answer kind, source and freshness
+            # target, plus the persona→audience map the console renders.
+            prin = self._require("curate")
+            if not prin:
+                return
+            reg = known_registry.Registry.load()
+            return self._send(
+                200, {"entries": reg.all(), "audiences": known_registry.AUDIENCES_FOR}
+            )
         return self._send(404, {"error": "not found"})
 
     # ------------------------------------------------------------ POST
@@ -999,6 +1024,30 @@ class Handler(BaseHTTPRequestHandler):
             p.cache.invalidate(prin.tenant)
             self._audit(prin, f"curate:review:{action}", rid, reason or "ok")
             return self._send(200, {"ok": True, "review_id": rid, "action": action, "result": res})
+        if u.path == "/curator/registry":
+            # T82 — add, edit or disable a known question. Each change is audited
+            # and persists to the fabric-data runtime registry, so the curator's
+            # governed list survives and takes effect for its persona immediately.
+            prin = self._require("curate")
+            if not prin:
+                return
+            b = self._body()
+            reg = known_registry.Registry.load()
+            action = b.get("action", "upsert")
+            try:
+                if action == "upsert":
+                    entry = reg.upsert(b.get("entry") or {})
+                    self._audit(prin, "registry:upsert", entry["id"], entry["pattern"])
+                    return self._send(200, {"ok": True, "action": "upsert", "entry": entry})
+                if action in ("enable", "disable"):
+                    entry = reg.set_enabled(b.get("id", ""), action == "enable")
+                    self._audit(prin, f"registry:{action}", entry["id"], "")
+                    return self._send(200, {"ok": True, "action": action, "entry": entry})
+                return self._send(400, {"error": f"unknown action '{action}'"})
+            except ValueError as e:
+                return self._send(400, {"error": str(e)})
+            except KeyError as e:
+                return self._send(404, {"error": f"unknown known question: {e}"})
 
         # ---- admin ---------------------------------------------------
         if u.path == "/admin/upload":

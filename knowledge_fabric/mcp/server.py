@@ -60,6 +60,7 @@ TOOL_NAMES = (
     "provider_status",
     "fabric_communities",
     "knowledge_gaps",
+    "list_known_questions",
 )
 
 
@@ -389,6 +390,42 @@ def tool_knowledge_gaps(platform, tenant: str) -> dict:
         "result": {
             "gaps": payload.get("gaps", []),
             "surprising": payload.get("surprising", []),
+        },
+        "citations": [],
+    }
+
+
+def tool_list_known_questions(persona: str = "") -> dict:
+    """T82/T89 — the governed known-question registry, so an agent can offer a
+    user their instant questions. With ``persona`` given, only that audience's
+    entries and a ready-to-ask suggestion set; without it, the whole enabled
+    registry. The same answer-first contract as the UI — these are the questions
+    the fabric answers on the fast path by design."""
+    from ..answer import registry as _registry
+
+    reg = _registry.Registry.load()
+    if persona:
+        entries = reg.for_audiences(_registry.audiences_for(persona))
+        suggestions = reg.suggestions(persona, limit=12)
+    else:
+        entries = reg.enabled()
+        suggestions = []
+    return {
+        "result": {
+            "persona": persona,
+            "known_questions": [
+                {
+                    "id": e.get("id"),
+                    "pattern": e.get("pattern"),
+                    "persona": e.get("persona"),
+                    "answer_kind": e.get("answer_kind"),
+                    "source": e.get("source"),
+                    "freshness_target_s": e.get("freshness_target_s"),
+                    "examples": e.get("examples"),
+                }
+                for e in entries
+            ],
+            "suggestions": suggestions,
         },
         "citations": [],
     }
@@ -755,5 +792,24 @@ def build_server(platform=None, tenant: str | None = None):
     def knowledge_gaps() -> dict:
         """The fabric's knowledge gaps and surprising connections."""
         return tool_knowledge_gaps(platform, tenant)
+
+    @server.tool(
+        description=(
+            "List the known-question registry — the governed questions the "
+            "fabric answers instantly — so you can offer a user their instant "
+            "questions. Pass a persona (developer, quality, delivery, executive, "
+            "curation, operations, general) for just that audience's set and "
+            "ready-to-ask suggestions; omit it for the whole enabled registry."
+        )
+    )
+    def list_known_questions(persona: str = "") -> dict:
+        """List the known-question registry.
+
+        Args:
+            persona: Optional persona to narrow to that audience's questions
+                (developer, quality, delivery, executive, curation, operations,
+                general). Omit for the whole enabled registry.
+        """
+        return tool_list_known_questions(persona)
 
     return server
