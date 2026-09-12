@@ -158,6 +158,20 @@ def run(steps: list[str], *, tenant: str = TENANT, limit=None, platform=None, ou
                 records.append(
                     {"step": "facts", "status": "failed", "detail": f"{type(e).__name__}: {e}"}
                 )
+    # T99 — once every source has landed, rebuild the cross-source relationships
+    # graph (Jira keys ↔ commits / PRs / documents) from the fabric's mentions,
+    # so cross-source verification is a graph lookup rather than a re-scan.
+    try:
+        from knowledge_fabric import relationships as relmod
+
+        rel = relmod.scan(platform, tenant)
+        records.append(
+            {"step": "relationships", "status": "ran", "detail": f"{rel['edges']} edges"}
+        )
+    except Exception as e:  # noqa: BLE001 — reported per step, never hidden
+        records.append(
+            {"step": "relationships", "status": "failed", "detail": f"{type(e).__name__}: {e}"}
+        )
     for r in records:
         out(f"  {r['step']:<11} {r['status']:<8} {r.get('detail', '')}")
     line = report_line(records)

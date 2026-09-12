@@ -47,7 +47,7 @@ from ..contracts.types import (
 from ..governance import authority
 from ..stores import versioning
 from ..telemetry import timing
-from . import aggregate, personas, reasoning
+from . import aggregate, cross_source, personas, reasoning
 from . import defaults as user_defaults
 from . import lang as langmod
 from . import registry as known
@@ -635,6 +635,16 @@ class AnswerService:
                 )
                 if coded is not None:
                     return coded
+
+            # C2b. cross-source verification (T99): "the Jira task V1-42 shows
+            # complete — check the repo and verify" corroborates the issue's
+            # status against the code, citing both, before prose retrieval.
+            if not _nested:
+                xs = self._cross_source_answer(
+                    principal, question, rq, trace_id, span, qlang, dsv=0
+                )
+                if xs is not None:
+                    return xs
 
             # C3. discovery intent (T24): "has anyone made auth code?", "find an
             # automation script for X" — return a ranked list of reusable assets.
@@ -1476,6 +1486,71 @@ class AnswerService:
             lang=qlang,
             model_name=model_for_tier("none"),
             complexity="simple",
+            dataset_version=dsv,
+        )
+
+    def _cross_source_answer(self, principal, question, rq, trace_id, span, qlang, dsv):
+        """Cross-source verification (T99). When the question asks to verify /
+        cross-check / confirm and names a Jira issue key, corroborate the issue's
+        status against the code (commits/PRs that mention it, from the
+        relationships graph) and report agreement or the specific gap, citing
+        BOTH sources. Keyless — no model needed. Returns None when it is not a
+        verify question or no issue key is present, so other paths run."""
+        if not cross_source.wants_verification(question):
+            return None
+        live = getattr(self.p, "live_jql", None)
+        res = cross_source.verify(self.p, principal, question, live_jql=live)
+        if res is None:
+            return None
+        tenant = principal.tenant
+        text = self._localize(res.text, qlang, principal, "none")
+        why = {
+            "level_name": "cross-source",
+            "explain": res.explain,
+            "reasons": [{"code": "cross_source", "detail": res.verdict, "signal": True}],
+            "signals": {
+                "retrieval": 1.0,
+                "semantic": 1.0,
+                "coverage": 1.0,
+                "agreement": 1.0 if res.verdict == "agree" else 0.5,
+                "resolvable": 1.0,
+            },
+            "retrieved": len(res.citations),
+            "complexity": "analytical",
+            "model_name": model_for_tier("none"),
+            "verdict": res.verdict,
+            "entity": res.entity,
+        }
+        self._audit(principal, "ask", f"answered:cross_source:{res.verdict}", trace_id)
+        span.set(
+            kind="answer",
+            level="cross-source",
+            tier="none",
+            citations_count=len(res.citations),
+            sources=[c.document_title for c in res.citations],
+            why=why,
+            grounding=1.0,
+            model_name=model_for_tier("none"),
+            complexity="analytical",
+            dataset_version=dsv,
+        )
+        return Answer(
+            AnswerKind.ANSWER,
+            text,
+            res.citations,
+            1.0,
+            trace_id,
+            0.0,
+            0,
+            "none",
+            grounding_score=1.0,
+            tenant=tenant,
+            level=2,
+            why=why,
+            lang=qlang,
+            model_name=model_for_tier("none"),
+            complexity="analytical",
+            authoritative_source=self._authority_card(tenant, res.citations),
             dataset_version=dsv,
         )
 

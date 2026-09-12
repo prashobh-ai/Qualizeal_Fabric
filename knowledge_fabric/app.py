@@ -24,6 +24,7 @@ from .adapters.vectorindex import SqlVectorIndex
 from .answer.cache import Cache
 from .governance.policy import PolicyEngine
 from .stores.db import Database
+from .stores.relationships import RelationshipRepo
 from .stores.repositories import (
     AuditRepo,
     CurationRepo,
@@ -68,6 +69,7 @@ class Platform:
 
         self.documents = DocumentRepo(self.db)
         self.passages = PassageRepo(self.db)
+        self.relationships = RelationshipRepo(self.db)  # T99 cross-source edges
         self.graph_repo = GraphRepo(self.db)
         self.graph = SqlGraphStore(self.graph_repo)
         self.audit = AuditRepo(self.db)

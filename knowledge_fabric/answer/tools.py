@@ -178,6 +178,26 @@ TOOL_SPECS: list[dict] = [
         },
     },
     {
+        "name": "corroborate",
+        "description": (
+            "Cross-source verification (T99): given a claim that names a Jira issue key "
+            "(e.g. 'V1-42 is done — check the repo'), report whether the repository corroborates "
+            "the Jira status — agreement, or the specific discrepancy — citing BOTH sources. Uses "
+            "the relationships graph of commits/PRs that mention the issue. Use when asked to "
+            "verify, cross-check or confirm one source against another."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "claim": {
+                    "type": "string",
+                    "description": "The claim to verify, naming a Jira issue key.",
+                }
+            },
+            "required": ["claim"],
+        },
+    },
+    {
         "name": "calculate",
         "description": (
             "Arithmetic and date math, evaluated safely. Numbers, + - * / // % **, min/max/abs/"
@@ -224,6 +244,7 @@ SEARCH_ORDER = [
     "github_api",
     "jira_search",
     "confluence_search",
+    "corroborate",
     "ask_user",
 ]
 
@@ -696,6 +717,30 @@ def calculate(expression: str) -> dict:
     )
 
 
+def corroborate(p, principal, claim: str, live_jql=None) -> dict:
+    from . import cross_source
+
+    res = cross_source.verify(p, principal, claim, live_jql=live_jql)
+    if res is None:
+        return _ok(
+            {
+                "found": False,
+                "note": "no Jira issue key to verify; name a key like V1-42 in the claim",
+            }
+        )
+    return _ok(
+        {
+            "found": True,
+            "verdict": res.verdict,
+            "text": res.text,
+            "entity": res.entity,
+            "jira_status": (res.per_source.get("jira") or {}).get("status"),
+            "repo_references": len((res.per_source.get("repo") or {}).get("references") or []),
+        },
+        [aggregate.citation_to_dict(c) for c in res.citations],
+    )
+
+
 def ask_user(question: str, options=None) -> dict:
     opts = [str(o) for o in (options or []) if str(o).strip()][:4]
     if not question or len(opts) < 2:
@@ -757,6 +802,8 @@ def execute(name: str, inp: dict, ctx: ToolContext) -> dict:
         return jira_search(str(inp.get("jql", "")), inp.get("fields"), ctx.live_jql)
     if name == "confluence_search":
         return confluence_search(str(inp.get("cql", "")), ctx.live_cql)
+    if name == "corroborate":
+        return corroborate(p, pr, str(inp.get("claim", "")), ctx.live_jql)
     if name == "calculate":
         return calculate(str(inp.get("expression", "")))
     if name == "ask_user":
