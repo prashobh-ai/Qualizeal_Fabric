@@ -218,7 +218,7 @@ class ConfluenceConnector(BaseConnector):
             items.append(self._page_record(space, page, as_of))
             if self.attachments:
                 items.extend(self._attachment_records(space, page, as_of))
-        for space in (self.list_spaces() if self.spaces else []):
+        for space in self.list_spaces() if self.spaces else []:
             if space["key"] not in self.spaces:
                 continue
             pages = self.list_pages(space["id"])

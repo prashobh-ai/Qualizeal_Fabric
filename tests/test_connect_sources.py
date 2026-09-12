@@ -27,16 +27,25 @@ from tests.util import T, seeded  # noqa: E402
 
 class TestUrlParse(unittest.TestCase):
     def test_github_org_user_repo(self):
-        self.assertEqual(url_parse.parse_source_url("https://github.com/QualiZeal"),
-                         {"source": "github", "org": "QualiZeal"})
-        self.assertEqual(url_parse.parse_source_url("https://github.com/prashobh-ai"),
-                         {"source": "github", "org": "prashobh-ai"})
-        self.assertEqual(url_parse.parse_source_url("https://github.com/acme/app"),
-                         {"source": "github", "repos": ["acme/app"]})
-        self.assertEqual(url_parse.parse_source_url("acme/app"),
-                         {"source": "github", "repos": ["acme/app"]})
-        self.assertEqual(url_parse.parse_source_url("https://github.com/acme/app.git"),
-                         {"source": "github", "repos": ["acme/app"]})
+        self.assertEqual(
+            url_parse.parse_source_url("https://github.com/QualiZeal"),
+            {"source": "github", "org": "QualiZeal"},
+        )
+        self.assertEqual(
+            url_parse.parse_source_url("https://github.com/prashobh-ai"),
+            {"source": "github", "org": "prashobh-ai"},
+        )
+        self.assertEqual(
+            url_parse.parse_source_url("https://github.com/acme/app"),
+            {"source": "github", "repos": ["acme/app"]},
+        )
+        self.assertEqual(
+            url_parse.parse_source_url("acme/app"), {"source": "github", "repos": ["acme/app"]}
+        )
+        self.assertEqual(
+            url_parse.parse_source_url("https://github.com/acme/app.git"),
+            {"source": "github", "repos": ["acme/app"]},
+        )
 
     def test_jira_dashboard_board_project(self):
         site = "https://qualizeal-team-aicoe.atlassian.net"
@@ -61,10 +70,13 @@ class TestUrlParse(unittest.TestCase):
         self.assertEqual(space["spaces"], ["COE"])
 
     def test_website(self):
-        self.assertEqual(url_parse.parse_source_url("https://qualizeal.com"),
-                         {"source": "website", "urls": ["https://qualizeal.com"]})
-        self.assertEqual(url_parse.parse_source_url("https://my-personal-site.dev/blog")["source"],
-                         "website")
+        self.assertEqual(
+            url_parse.parse_source_url("https://qualizeal.com"),
+            {"source": "website", "urls": ["https://qualizeal.com"]},
+        )
+        self.assertEqual(
+            url_parse.parse_source_url("https://my-personal-site.dev/blog")["source"], "website"
+        )
 
     def test_empty_is_none(self):
         self.assertIsNone(url_parse.parse_source_url("   "))
@@ -97,12 +109,14 @@ class TestConfigFromAllow(unittest.TestCase):
 
     def test_backward_compatible_plain_lists(self):
         # allow-lists written before T118 (plain ids) still map to native keys.
-        self.assertEqual(url_parse.config_from_allow("jira", ["V1", "PLAT"]),
-                         {"projects": ["V1", "PLAT"]})
-        self.assertEqual(url_parse.config_from_allow("confluence", ["coe"]),
-                         {"spaces": ["COE"]})
-        self.assertEqual(url_parse.config_from_allow("files", [".pdf", ".docx"]),
-                         {"allow_ext": [".pdf", ".docx"]})
+        self.assertEqual(
+            url_parse.config_from_allow("jira", ["V1", "PLAT"]), {"projects": ["V1", "PLAT"]}
+        )
+        self.assertEqual(url_parse.config_from_allow("confluence", ["coe"]), {"spaces": ["COE"]})
+        self.assertEqual(
+            url_parse.config_from_allow("files", [".pdf", ".docx"]),
+            {"allow_ext": [".pdf", ".docx"]},
+        )
 
     def test_wrong_source_url_ignored(self):
         # a website URL pasted into the github card is ignored, not misfiled.
@@ -121,7 +135,9 @@ class TestEffectiveConfigUrlAware(unittest.TestCase):
 
     def test_configured_url_not_overridden_by_parsed(self):
         admin.upsert(
-            self.p, T, "confluence",
+            self.p,
+            T,
+            "confluence",
             config={"url": "https://real.atlassian.net"},
             allow=["https://other.atlassian.net/wiki/spaces/COE/pages/5/T"],
         )
@@ -133,8 +149,16 @@ class TestEffectiveConfigUrlAware(unittest.TestCase):
 class TestCredentialStatus(unittest.TestCase):
     def setUp(self):
         self.p = seeded([T])
-        for var in ("JIRA_URL", "JIRA_EMAIL", "JIRA_TOKEN", "CONFLUENCE_URL",
-                    "CONFLUENCE_EMAIL", "CONFLUENCE_TOKEN", "KF_GITHUB_TOKEN", "GITHUB_TOKEN"):
+        for var in (
+            "JIRA_URL",
+            "JIRA_EMAIL",
+            "JIRA_TOKEN",
+            "CONFLUENCE_URL",
+            "CONFLUENCE_EMAIL",
+            "CONFLUENCE_TOKEN",
+            "KF_GITHUB_TOKEN",
+            "GITHUB_TOKEN",
+        ):
             os.environ.pop(var, None)
 
     def test_jira_missing_is_not_configured(self):
@@ -143,8 +167,12 @@ class TestCredentialStatus(unittest.TestCase):
         self.assertEqual(set(cr["missing"]), {"JIRA_URL", "JIRA_EMAIL", "JIRA_TOKEN"})
 
     def test_jira_configured_via_connector_config(self):
-        admin.upsert(self.p, T, "jira",
-                     config={"url": "https://q.atlassian.net", "email": "a@b.co", "token": "x"})
+        admin.upsert(
+            self.p,
+            T,
+            "jira",
+            config={"url": "https://q.atlassian.net", "email": "a@b.co", "token": "x"},
+        )
         cr = admin.credentials(self.p, T, "jira")
         self.assertTrue(cr["configured"])
         self.assertEqual(cr["missing"], [])
@@ -172,23 +200,48 @@ def _jira_transport(url, headers, timeout=30):
     if path == "/rest/api/3/status":
         return ok([{"id": "1", "name": "To Do"}, {"id": "2", "name": "In Progress"}])
     if path == "/rest/api/3/dashboard":
-        return ok({"dashboards": [
-            {"id": "10201", "name": "ValidAIte QA Status", "owner": {"displayName": "Prashobh"}},
-            {"id": "10202", "name": "Private Board", "owner": {"displayName": "Prashobh"}},
-        ], "total": 2})
+        return ok(
+            {
+                "dashboards": [
+                    {
+                        "id": "10201",
+                        "name": "ValidAIte QA Status",
+                        "owner": {"displayName": "Prashobh"},
+                    },
+                    {"id": "10202", "name": "Private Board", "owner": {"displayName": "Prashobh"}},
+                ],
+                "total": 2,
+            }
+        )
     if path == "/rest/api/3/dashboard/10201":
-        return ok({"id": "10201", "name": "ValidAIte QA Status",
-                   "owner": {"displayName": "Prashobh"}})
+        return ok(
+            {"id": "10201", "name": "ValidAIte QA Status", "owner": {"displayName": "Prashobh"}}
+        )
     if path == "/rest/api/3/dashboard/10201/gadget":
         return ok({"gadgets": [{"title": "Sprint Health"}, {"title": "Open Defects"}]})
     if path == "/rest/agile/1.0/board/34":
-        return ok({"id": 34, "name": "Platform", "type": "scrum",
-                   "location": {"projectKey": "PLAT"}})
+        return ok(
+            {"id": 34, "name": "Platform", "type": "scrum", "location": {"projectKey": "PLAT"}}
+        )
     if path == "/rest/agile/1.0/board/34/issue":
-        return ok({"issues": [{"key": "PLAT-1", "id": "1", "fields": {
-            "summary": "Login flow", "status": {"name": "In Progress"},
-            "issuetype": {"name": "Task"}, "project": {"key": "PLAT"},
-            "updated": "2026-09-12T08:00:00.000+0000"}}], "total": 1})
+        return ok(
+            {
+                "issues": [
+                    {
+                        "key": "PLAT-1",
+                        "id": "1",
+                        "fields": {
+                            "summary": "Login flow",
+                            "status": {"name": "In Progress"},
+                            "issuetype": {"name": "Task"},
+                            "project": {"key": "PLAT"},
+                            "updated": "2026-09-12T08:00:00.000+0000",
+                        },
+                    }
+                ],
+                "total": 1,
+            }
+        )
     if path == "/rest/agile/1.0/board/34/configuration":
         cols = [{"name": "In Progress", "statuses": [{"id": "2"}]}]
         return ok({"id": 34, "name": "Platform", "columnConfig": {"columns": cols}})
@@ -254,12 +307,16 @@ def _conf_transport(url, headers, timeout=60):
         return 200, json.dumps(payload).encode()
 
     if path == "/wiki/api/v2/pages/1703938":
-        return ok({
-            "id": "1703938", "title": "Project Plan", "spaceId": "555",
-            "body": {"storage": {"value": "<p>Kickoff on 2026-10-01. Lead: Prashobh.</p>"}},
-            "version": {"number": 3, "createdAt": "2026-09-01T00:00:00Z"},
-            "_links": {"webui": "/spaces/COE/pages/1703938/Project+Plan"},
-        })
+        return ok(
+            {
+                "id": "1703938",
+                "title": "Project Plan",
+                "spaceId": "555",
+                "body": {"storage": {"value": "<p>Kickoff on 2026-10-01. Lead: Prashobh.</p>"}},
+                "version": {"number": 3, "createdAt": "2026-09-01T00:00:00Z"},
+                "_links": {"webui": "/spaces/COE/pages/1703938/Project+Plan"},
+            }
+        )
     if path == "/wiki/api/v2/spaces/555":
         return ok({"id": "555", "key": "COE", "name": "AI CoE"})
     if path == "/wiki/api/v2/pages/1703938/attachments":
@@ -283,8 +340,9 @@ class TestConfluencePage(unittest.TestCase):
         rec = items[0]
         self.assertEqual(rec.uri, "confluence://COE/1703938")
         self.assertIn("Kickoff", rec.bytes_.decode())
-        self.assertEqual(rec.meta["citation_url"],
-                         f"{CONF_SITE}/wiki/spaces/COE/pages/1703938/Project+Plan")
+        self.assertEqual(
+            rec.meta["citation_url"], f"{CONF_SITE}/wiki/spaces/COE/pages/1703938/Project+Plan"
+        )
 
     def test_no_allowlist_raises(self):
         from knowledge_fabric.connectors.confluence import ConnectorConfigError
