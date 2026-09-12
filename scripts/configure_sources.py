@@ -64,7 +64,7 @@ def run(
     jira = provisioning.jira_ready(platform, tenant)
     conf = provisioning.confluence_ready(platform, tenant)
     out("Configured live sources for tenant " + tenant + ":")
-    out("  jira_live   " + json.dumps(jira, default=str))
+    out("  jira        " + json.dumps(jira, default=str))
     out("  confluence  " + json.dumps(conf, default=str))
     if jira["missing_secrets"]:
         out("  → set " + ", ".join(jira["missing_secrets"]) + " to sync the V1 board")

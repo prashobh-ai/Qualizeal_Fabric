@@ -67,7 +67,7 @@ def configure_jira_v1(
     return admin.upsert(
         platform,
         tenant,
-        "jira_live",
+        "jira",
         enabled=True,
         config=config,
         allow=[project],
@@ -102,10 +102,10 @@ def configure_confluence(
 def jira_ready(platform, tenant: str) -> dict:
     """Whether the V1 board can sync now: config present, allow-list set, and the
     three secrets available in the environment. Never reveals a secret's value."""
-    cfg = admin.effective_config(platform, tenant, "jira_live", {})
+    cfg = admin.effective_config(platform, tenant, "jira", {})
     missing = _missing(JIRA_SECRET_ENV)
     return {
-        "source": "jira_live",
+        "source": "jira",
         "configured": bool(cfg.get("url") and cfg.get("projects")),
         "projects": list(cfg.get("projects") or []),
         "board_id": cfg.get("board_id"),

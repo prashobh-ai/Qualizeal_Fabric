@@ -1250,42 +1250,79 @@ class Handler(BaseHTTPRequestHandler):
             if not prin:
                 return
             b = self._body()
-            row = conn_admin.upsert(
-                p,
-                prin.tenant,
-                b["source"],
-                enabled=b.get("enabled"),
-                config=b.get("config"),
-                allow=b.get("allow"),
-                scopes=b.get("scopes"),
-            )
-            if b.get("interval_s") is not None:
-                existing = (scheduler.get_schedule(p, prin.tenant, b["source"]) or {}).get(
-                    "config"
-                ) or {}
-                cfg = (
-                    b["config"]
-                    if b.get("config") is not None
-                    else (existing or row.get("config") or {})
+            source = b.get("source", "")
+            # T115 — a known-shape request NEVER raises to the client: an unknown
+            # source or any failure returns 200 with a shaped body carrying a
+            # `status` and a current/default `connector` row (always with
+            # `enabled`), so the client can never read a field off `undefined`.
+            if not conn_admin.is_known(source):
+                return self._send(
+                    200,
+                    {
+                        "connector": conn_admin.get(p, prin.tenant, source)
+                        or {"source": source, "enabled": False, "allow": [], "interval_s": None},
+                        "health": {},
+                        "status": "error",
+                        "message": f"unknown source {source!r}; expected one of "
+                        + ", ".join(conn_admin.KNOWN_SOURCES),
+                    },
                 )
-                scheduler.set_schedule(
+            try:
+                row = conn_admin.upsert(
                     p,
                     prin.tenant,
-                    b["source"],
-                    int(b["interval_s"]),
-                    cfg,
-                    enabled=bool(b.get("enabled", True)),
-                    now=time.time(),
+                    source,
+                    enabled=b.get("enabled"),
+                    config=b.get("config"),
+                    allow=b.get("allow"),
+                    scopes=b.get("scopes"),
                 )
-            self._audit(
-                prin,
-                "connector_config",
-                b["source"],
-                json.dumps({k: v for k, v in b.items() if k != "source"}),
-            )
-            return self._send(
-                200, {"connector": row, "health": scheduler.health_for(p, prin.tenant, b["source"])}
-            )
+                if b.get("interval_s") is not None:
+                    existing = (scheduler.get_schedule(p, prin.tenant, source) or {}).get(
+                        "config"
+                    ) or {}
+                    cfg = (
+                        b["config"]
+                        if b.get("config") is not None
+                        else (existing or row.get("config") or {})
+                    )
+                    scheduler.set_schedule(
+                        p,
+                        prin.tenant,
+                        source,
+                        int(b["interval_s"]),
+                        cfg,
+                        enabled=bool(b.get("enabled", True)),
+                        now=time.time(),
+                    )
+                self._audit(
+                    prin,
+                    "connector_config",
+                    source,
+                    json.dumps({k: v for k, v in b.items() if k != "source"}),
+                )
+                sched = scheduler.get_schedule(p, prin.tenant, source) or {}
+                row = dict(row)
+                row.setdefault("interval_s", sched.get("interval_s"))
+                return self._send(
+                    200,
+                    {
+                        "connector": row,
+                        "health": scheduler.health_for(p, prin.tenant, source),
+                        "status": "ok",
+                    },
+                )
+            except Exception as e:  # noqa: BLE001 — reported to the client, never a bare 500
+                return self._send(
+                    200,
+                    {
+                        "connector": conn_admin.get(p, prin.tenant, source)
+                        or {"source": source, "enabled": False, "allow": [], "interval_s": None},
+                        "health": {},
+                        "status": "error",
+                        "message": f"{type(e).__name__}: {e}",
+                    },
+                )
         if u.path == "/admin/sync":
             prin = self._require("admin")
             if not prin:

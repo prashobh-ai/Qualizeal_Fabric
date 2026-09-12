@@ -39,12 +39,21 @@ async function loadConnectors(){try{const d=await api('/admin/connectors');gate(
  catch(e){gate(e,'admin');if(e.status!==401&&e.status!==403)toast(e.message,'bad');throw e}}
 
 async function saveConnector(source,body){try{const out=await api('/admin/connectors',{method:'POST',body:Object.assign({source},body)});
- toast(source+' saved · '+(out.connector.enabled?'enabled':'disabled')+(body.interval_s?' · every '+body.interval_s+' s':''),'good');await loadConnectors()}catch(e){toast(e.message,'bad')}}
+ // T115 — read every field off a possibly-undefined response defensively; the
+ // server always returns a shaped body with a `status`, so a bad save shows the
+ // message instead of throwing on `out.connector.enabled`.
+ const c=out&&out.connector?out.connector:{};
+ if(out&&out.status==='error'){toast(source+': '+(out.message||'save failed'),'bad')}
+ else{toast(source+' saved · '+(c.enabled?'enabled':'disabled')+(body.interval_s?' · every '+body.interval_s+' s':''),'good')}}
+ catch(e){toast(e.message,'bad')}
+ finally{try{await loadConnectors()}catch(e){}}}
 
 async function syncNow(source){try{$('#runs-status').textContent='syncing '+source+'…';FORCE=4;schedulePoll();
  const out=await api('/admin/sync',{method:'POST',body:{source}});
- toast(source+': pulled '+num(out.pulled)+', ingested '+num(out.ingested)+', tombstoned '+num(out.tombstoned)+' · '+out.status,out.status==='ok'?'good':'warn');
- await Promise.all([loadConnectors(),loadRuns(),loadAudit()])}catch(e){toast(e.message,'bad');$('#runs-status').textContent=e.message}}
+ const st=(out&&out.status)||'done';
+ toast(source+': pulled '+num(out&&out.pulled)+', ingested '+num(out&&out.ingested)+', tombstoned '+num(out&&out.tombstoned)+' · '+st,st==='ok'?'good':'warn')}
+ catch(e){toast(e.message,'bad');$('#runs-status').textContent=e.message}
+ finally{try{await Promise.all([loadConnectors(),loadRuns(),loadAudit()])}catch(e){}}}
 
 async function runDue(){try{const out=await api('/admin/refresh/run-due',{method:'POST',body:{}});FORCE=3;schedulePoll();
  toast((out.ran||[]).length+' due source(s) refreshed','good');await Promise.all([loadConnectors(),loadRuns()])}catch(e){toast(e.message,'bad')}}

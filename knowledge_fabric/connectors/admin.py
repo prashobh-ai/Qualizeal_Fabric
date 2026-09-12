@@ -38,6 +38,8 @@ from . import registry
 __all__ = [
     "ALLOW_KEYS",
     "DEFAULT_ALLOW_KEY",
+    "KNOWN_SOURCES",
+    "is_known",
     "upsert",
     "get",
     "list_all",
@@ -50,17 +52,26 @@ __all__ = [
     "allow_key",
 ]
 
+# T115 — one source key per connector, everywhere.
+KNOWN_SOURCES: tuple[str, ...] = ("website", "files", "github", "jira", "confluence")
+
 #: connector-specific config key that carries its allow-list
 ALLOW_KEYS: dict[str, str] = {
     "github": "repos",
-    "github_live": "repos",
     "jira": "projects",
-    "jira_live": "projects",
     "confluence": "spaces",
     "files": "allow_ext",
 }
 #: key used for connectors without a known allow-list key
 DEFAULT_ALLOW_KEY = "allow"
+
+
+def is_known(source: str) -> bool:
+    """Whether ``source`` is one of the five canonical connector keys (T115).
+    The admin endpoint uses this to reject an unknown source with a shaped
+    ``status:"error"`` body rather than raising to the client."""
+    return source in KNOWN_SOURCES
+
 
 _SOURCE_RE = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 _AUDIT_SUBJECT = "system"
