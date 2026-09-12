@@ -212,8 +212,22 @@ function wireFeedback(){const t=curThread();if(!t)return;
    bar.querySelectorAll('.fbbtn').forEach(b=>b.disabled=true)};
   bar.querySelector('.up').onclick=e=>{e.stopPropagation();done('up')};
   bar.querySelector('.down').onclick=e=>{e.stopPropagation();
-   api('/feedback',{method:'POST',body:{question:turn.q,trace_id:turn.a.trajectory_id,
-    level:(turn.a.why||{}).level_name||'',verdict:'down'}}).catch(()=>{});done('down')}})}
+   api('/feedback',{method:'POST',body:feedbackBody(t,+bar.dataset.i)}).catch(()=>{});done('down')}})}
+// Capture the FULL context of the flagged turn so a curator can see what
+// happened in the chat: the exact question, what the AI actually answered, the
+// sources it cited, the persona/level it used, and the couple of turns before
+// it (coreference context). Without this the curator only saw the question.
+function feedbackBody(t,i){const turn=t.turns[i];const a=turn.a||{};
+ const cites=(a.citations||[]).map(c=>({title:c.document_title,where:c.coordinate_render,snippet:c.snippet}));
+ const prior=t.turns.slice(Math.max(0,i-2),i).map(x=>({q:x.q,a:(x.a||{}).result||(x.a||{}).answer_text||''}));
+ return {verdict:'down',question:turn.q,trace_id:a.trajectory_id,
+  level:(a.why||{}).level_name||'',
+  answer:a.result||a.answer_text||'',
+  kind:a.kind||'',lang:a.lang||'',
+  understood_as:a.understood_as||'',
+  persona:(a.role_view||{}).persona||'',
+  citations:cites,
+  context:prior};}
 
 // ===================== the card (L2.3) ===============================
 function bars(sig){const order=['retrieval','semantic','coverage','agreement','resolvable'];

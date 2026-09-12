@@ -50,6 +50,22 @@ _CSS = r"""
 .filterbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .filterbar input{min-width:220px}
 .queue li{margin:3px 0;font-size:13px}
+/* negative-feedback: the full chat context a reader flagged */
+.fb-detail{margin-top:4px}
+.fb-detail summary{cursor:pointer}
+.fb-body{margin-top:6px;padding:8px 10px;background:var(--panel);border:1px solid var(--line);
+ border-radius:8px;display:flex;flex-direction:column;gap:6px}
+.fb-answer .small{white-space:pre-wrap}
+/* T53 — curation mode switch: a real two-state segmented toggle */
+.modeswitch{display:inline-flex;align-items:center;gap:8px}
+.modeswitch .ms-label{font-size:12px;color:var(--mut);font-weight:600}
+.ms-track{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;
+ background:var(--panel2)}
+.ms-track .seg{border:0;background:transparent;cursor:pointer;font-size:12px;font-weight:600;
+ padding:4px 12px;color:var(--mut);line-height:1.4}
+.ms-track .seg:hover:not(.on){background:var(--panel)}
+.ms-track .seg.on{cursor:default;color:#fff;background:var(--good)}
+.modeswitch.manual .ms-track .seg.on{background:var(--warn)}
 /* T47 — repositories / insights / tables */
 .langbar{display:flex;height:10px;border-radius:6px;overflow:hidden;background:var(--panel2);
  margin:6px 0}

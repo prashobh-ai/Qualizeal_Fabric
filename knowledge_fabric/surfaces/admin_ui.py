@@ -46,6 +46,17 @@ _RUNS = card(
 _UPLOAD = card(
     "Bulk upload",
     '<div class="col">'
+    # Door 1 — pick real files from disk (PDF / DOCX / XLSX / images / MD / CSV …).
+    # They are read in the browser and sent as base64 to the same multi-format
+    # intake the connectors use; ACL applies to every file in the drop.
+    '<div class="row"><label class="btn sm" for="upload-files" style="cursor:pointer">Choose '
+    "files…</label>"
+    '<input id="upload-files" type="file" multiple style="display:none">'
+    '<select id="upload-file-acl"><option value="public">public</option>'
+    '<option value="restricted">restricted</option></select>'
+    '<span class="muted small" id="upload-files-hint">Documents are read in your browser and '
+    "uploaded as-is — nothing is sent until you press Upload.</span></div>"
+    # Door 2 — type/paste a document inline.
     '<div class="row"><input id="upload-filename" placeholder="filename" style="flex:1">'
     '<select id="upload-acl"><option value="public">public</option><option '
     'value="restricted">restricted</option></select>'

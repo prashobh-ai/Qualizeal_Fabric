@@ -50,6 +50,7 @@ __all__ = [
     "recommendation",
     "review_id",
     "on_ingest",
+    "settle_ingested",
     "accept",
     "reject",
     "delete",
@@ -444,6 +445,50 @@ def on_ingest(platform, tenant: str, doc, source: str) -> dict:
         "review_id": rid,
         "log_id": log_id,
     }
+
+
+def settle_ingested(platform, tenant: str, results: list[dict], source: str | None = None) -> dict:
+    """Apply the source's curation mode to a batch of freshly-ingested documents.
+
+    This is the ingest-time hook every *user-facing* intake door calls after the
+    pipeline has landed its documents (the admin/curator upload and the connector
+    sync). It is deliberately **not** invoked by the bootstrap corpus loader or
+    the test seed, so the authored corpus stays live-by-default (see the module
+    docstring) while everything a source or a person ingests afterwards obeys the
+    mode the curator set.
+
+    A source in **manual** mode holds each freshly-ingested document in the
+    review queue (state ``review``, held out of retrieval, logged ``ingested``)
+    until a curator accepts it — this is what :func:`on_ingest` does. A source in
+    **automated** mode (the default, and the whole authored/connector corpus) is
+    left exactly as the pipeline landed it: live and answerable, with no log row —
+    so automated ingestion is a genuine no-op here and never floods the review
+    queue or the timeline. Only manual-mode content is held and recorded.
+
+    ``source`` overrides the per-document source used to resolve the mode (the
+    connector sync passes its source; uploads let each document's own ``source``
+    decide). Returns ``{"ingested", "held", "live"}`` over the batch.
+    """
+    _guard(tenant)
+    held = live = 0
+    for r in results:
+        if not isinstance(r, dict) or r.get("status") not in ("ok", "updated"):
+            continue
+        doc_id = r.get("document_id")
+        doc = platform.documents.get(tenant, doc_id) if doc_id else None
+        if not doc:
+            continue
+        src = source or doc.get("source") or GLOBAL_SOURCE
+        # Automated is the default and covers the authored corpus + trusted
+        # connectors: leave those live-by-default, untouched and unlogged. Only
+        # a source the curator put in manual review is held back and recorded.
+        if get_mode(platform, tenant, src) != "manual":
+            live += 1
+            continue
+        outcome = on_ingest(platform, tenant, doc, src)
+        held += 1 if outcome["state"] == "review" else 0
+        live += 0 if outcome["state"] == "review" else 1
+    return {"ingested": held + live, "held": held, "live": live}
 
 
 def _resolve_target(platform, tenant: str, review: str) -> dict:
