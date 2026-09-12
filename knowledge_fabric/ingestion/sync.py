@@ -9,6 +9,7 @@ freshness (minutes since last sync) is recorded for the dashboard.
 
 from __future__ import annotations
 
+from .. import curation
 from ..connectors import registry
 from ..contracts.types import now_ms
 from .intake import IngestWorker, Intake
@@ -62,11 +63,16 @@ class SyncManager:
         results = self.worker.drain()
         self._save_cursor(tenant, source, next_cursor, submitted)
         ingested = [r for r in results if r["status"] in ("ok", "updated")]
+        # T53 — a synced document obeys this source's curation mode: manual holds
+        # it in the review queue (out of answers) until a curator accepts it;
+        # automated lets it go live at once.
+        settled = curation.settle_ingested(self.p, tenant, results, source=source)
         return {
             "tenant": tenant,
             "source": source,
             "pulled": submitted,
             "ingested": len(ingested),
+            "held_for_review": settled["held"],
             "noops": len([r for r in results if r["status"] == "noop"]),
             "tombstoned": len(tombstoned),
             "cursor": next_cursor,

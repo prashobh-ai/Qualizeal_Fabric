@@ -299,11 +299,16 @@ class Handler(BaseHTTPRequestHandler):
                 )
             res = worker.drain()
         ingested = [r for r in res if r["status"] in ("ok", "updated")]
+        # T53 — apply the source's curation mode: under manual mode a freshly
+        # uploaded document waits in the review queue (held out of answers) until
+        # a curator accepts it; under automated mode it goes live at once.
+        settled = curation.settle_ingested(p, prin.tenant, res)
         runs.finish(p, run_id, "ok", len(ingested))
         self._audit(prin, "upload", source_label, f"{len(files)} file(s), {len(ingested)} ingested")
         return {
             "uploaded": len(files),
             "ingested": len(ingested),
+            "held_for_review": settled["held"],
             "noops": len([r for r in res if r["status"] == "noop"]),
             "run_id": run_id,
             "dataset_version": versioning.current_dataset(p, prin.tenant),
@@ -957,6 +962,25 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(401, {"error": str(e)})
             b = self._body()
             if (b.get("verdict") or "down") == "down":
+                # Capture the FULL context of the flagged turn so a curator can
+                # reconstruct what happened in the chat — not just the question,
+                # but the answer the AI gave, the sources it cited, the persona
+                # and level it used, and the couple of turns before it. Citations
+                # and prior context are trimmed to a safe size before storing.
+                cites = [
+                    {
+                        "title": str(c.get("title", ""))[:200],
+                        "where": str(c.get("where", ""))[:120],
+                        "snippet": str(c.get("snippet", ""))[:400],
+                    }
+                    for c in (b.get("citations") or [])[:8]
+                    if isinstance(c, dict)
+                ]
+                context = [
+                    {"q": str(t.get("q", ""))[:400], "a": str(t.get("a", ""))[:800]}
+                    for t in (b.get("context") or [])[:3]
+                    if isinstance(t, dict)
+                ]
                 item = json.dumps(
                     {
                         "subject": prin.subject,
@@ -964,6 +988,14 @@ class Handler(BaseHTTPRequestHandler):
                         "trace_id": b.get("trace_id", ""),
                         "level": b.get("level", ""),
                         "note": b.get("note", ""),
+                        # T-feedback-context — what the AI actually answered
+                        "answer": str(b.get("answer", ""))[:2000],
+                        "kind": b.get("kind", ""),
+                        "lang": b.get("lang", ""),
+                        "understood_as": b.get("understood_as", ""),
+                        "persona": b.get("persona", ""),
+                        "citations": cites,
+                        "context": context,
                     }
                 )
                 p.curation.add(prin.tenant, item, "negative-feedback", now_ms())
