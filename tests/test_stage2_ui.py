@@ -458,17 +458,18 @@ class TestServedPages(unittest.TestCase):
             self.assertEqual(raw.decode("utf-8"), html)
 
     def test_signin_page_is_public(self):
-        # L1.4 — /signin is reachable with no session (it is where the gate
-        # sends the reader) and carries the lockup, the local IdP form and the
-        # disabled SSO placeholder.
+        # L1.4 / T117 — /signin is reachable with no session (it is where the
+        # gate sends the reader) and carries the lockup, the email+password
+        # form, the SSO button and the dev-only identity picker.
         code, ctype, raw = self._call("GET", "/signin")
         self.assertEqual(code, 200)
         body = raw.decode("utf-8")
         self.assertIn("Sign in to QualiZeal Knowledge Fabric", body)
         self.assertIn('id="signin-form"', body)
         self.assertIn("qualizeal-lockup.png", body)
-        self.assertIn("Single sign-on", body)  # SSO placeholder
-        self.assertIn("Showcase sign-in", body)  # demo identity picker
+        self.assertIn('id="su-pass"', body)  # T117 — real password field
+        self.assertIn('id="sso-btn"', body)  # SSO (shown when OIDC configured)
+        self.assertIn('id="demo-picker"', body)  # dev identity picker
 
     def test_login_shape_used_by_sign_in_bar(self):
         code, j = self._json("POST", "/login", {"tenant": T, "subject": "curator"})

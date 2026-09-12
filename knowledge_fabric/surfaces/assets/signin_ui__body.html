@@ -4,17 +4,15 @@
     <img class="lockup" src="__LOCKUP__" alt="QualiZeal Knowledge Fabric">
     <h1>Sign in to QualiZeal Knowledge Fabric</h1>
     <p class="sub">Internal knowledge for QualiZeal.</p>
-    <label for="su-user">User ID</label>
+    <label for="su-user">Email</label>
     <input id="su-user" name="user" autocomplete="username" placeholder="you@qualizeal.com">
     <label for="su-pass">Password</label>
     <input id="su-pass" name="pass" type="password" autocomplete="current-password" placeholder="••••••••">
     <button class="btn primary full" type="submit">Sign in</button>
-    <div class="sso" title="Anyone with a QualiZeal address signs in by default">
-      Single sign-on — anyone with a @qualizeal.com address signs in by default
-    </div>
+    <button class="btn full" type="button" id="sso-btn" hidden>Sign in with SSO</button>
     <div class="err" id="su-err"></div>
-    <div class="demo-picker" id="demo-picker">
-      <div class="lbl">Showcase sign-in</div>
+    <div class="demo-picker" id="demo-picker" hidden>
+      <div class="lbl">Dev sign-in (KF_DEV_LOGIN)</div>
       <div class="chips" id="demo-chips"></div>
     </div>
     <div class="signin-foot">&copy; QualiZeal. All rights reserved. &middot; __VERSION__</div>

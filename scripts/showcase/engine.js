@@ -821,6 +821,15 @@
         if (r.code === 400) return respond({ error: "enter your user id" }, 400);
         return respond({ error: "unknown user " + (body.subject || "") }, 404);
       }
+      // T117 — the real password endpoint. The static showcase has no user
+      // store, so email is the subject and the same demo/seed/SSO rules apply;
+      // an unknown or bad-password account is a 401 (never a passwordless entry).
+      if (path === "/api/auth/login") {
+        var ar = resolveLogin(body.email, body.password);
+        if (ar.login) return respond(ar.login);
+        if (ar.code === 400) return respond({ error: "enter your email" }, 400);
+        return respond({ error: "invalid credentials" }, 401);
+      }
       if (path === "/ask") return answerFor(subject, body.question || "", body.context)
         .then(function (a) { if (a && a.trajectory_id) EXPLAINS[a.trajectory_id] = a; return respond(a); });
       if (path === "/api/explain") {
@@ -837,6 +846,14 @@
       return respond({ ok: true, note: "showcase — action acknowledged (no server-side state on Pages)" });
     }
     // GET
+    // T117 — the static build always runs in dev-login mode (no OIDC on Pages),
+    // so the sign-in page keeps its email+password form and the dev picker.
+    if (path === "/api/auth/config") return respond({ mode: "password", sso: { enabled: false, label: "SSO" }, dev_login: true });
+    if (path === "/api/auth/whoami") {
+      if (!subject) return respond({ error: "not signed in" }, 401);
+      var wl = loginOf(subject) || {};
+      return respond({ subject: subject, roles: wl.roles || ["asker"], scopes: wl.scopes || ["public"], designation: wl.designation || "" });
+    }
     if (path === "/api/corpus") return respond(SNAP.corpus || {});
     // T82 — suggestions are baked per subject (so the reader's persona known
     // questions show) with a scope-key fallback for older snapshots.

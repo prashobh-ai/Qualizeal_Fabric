@@ -153,6 +153,10 @@ CREATE TABLE IF NOT EXISTS relationships (
     subject_kind TEXT, subject_id TEXT, relation TEXT, object_kind TEXT, object_id TEXT,
     evidence_kind TEXT, evidence_id TEXT, evidence_url TEXT, evidence_title TEXT, at INTEGER
 );
+CREATE TABLE IF NOT EXISTS users (
+    email TEXT PRIMARY KEY, tenant TEXT NOT NULL, roles TEXT, scopes TEXT, designation TEXT,
+    password_hash TEXT, status TEXT DEFAULT 'active', created_at INTEGER
+);
 CREATE INDEX IF NOT EXISTS ix_passages_tenant ON passages(tenant, index_version);
 CREATE INDEX IF NOT EXISTS ix_docs_tenant ON documents(tenant);
 CREATE INDEX IF NOT EXISTS ix_edges_tenant ON graph_edges(tenant, src);
