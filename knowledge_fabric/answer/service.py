@@ -48,6 +48,7 @@ from ..governance import authority
 from ..stores import versioning
 from ..telemetry import timing
 from . import aggregate, personas, reasoning
+from . import defaults as user_defaults
 from . import lang as langmod
 from . import registry as known
 from . import selector as sel
@@ -143,6 +144,10 @@ class AnswerService:
         conversation window before answering, and stamp ``understood_as`` when a
         rewrite happened; when the reference is ambiguous, ask back with chips."""
         understood = None
+        # T87 — apply the reader's stored defaults (persona view, depth, language,
+        # Explain auto-expand) to this request. No stored default → unchanged.
+        if not _nested:
+            principal = user_defaults.apply_to(principal, principal.tenant, principal.subject)
         if not _nested and context:
             res = self._resolve_context(principal, question, context)
             if res.clarify:
@@ -163,7 +168,20 @@ class AnswerService:
         if not _nested:
             answer.role_view = self._persona_view(principal, answer)
             self._answer_first(principal, answer)
+            self._apply_language(principal, answer)
         return answer
+
+    def _apply_language(self, principal, answer) -> None:
+        """T87 — render the finished answer in the reader's preferred output
+        language when they set one and it differs from the answer's language. A
+        single post-hoc pass, so it never disturbs retrieval (which stays on the
+        English source of truth) — only the rendered text and its ``lang``."""
+        pref = getattr(principal, "lang_pref", None)
+        if not pref or answer.kind != AnswerKind.ANSWER or (answer.lang or "en") == pref:
+            return
+        answer.answer_text = self._localize(answer.answer_text, pref, principal, answer.tier)
+        answer.result = answer.answer_text
+        answer.lang = pref
 
     def _answer_first(self, principal, answer) -> None:
         """T81/T84/T85 — the answer-first contract. The composed answer is the
@@ -178,8 +196,19 @@ class AnswerService:
             "available": answered,
             "offers": list(contract["offers"]) if answered else [],
             "trace_id": answer.trajectory_id,
+            # T87 — a reader who set "Explain auto-expand" gets the narrative
+            # opened with the answer; the UI honours this flag.
+            "auto": bool(answered and getattr(principal, "explain_auto", False)),
         }
         answer.governance = self._governance_line(principal.tenant, answer)
+
+    def _depth_cap(self, principal) -> int:
+        """How many sentences this answer may carry: the reader's stored depth
+        preference (T87) when set, else the persona's depth (T27)."""
+        pref = getattr(principal, "depth_pref", None)
+        if pref in personas.DEPTH_CAP:
+            return personas.DEPTH_CAP[pref]
+        return personas.depth_cap(principal.designation)
 
     def _governance_line(self, tenant, answer) -> dict | None:
         """T85 — source kind, authority and freshness for the answer's lead
@@ -377,12 +406,19 @@ class AnswerService:
     def _answer_scope(principal) -> list[str]:
         """The full-answer cache key scope: the accessible ACLs plus a persona
         sentinel, so each designation's persona-conditioned answer is cached
-        distinctly. The sentinel lives only in the cache key — never in the ACLs
+        distinctly. The sentinels live only in the cache key — never in the ACLs
         used for retrieval — so personas still share the persona-agnostic
-        retrieval cache and no persona ever widens what it can retrieve."""
-        return principal.accessible_acls() + [
+        retrieval cache and no persona ever widens what it can retrieve. T87 adds
+        a depth sentinel, so a reader's preferred depth composes its own answer
+        rather than serving another depth's cached one (language and Explain-auto
+        are applied post-cache, so they need no sentinel)."""
+        scope = principal.accessible_acls() + [
             f"@persona:{personas.persona_for(principal.designation)}"
         ]
+        depth = getattr(principal, "depth_pref", None)
+        if depth:
+            scope.append(f"@depth:{depth}")
+        return scope
 
     def _persona_boost(self, principal, tenant, fused):
         """Emphasis (T27): gently lift the grounded evidence a persona cares about
@@ -1487,7 +1523,7 @@ class AnswerService:
         # one block.
         prof = personas.profile_for(principal.designation)
         text, citations, *_ = self._compose_code(
-            rq, sel, personas.DEPTH_CAP[prof["depth"]], prof["emphasis"]
+            rq, sel, self._depth_cap(principal), prof["emphasis"]
         )
         if not citations:
             return None
@@ -1717,7 +1753,7 @@ class AnswerService:
         # headline (1) for an executive, brief (2) for delivery, full (3) for a
         # builder/quality/curator/admin/general reader. Facts stay grounded; the
         # persona only decides how much of the grounded answer to surface.
-        cap = personas.depth_cap(principal.designation)
+        cap = self._depth_cap(principal)
         emphasis = personas.profile_for(principal.designation)["emphasis"]
         code = self._compose_code(question, selected, cap, emphasis)
         if code is not None:

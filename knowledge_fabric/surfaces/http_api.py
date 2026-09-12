@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .. import curation, fabric_views
 from ..adapters import cloud
+from ..answer import defaults as user_defaults
 from ..answer import personas
 from ..answer import registry as known_registry
 from ..answer.service import AnswerService
@@ -430,6 +431,23 @@ class Handler(BaseHTTPRequestHandler):
                     "families": sorted(seen_family),
                     "persona": persona,
                     "known": reg.suggestions(persona),
+                },
+            )
+        if u.path == "/api/defaults":
+            # T87 — the reader's stored defaults (persona view, depth, language,
+            # Explain auto-expand) and the options the user menu offers. Any
+            # signed-in principal reads its own.
+            try:
+                prin = self._principal()
+            except PermissionError as e:
+                return self._send(401, {"error": str(e)})
+            return self._send(
+                200,
+                {
+                    "defaults": user_defaults.get(prin.tenant, prin.subject),
+                    "options": user_defaults.options(),
+                    "designation": prin.designation or "",
+                    "persona": personas.persona_for(prin.designation),
                 },
             )
         if u.path == "/api/corpus":
@@ -951,6 +969,16 @@ class Handler(BaseHTTPRequestHandler):
                 p.curation.add(prin.tenant, item, "negative-feedback", now_ms())
                 self._audit(prin, "feedback", b.get("trace_id", ""), "down")
             return self._send(200, {"ok": True})
+        if u.path == "/api/defaults":
+            # T87 — set the reader's own stored defaults; per user and audited.
+            try:
+                prin = self._principal()
+            except PermissionError as e:
+                return self._send(401, {"error": str(e)})
+            b = self._body()
+            stored = user_defaults.set(prin.tenant, prin.subject, b)
+            self._audit(prin, "defaults:set", prin.subject, json.dumps(stored, sort_keys=True))
+            return self._send(200, {"ok": True, "defaults": stored})
 
         # ---- curator -------------------------------------------------
         if u.path == "/curator/upload":
