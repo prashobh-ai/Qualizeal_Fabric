@@ -12,15 +12,14 @@
  * deploy base from the URL and sets window.KF_BASE / window.KF_ROUTES so the
  * one build serves any base path (Pages repo path, localhost, an AWS subpath).
  *
- * Serving order for POST /ask (T44/T45):
+ * Serving order for POST /ask (T44/T92):
  *   1. a BAKED answer — answers/<hash>.json, hash = sha256(norm(question))[:16],
- *      fetched over the REAL network (the bake at ingest, or the ask queue);
+ *      fetched over the REAL network (the fluent answer from the bake workflow);
  *   2. in-browser retrieval and facts — the snapshot's baked bank, then BM25
- *      over the exported index (Level 1/2 extractive);
- *   3. the ask queue — a Level 2/3 or gap answer with no baked file is stamped
- *      `queue: {eligible, hash, path}` so the Workspace offers "Get full
- *      answer" (an `ask` issue) and polls answers/<hash>.json for the result.
- * /answers/*.json and static assets pass through to the real fetch untouched.
+ *      over the exported index, composed by the open-source path (Level 1/2/3),
+ *      labelled "Open-source LLM".
+ * Every question is answered in place (T92): there is no "Get full answer"
+ * GitHub-issue detour. /answers/*.json and static assets pass through untouched.
  */
 (function () {
   "use strict";
@@ -419,12 +418,17 @@
     });
     return best.trim();
   }
+  // T91 — a word x 1.3 token estimate so the keyless browser answer shows a
+  // real input/output split on the card (the server counts with tiktoken).
+  function estTokens(s) { return Math.max(1, Math.round((String(s || "").split(/\s+/).filter(Boolean).length) * 1.3)); }
   function mkAnswer(level_name, level, text, citations, conf) {
+    var evidence = (citations || []).map(function (c) { return c.snippet || ""; }).join(" ");
+    var tin = estTokens(evidence || text), tout = estTokens(text);
     return {
       kind: "answer", answer_text: text, citations: citations || [], confidence: conf,
       grounding_score: conf, trajectory_id: "traj_ret_" + Math.random().toString(36).slice(2, 8),
-      cost: 0, tokens: 0, tier: "none", level: level, lang: "en", cache_hit: false, cost_saved: 0,
-      tokens_in: 0, tokens_out: 0, model_name: "demo model", complexity: "simple",
+      cost: 0, tokens: tin + tout, tier: "fast", level: level, lang: "en", cache_hit: false, cost_saved: 0,
+      tokens_in: tin, tokens_out: tout, model_name: "Open-source LLM · Extractive-NLG", complexity: "simple",
       authoritative_source: null, dataset_version: 1, reasoning: null,
       why: { level_name: level_name, explain: level_name === "discovery"
                ? "Searched the fabric; listed matching assets."
@@ -622,11 +626,9 @@
           if (s2) a = clarifyAnswer(s2, question, turns.map(function (t) { return t.question; }));
         }
         if (!a) a = gapAnswer(question);
-        // 3) the queue — Level 2/3 or a gap with no baked file can get the full
-        // answer from the agent; the Workspace offers it and polls the file.
-        var eligible = a.kind === "gap" || (a.kind === "answer" && Number(a.level) >= 2);
-        a.queue = { eligible: eligible, hash: b.hash, path: b.hash ? answersPath(b.hash) : "",
-                    question: rq, repo: window.KF_REPO || "prashobh-ai/QualiZeal_Fabric" };
+        // T92 — every question is answered in place by the open-source path; no
+        // GitHub-issue detour. A baked fluent answer (from the bake workflow) is
+        // served above when present; otherwise this composed answer stands as-is.
       }
       if (res.understood_as) a.understood_as = res.understood_as;  // shown under the bubble
       a.role_view = roleView(a, designation);  // T27 — the designation/persona lens

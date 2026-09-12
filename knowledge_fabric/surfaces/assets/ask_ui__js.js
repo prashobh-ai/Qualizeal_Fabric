@@ -18,44 +18,11 @@ const DECLINE="There isn't enough evidence in the fabric to answer that.";
 // the question key — the same normalisation the engine and the bake use.
 function norm(q){return String(q||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim()}
 
-// ===================== the ask queue (T45) ============================
-// On the static Workspace the engine stamps `queue:{eligible,hash,path,repo}`
-// on a Level 2/3 or gap answer that has no baked file. "Get full answer" opens
-// an `ask` issue (the ask.yml form, pre-filled); the page then polls
-// answers/<hash>.json every 20 s for 5 minutes and swaps the bubble when the
-// queue's answer lands. The live server never stamps `queue`, so no button.
-const QUEUE_POLL_MS=20000, QUEUE_POLL_FOR_MS=5*60*1000;
-let QUEUE=[];   // {question,hash,at,status:'pending'|'answered',model,cost_usd} — per browser
-function loadQueue(){try{QUEUE=JSON.parse(localStorage.getItem('kf.queue')||'[]')}catch(e){QUEUE=[]}}
-function saveQueue(){try{localStorage.setItem('kf.queue',JSON.stringify(QUEUE.slice(0,50)))}catch(e){}}
-function issueUrl(a){const q=a.queue||{};const question=q.question||'';
- const body={question,subject:(KF.session&&KF.session.subject)||'',context:{hash:q.hash||''}};
- return 'https://github.com/'+(q.repo||'prashobh-ai/QualiZeal_Fabric')+'/issues/new?template=ask.yml&labels=ask'+
-  '&title='+encodeURIComponent(question)+'&question='+encodeURIComponent(question)+'&body='+encodeURIComponent(JSON.stringify(body))}
-function queueBar(a,i){if(!a.queue||!a.queue.eligible||a.baked)return '';
- const pending=QUEUE.find(x=>x.hash===a.queue.hash&&x.status==='pending');
- return '<div class="queue-bar" data-i="'+i+'"><a class="btn sm primary qbtn" href="'+esc(issueUrl(a))+'" target="_blank" rel="noopener">Get full answer</a>'+
-  '<span class="muted small qstatus">'+(pending?'queued — waiting for the full answer…':'Queue this question for the full agent answer (about a minute).')+'</span></div>'}
-function wireQueue(){const t=curThread();if(!t)return;
- $$('#messages .queue-bar .qbtn').forEach(b=>b.onclick=()=>{const turn=t.turns[+b.closest('.queue-bar').dataset.i];if(turn)startPoll(turn)})}
-function startPoll(turn){const q=turn.a.queue;if(!q||!q.hash)return;
- if(!QUEUE.some(x=>x.hash===q.hash))QUEUE.unshift({question:q.question,hash:q.hash,at:Date.now(),status:'pending'});
- saveQueue();renderUsage();
- const bar=$('#messages .queue-bar[data-i="'+turn._i+'"] .qstatus');if(bar)bar.textContent='queued — waiting for the full answer…';
- const t0=Date.now();
- const tick=async()=>{try{const r=await fetch((KF.base()||'')+'/'+q.path,{cache:'no-store'});
-   if(r.ok){const j=await r.json();if(j&&j.kind){applyFull(turn,j);return}}}catch(e){}
-  if(Date.now()-t0<QUEUE_POLL_FOR_MS)setTimeout(tick,QUEUE_POLL_MS);
-  else{const el=$('#messages .queue-bar[data-i="'+turn._i+'"] .qstatus');if(el)el.textContent='still queued — check back later or open the issue.'}};
- setTimeout(tick,QUEUE_POLL_MS)}
-function applyFull(turn,j){const a=Object.assign({},j);
- a.model_name=j.model||a.model_name||'';a.cost=Number(j.cost_usd!=null?j.cost_usd:a.cost)||0;
- a.baked={source:j.source||'queue',asked_at:j.asked_at||'',model:j.model||'',cost_usd:Number(j.cost_usd)||0,steps:(j.steps||[]).length};
- a.why=a.why||{level_name:'baked',explain:'Served from the queue answer.',reasons:[],signals:{},retrieved:(a.citations||[]).length};
- a.role_view=turn.a.role_view;a._ms=turn.a._ms;turn.a=a;
- const row=QUEUE.find(x=>x.hash===j.question_hash||norm(x.question)===norm(j.question||''));
- if(row){row.status='answered';row.model=a.model_name;row.cost_usd=a.cost;}
- saveQueue();saveThreads();renderMessages();selectAnswer(turn);toast('Full answer arrived.','good')}
+// T92 — the GitHub-issue "ask queue" is gone. Every question is answered in
+// place: the live server answers via the agent or the open-source fallback, and
+// the static Workspace answers via the browser open-source path (labelled
+// "Open-source LLM"). Baked fluent answers from the bake workflow are still
+// served by the engine when present; nothing ever leaves the app to an issue.
 
 // ===================== threads (per-session) =========================
 let THREADS=[], CUR=null;
@@ -83,7 +50,7 @@ function renderMessages(){const box=$('#messages');const t=curThread();
      ?'<div class="understood">understood as: '+esc(tn.a.understood_as)+'</div>':'')+
    aiBlock(tn.a,i)+'</div>').join('');
  $$('#messages .msg.ai').forEach(el=>el.onclick=()=>selectAnswer(t.turns[+el.dataset.i]));
- wireCites();wireFeedback();wireClarify();wireQueue();wireExplain();box.scrollTop=box.scrollHeight}
+ wireCites();wireFeedback();wireClarify();wireExplain();box.scrollTop=box.scrollHeight}
 // T81 — the Explain affordance buttons fire POST /api/explain on click.
 function wireExplain(){$$('#messages .explain-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();runExplain(b)})}
 // a reader clicks one of the clarify's offered questions -> ask it straight away.
@@ -109,7 +76,7 @@ function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
  const baked=a.baked?'<span class="pill info" title="'+esc(a.baked.asked_at||'')+'">'+(a.baked.source==='queue'?'full answer':'baked')+'</span>':'';
  const gov=a.kind==='answer'?govLine(a):'';
  const explain=a.kind==='answer'?explainBar(a,i):'';
- return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+baked+'</div>'+stepsHtml(a)+body+gov+explain+roleLens(a)+queueBar(a,i)+fb+'</div>'}
+ return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+baked+'</div>'+stepsHtml(a)+body+gov+explain+roleLens(a)+fb+'</div>'}
 // T85 — the governance line under every answer: source kind, authority, and
 // freshness; amber + a "show newer sources" nudge when the source is stale.
 function govLine(a){const g=a.governance;if(!g)return '';
@@ -254,7 +221,7 @@ function card(a){const box=$('#answer-card');const w=a.why||{};const lw=levelWor
  rows.push(['Model',modelLabel(a)]);
  // T44/T45 — an answer served from answers/<hash>.json shows where it came
  // from and the model + cost recorded in the file.
- if(a.baked)rows.push(['Full answer','<span class="pill info">'+esc(a.baked.source==='queue'?'ask queue':'bake')+'</span> '+
+ if(a.baked)rows.push(['Full answer','<span class="pill info">'+esc(a.baked.source||'bake')+'</span> '+
    esc(a.baked.model||'no model')+' &middot; '+money(a.baked.cost_usd)+(a.baked.steps?' &middot; '+a.baked.steps+' step(s)':'')]);
  rows.push(['Moved levels',esc(reasonWord(a))]);
  // --- under Details ---
@@ -422,13 +389,6 @@ function renderUsage(){const box=$('#usage-body');if(!USAGE){return}
   html+='<div class="kv" style="margin-top:10px"><span>Fabric budget</span><b>'+money(b.spent)+' / '+money(b.cap)+'</b></div>'+
    '<div class="trk"><i style="width:'+(used*100).toFixed(1)+'%"></i></div>';}
  html+='<div class="kv"><span>Speech seconds</span><b><span id="speech-secs">'+(SPEECH_SECS?SPEECH_SECS+'s':'—')+'</span> <span class="muted small">(with voice)</span></b></div>';
- // T45 — the reader's queued questions: the server's list (answers baked by
- // the queue for this subject) merged with what this browser queued.
- const seen={},queued=[];
- (USAGE.queued||[]).concat(QUEUE).forEach(x=>{const k=x.hash||norm(x.question);if(!k||seen[k])return;seen[k]=1;queued.push(x)});
- if(queued.length){html+='<div class="kv" style="margin-top:10px"><span>Queued questions</span><b>'+queued.length+'</b></div><ul class="queue-list">'+
-  queued.slice(0,8).map(x=>'<li><span class="pill '+(x.status==='answered'?'good':'warn')+'">'+esc(x.status||'answered')+'</span> '+esc(x.question||'')+
-   (x.model?' <span class="muted small">'+esc(x.model)+' &middot; '+money(x.cost_usd)+'</span>':'')+'</li>').join('')+'</ul>';}
  box.innerHTML=html;
  $$('#usage-body .win button').forEach(bt=>bt.onclick=()=>{USE_WIN=bt.dataset.w;renderUsage()})}
 
@@ -539,7 +499,7 @@ async function loadProvider(){const el=$('#provider-badge');if(!el)return;
   el.innerHTML='<span class="dot" style="background:'+esc(p.dot||'#5A6B7C')+'"></span>'+esc(p.label);
   el.classList.add('on');}
  catch(e){el.classList.remove('on')}}
-function boot(){loadThreads();loadQueue();if(!THREADS.length){CUR=null}else{CUR=THREADS[0].id}
+function boot(){loadThreads();if(!THREADS.length){CUR=null}else{CUR=THREADS[0].id}
  renderThreads();renderMessages();
  if(KF.session){corpusStrip();loadUsage();loadProvider()}else{gate({status:401,message:''},'asker')}}
 window.KF_ON_SESSION=s=>{gate(null);if(s){corpusStrip();loadUsage();samples();loadProvider();loadPrefs();$('#ask-status').textContent='ready for '+s.subject}

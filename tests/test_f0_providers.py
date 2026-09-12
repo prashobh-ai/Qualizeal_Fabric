@@ -1,9 +1,11 @@
 """F0.3 → T35 — Anthropic-first provider selection and doctor model-id check.
 
-T35 replaced every silent fallback: a configured-but-unreachable provider
-raises ``ProviderUnavailable``; keyless must be explicit (``extractive``/``off``).
-The Anthropic API is never actually called: `urllib.request.urlopen` is
-patched so tests run without a network connection (or a real key).
+T35 replaced every silent mock fallback: an explicitly-configured but
+unreachable provider raises ``ProviderUnavailable`` (e.g. ``anthropic`` with no
+key). T91 makes ``auto`` the default, so an unset mode with no key answers via
+the open-source fallback rather than raising; the loud failure is now reserved
+for an explicit provider mode. The Anthropic API is never actually called:
+`urllib.request.urlopen` is patched so tests run without a network (or a key).
 """
 
 from __future__ import annotations
@@ -21,8 +23,9 @@ os.environ.setdefault("KF_DATA_ROOT", tempfile.mkdtemp(prefix="kf-ledger-"))
 
 
 class TestBuildModelClient(unittest.TestCase):
-    """`KF_MODEL_MODE` selects the provider; anthropic is the default and
-    REQUIRES its key — there is no silent mock fallback (T35)."""
+    """`KF_MODEL_MODE` selects the provider; ``auto`` is the default (T91) —
+    a verified key wins, else the open-source fallback answers keyless. An
+    explicit ``anthropic`` still REQUIRES its key (no silent mock fallback, T35)."""
 
     def setUp(self):
         # Snapshot and clear the four env vars this test touches.
@@ -46,12 +49,17 @@ class TestBuildModelClient(unittest.TestCase):
             else:
                 os.environ[k] = v
 
-    def test_default_without_key_is_loud(self):
-        with self.assertRaises(model.ProviderUnavailable) as cm:
-            model.build_model_client()
-        self.assertIn("ANTHROPIC_API_KEY", str(cm.exception))
+    def test_default_without_key_answers_open_source(self):
+        # T91 — the default is now ``auto``: with no key it falls through to the
+        # open-source fallback (a usable keyless client) instead of raising.
+        from knowledge_fabric.adapters import oss_model
+
+        client = model.build_model_client()
+        self.assertIsInstance(client, oss_model.OSSModelClient)
+        self.assertTrue(client.available())
 
     def test_default_is_anthropic_when_key_set(self):
+        # ``auto`` still prefers a verified provider key.
         os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
         client = model.build_model_client()
         self.assertIsInstance(client, model.AnthropicModelClient)

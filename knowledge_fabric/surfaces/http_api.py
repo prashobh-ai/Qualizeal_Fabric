@@ -184,7 +184,7 @@ def _provider_badge(p) -> dict:
     if name == "OSSModelClient" and hasattr(client, "provider_label"):
         lab = client.provider_label()
         return {
-            "provider": "Open-source",
+            "provider": "Open-source LLM",
             "model": lab.get("model", ""),
             "dot": lab.get("dot", "#0CA678"),
             "label": f"Open-source LLM · {lab.get('model', '')}",

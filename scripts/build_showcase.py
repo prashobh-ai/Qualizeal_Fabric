@@ -200,7 +200,8 @@ CURATOR_GETS = [
     "/curator/timeline",  # T54: the ingestion timeline (per-month stacks)
     "/curator/registry",  # T82: the governed known-question registry
 ]
-# T45 — the Workspace's "Get full answer" opens an `ask` issue on this repo.
+# The repo slug for GitHub deep-links (source/citation links). T92 removed the
+# "Get full answer" issue detour; every question now answers in place.
 KF_REPO = os.environ.get("GITHUB_REPOSITORY") or "prashobh-ai/QualiZeal_Fabric"
 
 

@@ -98,8 +98,8 @@ def model_for_tier(tier: str) -> str:
     id (``resolve_models``); the mock tiers keep their ``kf-mock-*`` names."""
     if tier in ("", "none", None):
         return "none (extractive core)"
-    mode = (os.environ.get("KF_MODEL_MODE") or "anthropic").lower()
-    if mode == "anthropic":
+    mode = (os.environ.get("KF_MODEL_MODE") or "auto").lower()
+    if mode in ("anthropic", "auto"):
         try:
             small, large = resolve_models()
         except ModelNotAllowed:
@@ -393,16 +393,19 @@ def _oss_client() -> object:
 def build_model_client() -> object:
     """Construct the configured provider or raise — never a silent mock.
 
-    * ``anthropic`` (the default when unset) — requires ``ANTHROPIC_API_KEY``.
-    * ``auto`` — anthropic when its key verifies, else the open-source fallback,
-      else the extractive core; a ``ProviderUnavailable`` from anthropic falls
-      through rather than raising, so ``auto`` always yields a usable client.
+    * ``auto`` (the default when unset) — anthropic when its key verifies, else
+      the open-source fallback, else the extractive core; a ``ProviderUnavailable``
+      from anthropic falls through rather than raising, so ``auto`` always yields a
+      usable client (T91 — keyless deployments answer instead of failing).
+    * ``anthropic`` — requires ``ANTHROPIC_API_KEY``; raises if unset.
     * ``oss`` — the always-available open-source fallback (T52), shown honestly.
     * ``extractive`` / ``off`` — the keyless extractive core; must be explicit.
     * ``mock`` — an explicit test double.
     * ``openai`` / ``hosted`` — requires the hosted endpoint + key.
     """
-    mode = (os.environ.get("KF_MODEL_MODE") or "anthropic").lower()
+    # T91 — ``auto`` is the default so a keyless deployment answers with the
+    # open-source fallback instead of raising; a verified provider key still wins.
+    mode = (os.environ.get("KF_MODEL_MODE") or "auto").lower()
     if mode in KEYLESS_MODES:
         return DisabledModelClient()
     if mode == "mock":
