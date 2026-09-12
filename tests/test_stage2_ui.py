@@ -215,9 +215,9 @@ class TestMarkup(unittest.TestCase):
                 self.assertNotIn('href="http', html)
                 self.assertNotIn("@import", html)
                 self.assertNotIn("http://", html)
-                # The one outbound NAVIGATION the product needs is the Workspace
-                # "Get full answer" anchor to the `ask` issue form on GitHub (T45),
-                # assembled at click time — never a resource that is loaded.
+                # The only https URLs allowed are GitHub deep-links (source /
+                # citation anchors), assembled at click time — never a loaded
+                # resource. (T92 removed the "Get full answer" issue detour.)
                 for url in re.findall(r"https://[\w./-]+", html):
                     self.assertTrue(url.startswith("https://github.com/"), f"{name}: {url}")
                 # any <link>/<script src> must point at /static (same origin)
