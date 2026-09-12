@@ -39,6 +39,19 @@
       <div class="s" data-key="images"><div class="n" id="tile-images">0</div><div class="l">Images</div></div>
     </div>
 
+    <!-- T87 — stored per-user defaults: set once, applied to every answer. -->
+    <details class="prefs" id="prefs">
+      <summary>Preferences <span class="muted small" id="prefs-note"></span></summary>
+      <div class="prefs-body">
+        <label>Persona view <select id="pref-persona"></select></label>
+        <label>Depth <select id="pref-depth"></select></label>
+        <label>Language <select id="pref-language"></select></label>
+        <label class="chk"><input type="checkbox" id="pref-explain-auto"> Auto-expand Explain</label>
+        <button class="btn sm primary" id="pref-save" type="button">Save defaults</button>
+        <span class="hint" id="pref-status"></span>
+      </div>
+    </details>
+
     <div class="messages" id="messages"></div>
 
     <div class="composer">

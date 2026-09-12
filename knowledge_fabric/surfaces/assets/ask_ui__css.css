@@ -170,3 +170,10 @@ main{max-width:none;padding:0;display:flex;flex-direction:column}
 .explainbar .explain-out{flex-basis:100%}
 .explanation{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;
  font-size:13px;line-height:1.5;margin-top:4px;white-space:normal}
+/* T87 — the per-user defaults (Preferences) control */
+.prefs{margin:8px 0;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.prefs summary{cursor:pointer;padding:6px 10px;font-size:13px;font-weight:600}
+.prefs-body{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:8px 10px;border-top:1px solid var(--line)}
+.prefs-body label{font-size:12px;color:var(--qz-soft);display:flex;gap:5px;align-items:center}
+.prefs-body label.chk{color:var(--fg)}
+.prefs-body select{font-size:12px;padding:2px 6px}

@@ -303,6 +303,14 @@ class Principal:
     # how an answer is framed and pitched; it never widens what is retrievable
     # (that is `scopes`/ACL, enforced before ranking).
     designation: str = ""
+    # T87 — the reader's stored defaults, loaded from user_defaults and applied
+    # to every answer (a set value overrides the derived default; None keeps the
+    # prior behaviour). They shape framing/depth/language/Explain — never what is
+    # retrievable (that stays scopes/ACL, enforced before ranking).
+    persona_pref: str | None = None
+    depth_pref: str | None = None
+    lang_pref: str | None = None
+    explain_auto: bool = False
 
     def accessible_acls(self) -> list[str]:
         acls = set(self.scopes) | {"public"}
