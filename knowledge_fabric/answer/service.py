@@ -1936,6 +1936,7 @@ class AnswerService:
             authoritative_source=pay.get("authoritative_source"),
             dataset_version=pay.get("dataset_version", 0),
             reasoning=pay.get("reasoning"),
+            thinking_tokens=int(pay.get("thinking_tokens", 0) or 0),
         )
 
     def _plain(self, kind, text, trace_id, tenant, span, g, qlang, principal, dsv=0):

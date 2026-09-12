@@ -364,6 +364,13 @@ def run(
             "complexity": "complex",
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
+            # T95 — every tool-loop turn but the final synthesis is reasoning
+            # ("thinking"); the final step's output is the answer text.
+            "thinking_tokens": max(
+                0, (tokens_in + tokens_out) - int((steps[-1] or {}).get("tokens_out", 0) or 0)
+            )
+            if steps
+            else 0,
         }
         if outcome == "clarify" and clarify:
             span.set(

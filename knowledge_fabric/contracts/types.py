@@ -223,6 +223,7 @@ class Answer:
     cost_saved: float = 0.0
     tokens_in: int = 0
     tokens_out: int = 0
+    thinking_tokens: int = 0  # T95 — reasoning/tool-loop tokens before final synthesis
     model_name: str = ""  # which model ran (multi-model gateway)
     complexity: str = ""  # simple | medium | complex
     authoritative_source: dict | None = None
@@ -253,6 +254,7 @@ class Answer:
             "cost_saved": round(self.cost_saved, 6),
             "tokens_in": self.tokens_in,
             "tokens_out": self.tokens_out,
+            "thinking_tokens": self.thinking_tokens,
             "model_name": self.model_name,
             "complexity": self.complexity,
             "authoritative_source": self.authoritative_source,
