@@ -60,14 +60,17 @@ jobs:
       - name: Check out fabric-data (clone, or create the orphan branch)
         run: python -m knowledge_fabric.fabric_data_git checkout --root fabric-data
 
+      - name: Preflight — prove each source's credential against a live call (T124)
+        # Runs BEFORE the Anthropic provider check on purpose: the four source
+        # credentials (GitHub/Jira/Confluence/website) are independent of the
+        # Anthropic key, so a rejected/expired ANTHROPIC_API_KEY must not hide
+        # whether the source keys pull. One authenticated call per source; a
+        # set-but-failing secret stops the build with the exact reason
+        # (401/403/404/network) before an ingest is spent.
+        run: python scripts/preflight_sources.py
+
       - name: Provider check — pin the models and prove the key (T35)
         run: python scripts/doctor.py --require anthropic
-
-      - name: Preflight — prove each source's credential against a live call (T124)
-        # One authenticated call per source; a set-but-failing secret stops the
-        # build here with the exact reason (401/403/404/network), so a bad token
-        # never surfaces as an empty tile in front of leadership.
-        run: python scripts/preflight_sources.py
 
       - name: Ingest every source, analyse, bake (T44/T46)
         run: >
