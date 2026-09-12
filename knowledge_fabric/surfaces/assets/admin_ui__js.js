@@ -186,9 +186,28 @@ function showCoverageCell(dt,persona){if(!COVERAGE)return;
    (c.questions||[]).map(q=>'<li><span class="pill '+(q.ok?'good':'bad')+'">'+(q.ok?'ok':q.kind)+'</span> '+esc(q.question)+(q.cited&&q.cited.length?' <span class="muted small">→ '+esc((q.cited||[]).join(', '))+'</span>':'')+'</li>').join('')+'</ul>'}
 async function loadCoverage(){try{renderCoverage(await api('/admin/coverage'))}catch(e){if(e.status!==404)toast(e.message,'bad')}}
 
+// ---------------------------------------------------------------- T86 service levels
+function pctm(x){return (x==null)?'—':Math.round(x)+' ms'}
+function shr(x){return (x==null)?'—':Math.round(x*100)+'%'}
+function renderSLA(rep){const h=rep.headline||{};
+ $('#sla-headline').className='';
+ $('#sla-headline').innerHTML='<div class="pill good" style="font-size:13px">'+esc(h.sla_line||'')+'</div>'+
+   '<div class="muted small" style="margin-top:6px">'+esc(h.reading_line||'')+'</div>'+
+   '<div class="row" style="margin-top:8px;gap:14px;flex-wrap:wrap">'+
+   '<span class="kv"><span>Answers</span><b>'+num(rep.n_answers||0)+'</b></span>'+
+   '<span class="kv"><span>Fast path</span><b>'+shr(h.fast_share)+'</b></span>'+
+   '<span class="kv"><span>Agent</span><b>'+shr(h.agent_share)+'</b></span>'+
+   '<span class="kv"><span>Explain rate</span><b>'+shr(h.explain_rate)+'</b></span>'+
+   '<span class="kv"><span>Cost/answer</span><b>$'+Number(h.cost_per_answer||0).toFixed(5)+'</b></span></div>';
+ const pr=(rep.by_persona||[]).map(r=>'<tr><td>'+esc(r.persona)+'</td><td>'+num(r.n)+'</td><td>'+pctm(r.p50_ms)+'</td><td>'+pctm(r.p95_ms)+'</td><td>'+shr(r.fast_share)+'</td><td>'+shr(r.agent_share)+'</td><td>'+shr(r.explain_rate)+'</td><td>$'+Number(r.cost_per_answer||0).toFixed(5)+'</td></tr>').join('');
+ $('#sla-persona').querySelector('tbody').innerHTML=pr||'<tr><td colspan="8" class="empty">No answers recorded yet.</td></tr>';
+ const dr=(rep.by_data_type||[]).map(r=>'<tr><td>'+esc(r.data_type)+'</td><td>'+num(r.n)+'</td><td>'+pctm(r.p50_ms)+'</td><td>'+pctm(r.p95_ms)+'</td><td>'+shr(r.fast_share)+'</td><td>'+shr(r.agent_share)+'</td><td>$'+Number(r.cost_per_answer||0).toFixed(5)+'</td></tr>').join('');
+ $('#sla-datatype').querySelector('tbody').innerHTML=dr||'<tr><td colspan="7" class="empty">No answers recorded yet.</td></tr>'}
+async function loadSLA(){try{renderSLA(await api('/admin/service-levels'))}catch(e){if(e.status!==404)toast(e.message,'bad')}}
+
 // ---------------------------------------------------------------- boot
 async function loadAll(){try{await loadConnectors()}catch(e){return}
- await Promise.all([loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources(),loadCoverage()]);
+ await Promise.all([loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources(),loadCoverage(),loadSLA()]);
  if(await loadRuns())schedulePoll()}
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{$('#connectors').innerHTML='';gate({status:401,message:''},'admin')}};
 KF.initBar({preferRole:'admin'});

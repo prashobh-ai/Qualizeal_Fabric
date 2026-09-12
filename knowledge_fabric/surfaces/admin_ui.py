@@ -200,8 +200,29 @@ _COVERAGE = card(
     right='<span class="pill" id="coverage-verdict"></span>',
 )
 
+# T86 — the business SLA & path panel: time-to-answer (median/p95) per persona
+# and per data type, the fast-vs-agent split, explain-request rate and cost per
+# answer, under a headline SLA line.
+_SLA = card(
+    "Service levels — time to answer",
+    '<div id="sla-headline" class="empty">Sign in as an admin to load the service '
+    "levels.</div>"
+    '<div class="grid two" style="margin-top:10px">'
+    '<div><div class="section-title">By persona</div><div class="tablewrap">'
+    '<table id="sla-persona"><thead><tr><th>Persona</th><th>n</th><th>median</th>'
+    "<th>p95</th><th>fast</th><th>agent</th><th>explain</th><th>$/answer</th></tr></thead>"
+    "<tbody></tbody></table></div></div>"
+    '<div><div class="section-title">By data type</div><div class="tablewrap">'
+    '<table id="sla-datatype"><thead><tr><th>Data type</th><th>n</th><th>median</th>'
+    "<th>p95</th><th>fast</th><th>agent</th><th>$/answer</th></tr></thead>"
+    "<tbody></tbody></table></div></div></div>",
+    "sla-panel",
+    right='<span class="muted small">median · p95 · fast/agent · explain rate · cost</span>',
+)
+
 _BODY = (
     _CONNECTORS
+    + f'<div style="margin-top:14px">{_SLA}</div>'
     + f'<div style="margin-top:14px">{_COVERAGE}</div>'
     + f'<div style="margin-top:14px">{_SOURCES}</div>'
     + f'<div style="margin-top:14px">{_MODELS}</div>'
