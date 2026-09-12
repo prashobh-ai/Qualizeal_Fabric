@@ -357,7 +357,7 @@ def tool_provider_status(platform, tenant: str) -> dict:
         provider, model_name = "Claude", large
     elif name == "OSSModelClient" and hasattr(client, "provider_label"):
         lab = client.provider_label()
-        provider, model_name = "Open-source", lab.get("model", "")
+        provider, model_name = "Open-source LLM", lab.get("model", "")
     else:
         provider, model_name = "Extractive", "core"
     return {

@@ -142,10 +142,10 @@ def provider_label() -> dict:
     summariser is loaded, otherwise the deterministic ``Extractive-NLG`` path."""
     name = _summarizer_name()
     return {
-        "provider": "Open-source",
+        "provider": "Open-source LLM",
         "model": name,
         "dot": _DOT,
-        "label": f"Open-source · {name}",
+        "label": f"Open-source LLM · {name}",
     }
 
 
@@ -360,6 +360,13 @@ class OSSModelClient:
 
     def available(self) -> bool:
         return True
+
+    def provider_label(self) -> dict:
+        """The provider badge for this client — ``Open-source LLM · <summariser>``.
+        A method (not only the module function) so surfaces that probe
+        ``hasattr(client, "provider_label")`` label the open-source path honestly
+        instead of falling through to the extractive core."""
+        return provider_label()
 
     # -- shared ledgered run ------------------------------------------------
     def _record(self, purpose: str, tin: int, tout: int, latency_ms: float, opts: dict) -> str:
