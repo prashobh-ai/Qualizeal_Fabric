@@ -195,6 +195,50 @@ class PassageRepo:
         )
         return [self._mk(r) for r in rows]
 
+    @staticmethod
+    def _reading_order(p: Passage) -> tuple:
+        """A stable in-document reading-order key from a passage's coordinate:
+        page → paragraph for prose, start line for code, then id as a tiebreak."""
+        loc = p.coordinate.locator or {}
+
+        def _int(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return 0
+
+        return (
+            _int(loc.get("page", 0)),
+            _int(loc.get("paragraph", 0)),
+            _int(loc.get("start_line", loc.get("line", 0))),
+            _int(loc.get("start_s", 0)),
+            p.id,
+        )
+
+    def context(self, tenant: str, passage_id: str, radius: int = 1) -> dict | None:
+        """T93 — a cited passage plus its in-document neighbours, so a citation can
+        expand to the paragraph in context. Returns ``{"passage", "before",
+        "after"}`` (``before``/``after`` are up to ``radius`` sibling passages in
+        reading order) or ``None`` when the passage is unknown. Live (non-superseded)
+        passages only, so a rolled-back version never leaks."""
+        _guard(tenant)
+        target = self.get(tenant, passage_id)
+        if target is None:
+            return None
+        sibs = sorted(
+            (p for p in self.by_document(tenant, target.document_id) if p.superseded_by is None),
+            key=self._reading_order,
+        )
+        idx = next((i for i, p in enumerate(sibs) if p.id == passage_id), None)
+        if idx is None:  # target is superseded; still return it alone
+            return {"passage": target, "before": [], "after": []}
+        r = max(0, int(radius or 0))
+        return {
+            "passage": target,
+            "before": sibs[max(0, idx - r) : idx],
+            "after": sibs[idx + 1 : idx + 1 + r],
+        }
+
     def supersede_document(self, tenant: str, document_id: str, new_version: int) -> None:
         _guard(tenant)
         self.db.execute(
