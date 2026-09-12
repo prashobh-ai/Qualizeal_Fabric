@@ -788,6 +788,16 @@ class Handler(BaseHTTPRequestHandler):
             report["selection"] = cloud.selection(dict(os.environ))
             return self._send(200, report)
 
+        if u.path == "/admin/coverage":
+            # T83 — the audience coverage matrix (data type × persona). Served
+            # from the generated data/coverage.json when present; otherwise
+            # computed once over the self-contained coverage corpus and cached.
+            prin = self._require("admin")
+            if not prin:
+                return
+            rep = fabric_views.coverage_matrix()
+            return self._send(200, rep)
+
         # ---- T47: fabric-data views (repositories, tables, insights) -----
         if u.path == "/curator/repositories":
             prin = self._require("curate")
