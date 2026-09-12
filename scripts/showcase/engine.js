@@ -630,9 +630,34 @@
       }
       if (res.understood_as) a.understood_as = res.understood_as;  // shown under the bubble
       a.role_view = roleView(a, designation);  // T27 — the designation/persona lens
+      answerFirst(a, designation);  // T81/T84/T85 — result + Explain offers + governance line
       bumpUsage(subject, a);
       return a;
     });
+  }
+  // T84 — the per-persona Explain offers, a verbatim mirror of personas.CONTRACT.
+  var PERSONA_CONTRACT = {
+    developer: ["How it works", "Callers", "Dependencies"],
+    quality: ["Edge cases", "Coverage gaps"],
+    delivery: ["Why?", "Break down", "Compare"],
+    executive: ["Why?", "Break down"],
+    curation: ["Audit trail", "Show working"],
+    operations: ["Audit trail", "Cost & level"],
+    general: ["Why?", "Show working"]
+  };
+  function answerFirst(a, designation) {
+    a.result = a.answer_text;  // T81 — the direct answer, rendered immediately
+    var answered = a.kind === "answer";
+    var offers = PERSONA_CONTRACT[personaFor(designation)] || PERSONA_CONTRACT.general;
+    a.explain = { available: answered, offers: answered ? offers.slice() : [], trace_id: a.trajectory_id };
+    var c0 = (a.citations || [])[0];
+    a.governance = (answered && c0) ? {
+      source_kind: c0.source || (c0.coordinate && c0.coordinate.kind) || "document",
+      authority: a.authoritative_source ? (a.authoritative_source.source || "authoritative") : "cited",
+      freshness: SNAP.as_of || "as of the last fabric build",
+      stale: false,
+      document_id: c0.document_id
+    } : null;
   }
   function gapAnswer(question) {
     return {
@@ -758,6 +783,32 @@
     return undefined;
   }
 
+  // T81 — the last answers, keyed by trajectory id, so POST /api/explain can
+  // produce the working from the same evidence (browser-side, model-free).
+  var EXPLAINS = {};
+  function buildExplain(a) {
+    var lines = [];
+    var w = a.why || {};
+    if (w.explain) lines.push("Answered by “" + (w.level_name || "") + "” — " + w.explain);
+    if (a.answer_text) lines.push(a.answer_text);
+    var cites = a.citations || [];
+    if (cites.length) {
+      lines.push("Working — the evidence this rests on:");
+      cites.forEach(function (c, i) {
+        lines.push("[" + (i + 1) + "] " + (c.document_title || "") +
+          " · " + (c.coordinate_render || "") + ": " + (c.snippet || ""));
+      });
+    }
+    return {
+      trace_id: a.trajectory_id,
+      explanation: lines.filter(Boolean).join("\n"),
+      model_name: a.model_name || "extractive core",
+      cost: 0,
+      citations: cites.map(function (c) {
+        return { document_title: c.document_title, document_id: c.document_id };
+      })
+    };
+  }
   function handle(method, path, q, body, token) {
     var subject = subjectOf(token);
     if (method === "POST") {
@@ -768,7 +819,13 @@
         if (r.code === 400) return respond({ error: "enter your user id" }, 400);
         return respond({ error: "unknown user " + (body.subject || "") }, 404);
       }
-      if (path === "/ask") return answerFor(subject, body.question || "", body.context).then(respond);
+      if (path === "/ask") return answerFor(subject, body.question || "", body.context)
+        .then(function (a) { if (a && a.trajectory_id) EXPLAINS[a.trajectory_id] = a; return respond(a); });
+      if (path === "/api/explain") {
+        var ea = EXPLAINS[(body || {}).trace_id];
+        if (!ea) return respond({ trace_id: (body || {}).trace_id, explanation: "", error: "unknown or expired trace" });
+        return respond(buildExplain(ea));
+      }
       if (path === "/curator/decision") { applyDecision(body); return respond({ ok: true, decision: body.decision }); }
       if (path === "/admin/users") return respond(userMutation(body));
       if (path === "/feedback") { recordFeedback(subject, body); return respond({ ok: true }); }
