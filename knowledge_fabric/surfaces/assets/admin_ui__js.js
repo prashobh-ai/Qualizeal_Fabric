@@ -65,6 +65,8 @@ async function saveConnector(source,body){try{const out=await api('/admin/connec
  // message instead of throwing on `out.connector.enabled`.
  const c=out&&out.connector?out.connector:{};
  if(out&&out.status==='error'){toast(source+': '+(out.message||'save failed'),'bad')}
+ // T120 — the static showcase cannot connect live sources; show why, honestly.
+ else if(out&&out.status==='demo'){toast(out.message||'static demo — connect on the running server','warn')}
  else{toast(source+' saved · '+(c.enabled?'enabled':'disabled')+(body.interval_s?' · every '+body.interval_s+' s':''),'good')}}
  catch(e){toast(e.message,'bad')}
  finally{try{await loadConnectors()}catch(e){}}}

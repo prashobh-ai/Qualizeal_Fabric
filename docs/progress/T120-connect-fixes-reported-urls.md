@@ -61,3 +61,23 @@ whose connectors are baked no-ops):
 
 A card missing its required secret shows `not configured · add <secrets>` (T118),
 so the Admin UI states exactly what to add rather than failing silently.
+
+## Static showcase is honest about live connect
+
+The reviewer was adding sources on the **GitHub Pages** build
+(`…github.io/Qualizeal_Fabric/admin/`), where Save popped "github saved ·
+disabled" but nothing entered the fabric. GitHub Pages serves only static files
+— there is no backend to run the connectors, no place to hold secrets, and a
+browser cannot call the GitHub/Jira/Confluence APIs with the user's credentials.
+So on the static build:
+
+- `scripts/showcase/engine.js` now answers `POST /admin/connectors` and
+  `/admin/sync` with `{status: "demo", message: …}` instead of a bare
+  `{ok: true}` — the message says to run the server (`make serve`) and connect
+  there with the source's secrets.
+- `admin_ui__js.js` surfaces a `status: "demo"` response as a clear warn toast,
+  so Save no longer reads as a successful (but inert) "saved".
+
+To actually connect and ask over live sources, run the server build (not Pages):
+`make serve`, sign in as admin, set the source's secrets in the environment,
+paste the URL into its card, and Sync.

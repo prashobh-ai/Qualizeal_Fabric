@@ -842,7 +842,24 @@
       if (path === "/feedback") { recordFeedback(subject, body); return respond({ ok: true }); }
       if (path === "/curator/repository/delete") return deleteRepository(body);  // T47
       if (path === "/curator/tables/query") return tableQuery(body);             // T47
-      // upload / sync / bulk-delete / budget / authority / connectors — demo success
+      // T120 — connecting a live source (GitHub / Jira / Confluence / website)
+      // needs the running server: the static GitHub Pages build has no backend
+      // to run the connectors, no place to hold secrets, and a browser cannot
+      // call those APIs with your credentials. Say so honestly instead of a
+      // misleading "saved", so the reviewer knows to use `make serve`.
+      var DEMO_MSG = "This is the static showcase (GitHub Pages) — it cannot connect live sources. " +
+        "Run the server (make serve) and paste the URL there, with the source's secrets set.";
+      if (path === "/admin/connectors") {
+        return respond({
+          status: "demo",
+          message: DEMO_MSG,
+          connector: { source: (body && body.source) || "", enabled: false, allow: (body && body.allow) || [] },
+        });
+      }
+      if (path === "/admin/sync") {
+        return respond({ status: "demo", pulled: 0, ingested: 0, tombstoned: 0, message: DEMO_MSG });
+      }
+      // upload / bulk-delete / budget / authority — demo acknowledgement
       return respond({ ok: true, note: "showcase — action acknowledged (no server-side state on Pages)" });
     }
     // GET
