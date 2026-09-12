@@ -309,6 +309,7 @@ class SqlTelemetry:
             role = (roles[0] if roles and roles[0] else "asker").split(".")[0]
             out.append(
                 {
+                    "trace_id": r["trace_id"] or "",  # links a row to its span waterfall (T96)
                     "subject": r["subject"] or "",
                     "role": role,
                     # T30 — persona/designation (T27), access scope, and whether a

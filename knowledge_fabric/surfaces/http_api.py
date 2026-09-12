@@ -874,6 +874,40 @@ class Handler(BaseHTTPRequestHandler):
             from ..telemetry import sla
 
             return self._send(200, sla.service_levels(p, prin.tenant))
+        if u.path == "/admin/overview":
+            # T96 — the leadership ROI page: value (hours saved), cost + cost
+            # avoided, the ROI ratio, adoption, quality and the service SLA line.
+            prin = self._require("admin")
+            if not prin:
+                return
+            from ..telemetry import roi
+
+            return self._send(200, roi.overview(p, prin.tenant, first("window", "7d")))
+        if u.path == "/admin/observability":
+            # T96 — the technical OTel view: a recent-trace list, error rate,
+            # latency percentiles and the reconciliation check; with ?trace_id=…
+            # the span waterfall for that one answer.
+            prin = self._require("admin")
+            if not prin:
+                return
+            from ..telemetry import roi
+
+            tid = first("trace_id", "")
+            if tid:
+                return self._send(200, roi.waterfall(p, prin.tenant, tid))
+            return self._send(
+                200, roi.observability(p, prin.tenant, int(first("limit", "20") or 20))
+            )
+        if u.path == "/admin/settings":
+            # T96 — the ROI knobs (minutes saved per question, loaded hourly rate).
+            prin = self._require("admin")
+            if not prin:
+                return
+            from ..telemetry import roi
+
+            return self._send(
+                200, {"settings": roi.get_settings(), "defaults": roi.SETTINGS_DEFAULTS}
+            )
 
         # ---- T47: fabric-data views (repositories, tables, insights) -----
         if u.path == "/curator/repositories":
@@ -1305,6 +1339,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, {"tenant": prin.tenant, "cap": b["cap"], "spent": p.policy.spent(prin.tenant)}
             )
+        if u.path == "/admin/settings":
+            # T96 — set the ROI knobs (minutes saved per question, loaded hourly
+            # rate). Audited; invalid values are ignored, never stored.
+            prin = self._require("admin")
+            if not prin:
+                return
+            from ..telemetry import roi
+
+            b = self._body()
+            settings = roi.set_settings(b)
+            self._audit(prin, "roi_settings", prin.tenant, json.dumps(settings, sort_keys=True))
+            return self._send(200, {"ok": True, "settings": settings})
         if u.path == "/admin/users":
             # L3.4 — Users & Access: add or disable a demo user. Roles are
             # attributes of users (F2.3); the directory is in memory for the
