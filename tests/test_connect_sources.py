@@ -324,6 +324,94 @@ def _conf_transport(url, headers, timeout=60):
     return 404, b'{"error":"not found"}'
 
 
+class TestReportedUrls(unittest.TestCase):
+    """The exact URLs the reviewer reported not being able to connect."""
+
+    def test_github_personal_user_url_parses_to_org(self):
+        self.assertEqual(
+            url_parse.parse_source_url("https://github.com/prashobh-ai"),
+            {"source": "github", "org": "prashobh-ai"},
+        )
+
+    def test_confluence_page_with_tilde_space_and_query_parses(self):
+        url = (
+            "https://aicoe-genq.atlassian.net/wiki/spaces/"
+            "~71202051d544b95eeb457597a5538880ebfc6f/pages/1703938/Project+Plan"
+            "?contentRecommendation=on&popular=true"
+        )
+        frag = url_parse.parse_source_url(url)
+        self.assertEqual(frag["source"], "confluence")
+        self.assertEqual(frag["pages"], ["1703938"])
+
+    def test_jira_dashboards_index_means_all(self):
+        frag = url_parse.parse_source_url(
+            "https://qualizeal-team-aicoe.atlassian.net/jira/dashboards"
+        )
+        self.assertEqual(frag["source"], "jira")
+        self.assertEqual(frag["dashboards"], ["*"])
+
+
+def _github_user_transport(url, headers, timeout=30, method="GET", body=None):
+    """A personal user: /orgs/<user> 404s, /users/<user>/repos serves the repos."""
+    path = urllib.parse.urlparse(url).path
+
+    def ok(payload):
+        return 200, {}, json.dumps(payload).encode()
+
+    if path == "/orgs/prashobh-ai":
+        return 404, {}, b'{"message":"Not Found"}'
+    if path == "/users/prashobh-ai/repos":
+        return ok(
+            [
+                {"full_name": "prashobh-ai/sideproject", "fork": False},
+                {"full_name": "prashobh-ai/notes", "fork": False},
+            ]
+        )
+    return 404, {}, b'{"message":"not found"}'
+
+
+class TestGitHubUserAccount(unittest.TestCase):
+    def test_personal_user_repos_list_via_users_endpoint(self):
+        from knowledge_fabric.connectors.github_live import GitHubLiveConnector
+
+        conn = GitHubLiveConnector(
+            "qualizeal", {"org": "prashobh-ai"}, transport=_github_user_transport
+        )
+        repos = conn.list_repositories()
+        self.assertEqual(repos, ["prashobh-ai/notes", "prashobh-ai/sideproject"])
+
+
+class TestJiraAllDashboards(unittest.TestCase):
+    def test_star_resolves_every_visible_dashboard(self):
+        def transport(url, headers, timeout=30):
+            path = urllib.parse.urlparse(url).path
+
+            def ok(p):
+                return 200, json.dumps(p).encode()
+
+            if path == "/rest/api/3/field":
+                return ok([])
+            if path == "/rest/api/3/dashboard":
+                return ok(
+                    {"dashboards": [{"id": "1", "name": "A"}, {"id": "2", "name": "B"}], "total": 2}
+                )
+            if path in ("/rest/api/3/dashboard/1", "/rest/api/3/dashboard/2"):
+                did = path.rsplit("/", 1)[1]
+                return ok({"id": did, "name": {"1": "A", "2": "B"}[did]})
+            if path.endswith("/gadget"):
+                return ok({"gadgets": []})
+            return 404, b'{"error":"not found"}'
+
+        items, _ = JiraLiveConnector(
+            "qualizeal",
+            {"url": SITE, "email": "c@q.co", "token": "x", "dashboards": ["*"]},
+            transport=transport,
+        ).pull(None)
+        uris = {i.uri for i in items}
+        self.assertIn("jira://dashboard/1", uris)
+        self.assertIn("jira://dashboard/2", uris)
+
+
 class TestConfluencePage(unittest.TestCase):
     CFG = {"url": CONF_SITE, "email": "coe@qualizeal.com", "token": "secret", "attachments": False}
 
