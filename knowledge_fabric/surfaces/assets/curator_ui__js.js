@@ -57,8 +57,20 @@ function renderDocs(){const f=$('#doc-filter').value,s=$('#doc-search').value.to
 
 function renderAuthority(ranks){$('#authority-ranks').innerHTML=(ranks||[]).map(r=>'<span class="pill '+(r.rank===1?'good':'')+'" title="weight '+esc(r.weight)+'">'+esc(r.source)+' · rank '+esc(r.rank)+(r.overridden?' *':'')+'</span>').join('')||'<span class="empty">defaults</span>'}
 
+// The full chat context a reader flagged: what they asked, what the AI answered,
+// the sources it cited and the turns before it — so a curator can see what
+// actually happened, not just the bare question.
+function fbDetail(f){const cites=f.citations||[],ctx=f.context||[];
+ if(!f.answer&&!cites.length&&!ctx.length&&!f.understood_as)return '';
+ let h='<details class="fb-detail"><summary class="muted small">what happened in that chat</summary><div class="fb-body">';
+ if(f.understood_as)h+='<div class="small"><b>Understood as:</b> '+esc(f.understood_as)+'</div>';
+ if(f.answer)h+='<div class="fb-answer"><b>AI answered'+(f.persona?' ('+esc(f.persona)+')':'')+':</b><div class="small">'+esc(f.answer)+'</div></div>';
+ if(cites.length)h+='<div class="fb-cites"><b>Cited:</b><ul class="queue">'+cites.map(c=>'<li><b>'+esc(c.title||'')+'</b> <span class="muted small mono">'+esc(c.where||'')+'</span>'+(c.snippet?'<div class="muted small">'+esc(c.snippet)+'</div>':'')+'</li>').join('')+'</ul></div>';
+ if(cites.length===0&&(f.kind==='answer'||f.kind===''))h+='<div class="small muted">No sources were cited for this answer.</div>';
+ if(ctx.length)h+='<div class="fb-ctx"><b>Earlier in the chat:</b><ul class="queue">'+ctx.map(t=>'<li><span class="muted small">Q:</span> '+esc(t.q||'')+(t.a?'<div class="muted small">A: '+esc(String(t.a).slice(0,200))+'</div>':'')+'</li>').join('')+'</ul></div>';
+ return h+'</div></details>'}
 function renderFeedback(rows){const fb=rows||[];
- $('#feedback-rows').innerHTML=fb.length?fb.map(f=>'<tr><td class="mono small">'+esc(ago(f.at))+'</td><td>'+esc(f.subject||'—')+'</td><td>'+esc(f.question||'')+'</td><td>'+(f.level?'<span class="pill">'+esc(f.level)+'</span>':'')+'</td><td class="small">'+esc(f.note||'')+'</td></tr>').join('')
+ $('#feedback-rows').innerHTML=fb.length?fb.map(f=>'<tr><td class="mono small">'+esc(ago(f.at))+'</td><td>'+esc(f.subject||'—')+'</td><td>'+esc(f.question||'')+fbDetail(f)+'</td><td>'+(f.level?'<span class="pill">'+esc(f.level)+'</span>':'')+(f.kind&&f.kind!=='answer'?' <span class="pill warn">'+esc(f.kind)+'</span>':'')+'</td><td class="small">'+esc(f.note||'')+'</td></tr>').join('')
   :'<tr><td colspan="5" class="empty">No negative feedback — readers are happy.</td></tr>'}
 async function loadFeedback(){try{const d=await api('/curator/feedback');renderFeedback(d.feedback)}catch(e){}}
 async function loadAll(){try{
@@ -178,15 +190,18 @@ async function loadFabricViews(){await Promise.all([loadRepos(),loadInsights(),l
 
 // ===================== T53 — curation modes + review queue =========
 const MODE_LABEL={automated:'Automated',manual:'Manual review'};
-function modeToggle(source,mode,label){const other=mode==='manual'?'automated':'manual';
- return '<span class="pill '+(mode==='manual'?'warn':'good')+'" style="cursor:pointer" '+
-  'data-source="'+esc(source)+'" data-mode="'+other+'" title="Click to switch to '+MODE_LABEL[other]+'">'+
-  esc(label)+': <b>'+esc(MODE_LABEL[mode]||mode)+'</b></span>'}
+// A real two-state switch: both options are shown at once and the active one is
+// highlighted, so it reads as a switch rather than a label that flips on click.
+function modeToggle(source,mode,label){
+ const seg=m=>'<button type="button" class="seg'+(mode===m?' on':'')+'" data-source="'+esc(source)+
+  '" data-mode="'+m+'"'+(mode===m?' aria-pressed="true"':'')+'>'+esc(MODE_LABEL[m])+'</button>';
+ return '<span class="modeswitch'+(mode==='manual'?' manual':'')+'"><span class="ms-label">'+esc(label)+
+  '</span><span class="ms-track">'+seg('automated')+seg('manual')+'</span></span>'}
 function renderCuration(m,rq){const box=$('#curation-modes');const def=m.default||'automated';
  let html=modeToggle('*',def,'Default');
  Object.keys(m.sources||{}).sort().forEach(s=>{html+=modeToggle(s,m.sources[s],s)});
  box.className='row';box.style.flexWrap='wrap';box.innerHTML=html;
- KF.$$('#curation-modes .pill').forEach(p=>p.onclick=()=>setMode(p.dataset.source,p.dataset.mode));
+ KF.$$('#curation-modes .seg').forEach(p=>p.onclick=()=>{if(!p.classList.contains('on'))setMode(p.dataset.source,p.dataset.mode)});
  const items=(rq&&rq.items)||[];$('#review-queue-count').textContent=items.length;
  const rows=$('#review-queue-rows');
  if(!items.length){rows.innerHTML='<tr><td colspan="5" class="empty">Nothing in review — every source is on automated, or all items are decided.</td></tr>';return}

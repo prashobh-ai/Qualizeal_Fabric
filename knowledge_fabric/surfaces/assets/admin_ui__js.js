@@ -68,17 +68,27 @@ async function loadRuns(){try{const d=await api('/admin/runs?limit=12');const ru
 function schedulePoll(){if(POLL)return;POLL=setInterval(async()=>{const active=await loadRuns();if(FORCE>0)FORCE--;if(!active&&FORCE<=0){clearInterval(POLL);POLL=null;$('#runs-live').className='dot'}},2000)}
 
 // ---------------------------------------------------------------- bulk upload / delete
-function renderBatch(){$('#upload-batch').innerHTML=BATCH.map((f,i)=>'<li><b>'+esc(f.filename)+'</b> <span class="muted">'+f.text.length+' chars · '+esc(f.acl.join(','))+'</span> <a href="#" data-i="'+i+'">remove</a></li>').join('');
+function batchSize(f){return f.content_b64?(Math.round(f.content_b64.length*3/4/1024*10)/10+' KB'):((f.text||'').length+' chars')}
+function renderBatch(){$('#upload-batch').innerHTML=BATCH.map((f,i)=>'<li><b>'+esc(f.filename)+'</b> <span class="muted">'+(f.content_b64?'file · ':'')+esc(batchSize(f))+' · '+esc((f.acl||['public']).join(','))+'</span> <a href="#" data-i="'+i+'">remove</a></li>').join('');
  KF.$$('#upload-batch a').forEach(a=>a.onclick=e=>{e.preventDefault();BATCH.splice(+a.dataset.i,1);renderBatch()})}
 function addToBatch(){const filename=$('#upload-filename').value.trim(),text=$('#upload-text').value;if(!filename||!text.trim()){toast('filename and text are required','warn');return}
  BATCH.push({filename,text,acl:[$('#upload-acl').value]});$('#upload-filename').value='';$('#upload-text').value='';renderBatch()}
+// Real file picker: read each chosen file as base64 and stage it for the same
+// multi-format intake the connectors use (PDF/DOCX/XLSX/images/MD/CSV/…).
+function readFileB64(file){return new Promise((resolve,reject)=>{const r=new FileReader();
+ r.onload=()=>resolve(String(r.result).split(',',2)[1]||'');r.onerror=()=>reject(r.error||new Error('read failed'));r.readAsDataURL(file)})}
+async function addFilesToBatch(files){const acl=[$('#upload-file-acl').value];let added=0;
+ for(const file of files){try{const content_b64=await readFileB64(file);BATCH.push({filename:file.name,content_b64,acl});added++}
+  catch(e){toast('Could not read '+file.name+': '+e.message,'bad')}}
+ if(added){renderBatch();toast(added+' file(s) staged — press "Upload batch" to ingest','good')}}
 async function upload(){let files=BATCH.slice();const raw=$('#upload-json').value.trim();
  if(raw){try{const arr=JSON.parse(raw);if(!Array.isArray(arr))throw new Error('JSON must be an array');files=files.concat(arr)}catch(e){toast('Invalid JSON: '+e.message,'bad');return}}
  if(!files.length){toast('Nothing to upload — add files to the batch first','warn');return}
  $('#upload-btn').disabled=true;$('#upload-status').textContent='uploading '+files.length+' file(s)…';FORCE=4;schedulePoll();
  try{const out=await api('/admin/upload',{method:'POST',body:{files}});
-  $('#upload-status').textContent='uploaded '+out.uploaded+' · ingested '+out.ingested+(out.noops?' · '+out.noops+' unchanged':'')+' · dataset v'+out.dataset_version+' · run '+out.run_id;
-  toast('Bulk upload done · dataset v'+out.dataset_version,'good');BATCH=[];renderBatch();$('#upload-json').value='';await Promise.all([loadRuns(),loadAudit()])}
+  const held=out.held_for_review?(' · '+out.held_for_review+' held for review'):'';
+  $('#upload-status').textContent='uploaded '+out.uploaded+' · ingested '+out.ingested+held+(out.noops?' · '+out.noops+' unchanged':'')+' · dataset v'+out.dataset_version+' · run '+out.run_id;
+  toast('Bulk upload done'+(out.held_for_review?' · '+out.held_for_review+' awaiting curator review':'')+' · dataset v'+out.dataset_version,'good');BATCH=[];renderBatch();$('#upload-json').value='';await Promise.all([loadRuns(),loadAudit()])}
  catch(e){$('#upload-status').textContent=e.message;toast(e.message,'bad')}finally{$('#upload-btn').disabled=false}}
 
 async function bulkDelete(){const ids=$('#delete-ids').value.split(/[\s,]+/).map(s=>s.trim()).filter(Boolean);const source=$('#delete-source').value.trim();const prefix=$('#delete-prefix').value.trim();
@@ -213,6 +223,7 @@ window.KF_ON_SESSION=s=>{if(s)loadAll();else{$('#connectors').innerHTML='';gate(
 KF.initBar({preferRole:'admin'});
 $('#connectors-refresh').onclick=loadAll;$('#run-due-btn').onclick=runDue;
 $('#upload-add').onclick=addToBatch;$('#upload-btn').onclick=upload;$('#delete-btn').onclick=bulkDelete;
+$('#upload-files').onchange=e=>{addFilesToBatch(Array.from(e.target.files||[]));e.target.value=''};
 $('#budget-btn').onclick=setBudget;$('#authority-btn').onclick=setAuthority;$('#audit-refresh').onclick=loadAudit;$('#doctor-btn').onclick=doctor;$('#models-refresh').onclick=loadModels;$('#models-days').onchange=loadModels;
 $('#add-user-btn').onclick=addUser;
 if(KF.session)loadAll();else gate({status:401,message:''},'admin');
