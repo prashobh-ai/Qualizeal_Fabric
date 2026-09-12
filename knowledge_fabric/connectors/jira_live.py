@@ -2,7 +2,8 @@
 
     env: JIRA_URL  JIRA_EMAIL  JIRA_TOKEN      (basic auth: email:api-token)
     config: {projects: [KEY…], interval: "7d", acl: [...], sprint_field?: "customfield_10020",
-             page_size: 100, max_issues: 5000, facts_max_issues: 2000, write_facts: true}
+             board_id?: 34, page_size: 100, max_issues: 5000, facts_max_issues: 2000,
+             write_facts: true}
 
 * ``pull(cursor)`` searches ``updated >= -<interval>`` (JQL) per allow-listed
   project with fields summary, description, status, assignee, priority, labels,
@@ -203,7 +204,7 @@ def project_facts(flat_issues: list[dict], as_of: str, window: str) -> dict:
     )
     sprint = None
     if active:
-        sprint = {"name": active.most_common(1)[0][0], "state": "active"}
+        sprint = {"name": active.most_common(1)[0][0], "state": "active", "start": "", "end": ""}
     else:
         named = Counter(i["sprint"]["name"] for i in flat_issues if i.get("sprint"))
         if named:
@@ -213,7 +214,7 @@ def project_facts(flat_issues: list[dict], as_of: str, window: str) -> dict:
                 for i in flat_issues
                 if i.get("sprint") and i["sprint"]["name"] == name
             )
-            sprint = {"name": name, "state": state}
+            sprint = {"name": name, "state": state, "start": "", "end": ""}
     return {
         "issues": {
             "total": len(flat_issues),
@@ -255,8 +256,10 @@ class JiraLiveConnector(BaseConnector):
         self.facts_max_issues = int(config.get("facts_max_issues", 2000))
         self.write_facts = bool(config.get("write_facts", True))
         self._sprint_field = config.get("sprint_field")
+        self.board_id = config.get("board_id")  # T97: the board whose columns define the workflow
         self._transport = transport or http_transport
         self._classic = False  # switched on when /search/jql is not served
+        self._statuses: dict[str, str] | None = None
         self.last_tombstones: list[str] = []
         self.calls = 0
 
@@ -313,6 +316,53 @@ class JiraLiveConnector(BaseConnector):
                     self._sprint_field = str(f.get("id", ""))
                     break
         return self._sprint_field or None
+
+    # -- board (T97) --------------------------------------------------------
+    def status_names(self) -> dict[str, str]:
+        """``status id → name`` for every workflow status (``/rest/api/3/status``,
+        cached). Board columns reference statuses by id; the facts and the
+        by_status table are keyed by name, so we resolve ids to names once."""
+        if self._statuses is None:
+            self._statuses = {}
+            for s in self._get("/rest/api/3/status", ok_missing=True) or []:
+                sid, name = str(s.get("id", "")), str(s.get("name", ""))
+                if sid and name:
+                    self._statuses[sid] = name
+        return self._statuses
+
+    def board_config(self, board_id) -> dict | None:
+        """The board's columns — each a named group of statuses — from the Agile
+        API (``/rest/agile/1.0/board/{id}/configuration``). ``None`` when the
+        board is not served (404/410) so a missing board never fails the sync."""
+        data = self._get(f"/rest/agile/1.0/board/{board_id}/configuration", ok_missing=True)
+        if not data:
+            return None
+        names = self.status_names()
+        columns = []
+        for col in (data.get("columnConfig") or {}).get("columns") or []:
+            sids = [str((s or {}).get("id", "")) for s in (col.get("statuses") or [])]
+            columns.append(
+                {
+                    "name": str(col.get("name", "")),
+                    "statuses": [names.get(sid, sid) for sid in sids if sid],
+                }
+            )
+        return {"id": int(board_id), "name": str(data.get("name", "")), "columns": columns}
+
+    def active_sprint(self, board_id) -> dict | None:
+        """The board's active sprint with its dates (``/rest/agile/1.0/board/{id}/sprint``),
+        or ``None`` (no active sprint / not a scrum board)."""
+        data = self._get(
+            f"/rest/agile/1.0/board/{board_id}/sprint", {"state": "active"}, ok_missing=True
+        )
+        for s in (data or {}).get("values") or []:
+            return {
+                "name": str(s.get("name", "")),
+                "state": str(s.get("state", "active")).lower(),
+                "start": str(s.get("startDate", "")),
+                "end": str(s.get("endDate", "")),
+            }
+        return None
 
     def search(self, jql: str, fields: str, max_results: int = 100, cap: int | None = None):
         """Every issue matching ``jql`` (paginated), up to ``cap``."""
@@ -380,6 +430,10 @@ class JiraLiveConnector(BaseConnector):
         as_of = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         items: list[RawItem] = []
         newest = cursor or ""
+        # T97: the configured board (columns + active sprint dates) is fetched
+        # once and stamped onto the facts of the project(s) it tracks.
+        board = self.board_config(self.board_id) if self.board_id else None
+        board_sprint = self.active_sprint(self.board_id) if self.board_id else None
         for project in self.projects:
             window = [
                 flatten_issue(i, self.base, sf)
@@ -394,9 +448,12 @@ class JiraLiveConnector(BaseConnector):
                         cap=self.facts_max_issues,
                     )
                 ]
-                write_project_facts(
-                    project, project_facts(census, as_of, f"updated >= -{self.interval}")
-                )
+                facts = project_facts(census, as_of, f"updated >= -{self.interval}")
+                if board is not None:
+                    facts["board"] = board
+                if board_sprint is not None:  # the board's dated sprint wins over the issue guess
+                    facts["sprint"] = board_sprint
+                write_project_facts(project, facts)
             for flat in window:
                 if cursor and flat["updated"] and flat["updated"] <= cursor:
                     continue  # already landed by an earlier pull (idempotent anyway)

@@ -1101,6 +1101,29 @@ def _live_issue_field(issue: dict, name: str) -> str:
     return str(v or "")
 
 
+def _jira_column_count(ql: str, block: dict):
+    """``(column_name, count, statuses)`` when the question names a board column
+    ("in progress", "to do", "done"). A board column is a *named group of
+    statuses*, so the exact count is the sum of ``by_status`` over that column's
+    statuses — the board's own definition, not a single status literal. The
+    longest column-name match wins (T97)."""
+    board = block.get("board") or {}
+    columns = board.get("columns") or []
+    by_status = (block.get("issues") or {}).get("by_status") or {}
+    best = None
+    for col in columns:
+        name = str(col.get("name") or "").lower().strip()
+        if not name:
+            continue
+        if re.search(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])", ql) and (
+            best is None or len(name) > len(str(best[0]))
+        ):
+            statuses = [str(s) for s in (col.get("statuses") or [])]
+            total = sum(int(by_status.get(s, 0) or 0) for s in statuses)
+            best = (str(col.get("name")), total, statuses)
+    return best
+
+
 def _jira_value_in(ql: str, issues: dict):
     """``(field, value, count)`` when the question names a value from one of the
     breakdown tables ("critical", "in progress", "bug", "alice"); the longest
@@ -1215,6 +1238,33 @@ def _p_jira(p, principal, q, ql, facts, caps, ents, context, live_jql=None) -> F
             when = f"{when}; live JQL failed: {str(e)[:80]}"
     by_status = issues.get("by_status") or {}
     by_type = issues.get("by_type") or {}
+    board = block.get("board") or {}
+    # T97: a board column ("in progress", "to do", "done") is a named group of
+    # statuses — answer its exact count with freshness, citing the board.
+    if not group and board.get("columns"):
+        col_hit = _jira_column_count(ql, block)
+        if col_hit:
+            cname, cnt, cstatuses = col_hit
+            bid = board.get("id")
+            grouped = (
+                " + ".join(cstatuses) if len(cstatuses) > 1 else (cstatuses[0] if cstatuses else "")
+            )
+            text = (
+                f"Jira project {r.name} has {_n(cnt)} issues in the {cname} column"
+                + (f" of board {bid}" if bid else " on the board")
+                + f" ({when})"
+                + (f" — statuses {grouped}" if grouped else "")
+                + " [1]."
+            )
+            bc = cite(
+                f"Jira {r.name} · board {bid}" if bid else f"Jira {r.name}",
+                _jira_url(r.name, block),
+                f"jira:{r.name}",
+                {"project": r.name, "board": bid, "column": cname},
+            )
+            return FactsResult(
+                text, [bc], f"Summed by_status over the {cname} column of board {bid}.", "jira"
+            )
     if not group:
         hit = _jira_value_in(ql, issues)
         if hit:
