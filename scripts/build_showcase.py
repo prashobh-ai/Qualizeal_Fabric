@@ -182,7 +182,10 @@ ROLES = [
     "cto",
 ]
 # GET endpoints to capture per bucket (askers use only the /api/* set).
-ASKER_GETS = ["/api/corpus"]  # T47: carries the repositories/jira/confluence/tables/images tiles
+ASKER_GETS = [
+    "/api/corpus",  # T47: carries the repositories/jira/confluence/tables/images tiles
+    "/api/defaults",  # T87: stored per-user defaults + the options the menu offers
+]
 CURATOR_GETS = [
     "/curator/quality",
     "/curator/gaps",

@@ -528,6 +528,28 @@ async function loadProvider(){const el=$('#provider-badge');if(!el)return;
 function boot(){loadThreads();loadQueue();if(!THREADS.length){CUR=null}else{CUR=THREADS[0].id}
  renderThreads();renderMessages();
  if(KF.session){corpusStrip();loadUsage();loadProvider()}else{gate({status:401,message:''},'asker')}}
-window.KF_ON_SESSION=s=>{gate(null);if(s){corpusStrip();loadUsage();samples();loadProvider();$('#ask-status').textContent='ready for '+s.subject}
+window.KF_ON_SESSION=s=>{gate(null);if(s){corpusStrip();loadUsage();samples();loadProvider();loadPrefs();$('#ask-status').textContent='ready for '+s.subject}
  else{$('#usage-body').innerHTML='<div class="placeholder">Sign in to see your usage.</div>'}};
+
+// ===================== T87 — stored per-user defaults ==============
+function fillSelect(id,opts,cur,blankLabel){const el=$('#'+id);if(!el)return;
+ el.innerHTML=(blankLabel?'<option value="">'+esc(blankLabel)+'</option>':'')+
+  opts.map(o=>'<option value="'+esc(o)+'"'+(o===cur?' selected':'')+'>'+esc(o)+'</option>').join('')}
+async function loadPrefs(){if(!$('#prefs'))return;
+ try{const j=await api('/api/defaults');const o=j.options||{},d=j.defaults||{};
+  fillSelect('pref-persona',o.persona||[],d.persona||'','from my title ('+(j.persona||'general')+')');
+  fillSelect('pref-depth',o.depth||[],d.depth||'','persona default');
+  fillSelect('pref-language',o.language||[],d.language||'','answer language');
+  $('#pref-explain-auto').checked=!!d.explain_auto;
+  const set=Object.keys(d).length;$('#prefs-note').textContent=set?'· '+set+' set':'';
+ }catch(e){}}
+async function savePrefs(){const body={persona:$('#pref-persona').value,depth:$('#pref-depth').value,
+  language:$('#pref-language').value,explain_auto:$('#pref-explain-auto').checked};
+ $('#pref-save').disabled=true;$('#pref-status').textContent='saving…';
+ try{await api('/api/defaults',{method:'POST',body});$('#pref-status').textContent='saved — applied to every answer';
+  await loadPrefs();samples()}
+ catch(e){$('#pref-status').textContent=e.message}
+ finally{$('#pref-save').disabled=false}}
+
 KF.initBar({preferRole:'asker'});boot();setupReadAloud();setupMic();
+if($('#pref-save'))$('#pref-save').onclick=savePrefs;
