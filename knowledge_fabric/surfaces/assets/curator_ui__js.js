@@ -63,7 +63,7 @@ function renderFeedback(rows){const fb=rows||[];
 async function loadFeedback(){try{const d=await api('/curator/feedback');renderFeedback(d.feedback)}catch(e){}}
 async function loadAll(){try{
  const [q,g,d]=await Promise.all([api('/curator/quality'),api('/curator/gaps'),api('/curator/documents')]);gate(null);
- renderQuality(q);renderQueues(g);DOCS=d.documents||[];DATASET=d.dataset_version||0;renderDocs();renderAuthority(d.authority);loadFeedback();loadFabricViews();loadGovernance();loadTimeline();loadGraph()}
+ renderQuality(q);renderQueues(g);DOCS=d.documents||[];DATASET=d.dataset_version||0;renderDocs();renderAuthority(d.authority);loadFeedback();loadFabricViews();loadGovernance();loadTimeline();loadGraph();loadRegistry()}
  catch(e){gate(e,'curator');if(e.status!==401&&e.status!==403)toast(e.message,'bad')}}
 
 async function decide(doc_id,decision,extra){const doc=DOCS.find(x=>x.document_id===doc_id)||{title:doc_id};
@@ -242,10 +242,39 @@ function renderGraph(g){g=g||{};
    ((x.suggest_tags||[]).length?' <span class="muted small">tag: '+esc(x.suggest_tags.join(', '))+'</span>':'')+'</div>').join(''):'No knowledge gaps detected.'}
 async function loadGraph(){try{const d=await api('/curator/insights');renderGraph(d.graph)}catch(e){/* graph is best-effort */}}
 
+// ===================== T82 — known-question registry ==============
+function renderRegistry(d){const entries=(d&&d.entries)||[];$('#registry-count').textContent=entries.length+' questions';
+ const rows=$('#registry-rows');
+ rows.innerHTML=entries.length?entries.map(e=>{const on=e.enabled!==false;
+  return '<tr'+(on?'':' class="muted"')+'><td>'+esc(e.pattern||'')+'<div class="muted small">'+esc((e.examples||[])[0]||'')+'</div></td>'+
+   '<td>'+(e.persona||[]).map(x=>'<span class="pill">'+esc(x)+'</span>').join(' ')+'</td>'+
+   '<td>'+esc(e.answer_kind||'')+'</td><td class="mono small">'+esc(e.source||'')+'</td>'+
+   '<td>'+esc(e.freshness_target_s!=null?e.freshness_target_s+'s':'')+'</td>'+
+   '<td>'+(on?'<span class="pill good">enabled</span>':'<span class="pill">disabled</span>')+'</td>'+
+   '<td><button class="btn sm" data-id="'+esc(e.id)+'" data-act="'+(on?'disable':'enable')+'">'+(on?'Disable':'Enable')+'</button></td></tr>'}).join('')
+  :'<tr><td colspan="7" class="empty">No known questions yet.</td></tr>';
+ KF.$$('#registry-rows button').forEach(b=>b.onclick=()=>toggleRegistry(b.dataset.id,b.dataset.act))}
+async function loadRegistry(){try{renderRegistry(await api('/curator/registry'))}catch(e){if(e.status!==404)toast(e.message,'bad')}}
+async function toggleRegistry(id,action){try{await api('/curator/registry',{method:'POST',body:{action,id}});toast('Known question '+action+'d','good');await loadRegistry()}catch(e){toast(e.message,'bad')}}
+async function addKnown(ev){ev.preventDefault();
+ const entry={id:$('#reg-id').value.trim(),pattern:$('#reg-pattern').value.trim(),
+  persona:$('#reg-personas').value.split(',').map(s=>s.trim()).filter(Boolean),
+  answer_kind:$('#reg-kind').value,source:$('#reg-source').value.trim()||'corpus',
+  examples:$('#reg-examples').value.split(',').map(s=>s.trim()).filter(Boolean),
+  freshness_target_s:Number($('#reg-fresh').value)||3};
+ if(!entry.id||!entry.pattern){toast('id and pattern are required','bad');return}
+ $('#reg-add-btn').disabled=true;$('#reg-status').textContent='saving…';
+ try{const out=await api('/curator/registry',{method:'POST',body:{action:'upsert',entry}});
+  $('#reg-status').textContent='saved '+((out.entry&&out.entry.id)||entry.id);toast('Known question saved','good');
+  $('#reg-id').value='';$('#reg-pattern').value='';$('#reg-personas').value='';$('#reg-examples').value='';await loadRegistry()}
+ catch(e){$('#reg-status').textContent=e.message;toast(e.message,'bad')}
+ finally{$('#reg-add-btn').disabled=false}}
+
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{DOCS=[];renderDocs();gate({status:401,message:''},'curator')}};
 KF.initBar({preferRole:'curator'});
 $('#doc-filter').addEventListener('change',renderDocs);$('#doc-search').addEventListener('input',renderDocs);
 $('#doc-refresh').onclick=loadAll;$('#history-close').onclick=()=>$('#history-panel').classList.add('hidden');
 $('#add-doc-form').addEventListener('submit',addDoc);
 $('#repo-refresh').onclick=loadFabricViews;$('#repo-close').onclick=()=>$('#repo-panel').classList.add('hidden');$('#tq-run').onclick=runTableQuery;
+$('#registry-form').addEventListener('submit',addKnown);
 if(KF.session)loadAll();else gate({status:401,message:''},'curator');

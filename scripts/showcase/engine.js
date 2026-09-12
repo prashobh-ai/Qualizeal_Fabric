@@ -836,7 +836,9 @@
     }
     // GET
     if (path === "/api/corpus") return respond(SNAP.corpus || {});
-    if (path === "/api/suggestions") return respond((SNAP.suggestions || {})[scopeKey(subject)] || { suggestions: [] });
+    // T82 — suggestions are baked per subject (so the reader's persona known
+    // questions show) with a scope-key fallback for older snapshots.
+    if (path === "/api/suggestions") return respond((SNAP.suggestions || {})[subject] || (SNAP.suggestions || {})[scopeKey(subject)] || { suggestions: [] });
     if (path === "/api/usage") return respond(STATE.usage[subject] || emptyUsage(subject));
     if (path === "/api/galaxy") { var t = q.get("trace_id"); return respond((SNAP.galaxy || {})[t] || { trace_id: t, nodes: [], edges: [], activated_ids: [], halo_ids: [], stats: {} }); }
     if (path === "/api/galaxy/node") { var nid = q.get("id"); var nd = (SNAP.galaxy_nodes || {})[nid]; return nd ? respond(nd) : respond({ error: "unknown node" }, 404); }

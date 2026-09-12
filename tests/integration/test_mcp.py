@@ -111,6 +111,7 @@ class TestMcpServer(unittest.TestCase):
                 "provider_status",
                 "fabric_communities",
                 "knowledge_gaps",
+                "list_known_questions",
             },
         )
         # every tool carries a description and an input schema (MCP conformance);

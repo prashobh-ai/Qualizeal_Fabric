@@ -1,0 +1,225 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "biz.projects_capability",
+      "pattern": "how many projects use <capability>",
+      "persona": ["business", "sales", "delivery"],
+      "answer_kind": "facts",
+      "source": "facts",
+      "template": "<n> projects use <capability> · as of <time>",
+      "freshness_target_s": 3,
+      "examples": ["how many projects use automation", "how many projects use accessibility testing"],
+      "enabled": true
+    },
+    {
+      "id": "biz.production_ready",
+      "pattern": "which repos are production-ready",
+      "persona": ["business", "delivery"],
+      "answer_kind": "list",
+      "source": "github",
+      "template": "the repositories marked production-ready",
+      "freshness_target_s": 3,
+      "examples": ["which repos are production-ready"],
+      "enabled": true
+    },
+    {
+      "id": "biz.case_studies_industry",
+      "pattern": "how many case studies mention <industry>",
+      "persona": ["business", "sales"],
+      "answer_kind": "facts",
+      "source": "corpus",
+      "template": "<n> case studies mention <industry>",
+      "freshness_target_s": 3,
+      "examples": ["how many case studies mention healthcare", "how many case studies mention banking"],
+      "enabled": true
+    },
+    {
+      "id": "biz.offer_service",
+      "pattern": "what does QualiZeal offer for <service>",
+      "persona": ["business", "sales", "delivery"],
+      "answer_kind": "definition",
+      "source": "corpus",
+      "template": "QualiZeal's offering for <service>, cited",
+      "freshness_target_s": 2,
+      "examples": ["what does QualiZeal offer for accessibility testing", "what does QualiZeal offer for performance testing"],
+      "enabled": true
+    },
+    {
+      "id": "dev.symbol_defined",
+      "pattern": "where is <symbol> defined",
+      "persona": ["developer", "architect"],
+      "answer_kind": "facts",
+      "source": "code",
+      "template": "the file and line where <symbol> is defined",
+      "freshness_target_s": 2,
+      "examples": ["where is classify defined", "where is AnswerService defined"],
+      "enabled": true
+    },
+    {
+      "id": "dev.repos_library",
+      "pattern": "which repos use <library>",
+      "persona": ["developer", "architect"],
+      "answer_kind": "list",
+      "source": "dependencies",
+      "template": "the repositories that depend on <library>",
+      "freshness_target_s": 3,
+      "examples": ["which repos use requests", "which repos use pytest"],
+      "enabled": true
+    },
+    {
+      "id": "dev.commits_repo",
+      "pattern": "how many commits in <repo>",
+      "persona": ["developer", "delivery"],
+      "answer_kind": "facts",
+      "source": "github",
+      "template": "<n> commits in <repo> · as of <time>",
+      "freshness_target_s": 3,
+      "examples": ["how many commits in knowledge fabric"],
+      "enabled": true
+    },
+    {
+      "id": "dev.login_impl",
+      "pattern": "show the login implementation",
+      "persona": ["developer"],
+      "answer_kind": "definition",
+      "source": "code",
+      "template": "the login / authentication implementation, cited to the symbol",
+      "freshness_target_s": 2,
+      "examples": ["show the login implementation", "show the authentication implementation"],
+      "enabled": true
+    },
+    {
+      "id": "qa.repos_tests",
+      "pattern": "which repos have tests",
+      "persona": ["tester", "quality", "architect"],
+      "answer_kind": "list",
+      "source": "code",
+      "template": "the repositories that carry a test suite",
+      "freshness_target_s": 3,
+      "examples": ["which repos have tests"],
+      "enabled": true
+    },
+    {
+      "id": "qa.coverage_repo",
+      "pattern": "test coverage of <repo>",
+      "persona": ["tester", "quality"],
+      "answer_kind": "facts",
+      "source": "facts",
+      "template": "the test coverage reported for <repo>",
+      "freshness_target_s": 3,
+      "examples": ["test coverage of knowledge fabric"],
+      "enabled": true
+    },
+    {
+      "id": "qa.feature_verified",
+      "pattern": "how is <feature> verified",
+      "persona": ["tester", "quality"],
+      "answer_kind": "definition",
+      "source": "code",
+      "template": "where and how <feature> is tested",
+      "freshness_target_s": 2,
+      "examples": ["how is grounding verified", "how is the selector verified"],
+      "enabled": true
+    },
+    {
+      "id": "arch.architecture_repo",
+      "pattern": "what is the architecture of <repo>",
+      "persona": ["architect", "developer"],
+      "answer_kind": "definition",
+      "source": "analysis",
+      "template": "the architecture summary of <repo>, cited",
+      "freshness_target_s": 2,
+      "examples": ["what is the architecture of knowledge fabric"],
+      "enabled": true
+    },
+    {
+      "id": "arch.retrieval_techniques",
+      "pattern": "which retrieval techniques in <repo>",
+      "persona": ["architect", "developer"],
+      "answer_kind": "list",
+      "source": "analysis",
+      "template": "the retrieval techniques used in <repo>",
+      "freshness_target_s": 3,
+      "examples": ["which retrieval techniques in knowledge fabric"],
+      "enabled": true
+    },
+    {
+      "id": "arch.depends_on",
+      "pattern": "what depends on <component>",
+      "persona": ["architect", "developer"],
+      "answer_kind": "list",
+      "source": "dependencies",
+      "template": "the components that depend on <component>",
+      "freshness_target_s": 3,
+      "examples": ["what depends on the selector", "what depends on the embedder"],
+      "enabled": true
+    },
+    {
+      "id": "cur.changed_week",
+      "pattern": "what changed this week",
+      "persona": ["curator", "admin"],
+      "answer_kind": "list",
+      "source": "versioning",
+      "template": "documents ingested or updated in the last 7 days",
+      "freshness_target_s": 3,
+      "examples": ["what changed this week"],
+      "enabled": true
+    },
+    {
+      "id": "cur.sources_stale",
+      "pattern": "which sources are stale",
+      "persona": ["curator", "admin"],
+      "answer_kind": "list",
+      "source": "sources",
+      "template": "sources not refreshed within their freshness window",
+      "freshness_target_s": 3,
+      "examples": ["which sources are stale"],
+      "enabled": true
+    },
+    {
+      "id": "cur.negative_feedback",
+      "pattern": "negative feedback this month",
+      "persona": ["curator", "admin"],
+      "answer_kind": "facts",
+      "source": "feedback",
+      "template": "<n> negative-feedback items this month",
+      "freshness_target_s": 3,
+      "examples": ["negative feedback this month"],
+      "enabled": true
+    },
+    {
+      "id": "hr.leave_policy",
+      "pattern": "what is the leave policy",
+      "persona": ["hr", "business"],
+      "answer_kind": "definition",
+      "source": "corpus",
+      "template": "the leave policy, cited to the HR source",
+      "freshness_target_s": 2,
+      "examples": ["what is the leave policy"],
+      "enabled": true
+    },
+    {
+      "id": "hr.who_leads_team",
+      "pattern": "who leads <team>",
+      "persona": ["hr", "business", "delivery"],
+      "answer_kind": "facts",
+      "source": "corpus",
+      "template": "who leads <team>",
+      "freshness_target_s": 2,
+      "examples": ["who leads the quality practice"],
+      "enabled": true
+    },
+    {
+      "id": "hr.values",
+      "pattern": "what are the values",
+      "persona": ["hr", "business"],
+      "answer_kind": "definition",
+      "source": "corpus",
+      "template": "the organisation's values, cited",
+      "freshness_target_s": 2,
+      "examples": ["what are the values", "what are the company values"],
+      "enabled": true
+    }
+  ]
+}
