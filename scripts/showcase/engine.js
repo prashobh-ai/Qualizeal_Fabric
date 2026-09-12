@@ -849,6 +849,13 @@
     if (path === "/api/analytics") { var w = q.get("window") || "7d"; return respond((SNAP.analytics || {})[w] || (SNAP.analytics || {})["7d"] || {}); }
     if (path === "/api/events") return respond({ events: SNAP.events || [] });
     if (path === "/api/trace") return respond({ spans: [] });
+    // T93 — a cited passage's paragraph + neighbours, when the build baked them;
+    // otherwise 404 and the Workspace keeps the cited snippet as the paragraph.
+    if (path.indexOf("/api/passage/") === 0) {
+      var pcid = decodeURIComponent(path.slice("/api/passage/".length));
+      var pc = (SNAP.passages || {})[pcid];
+      return pc ? respond(pc) : respond({ error: "passage not baked" }, 404);
+    }
     if (path === "/curator/versions") { var d = q.get("document_id"); return respond((SNAP.versions || {})[d] || { versions: [], datasets: [] }); }
     if (path === "/admin/doctor") { var tg = q.get("target") || ""; return respond((SNAP.doctor || {})[tg] || (SNAP.doctor || {})[""] || { checks: [] }); }
     if (path === "/curator/feedback") return respond({ feedback: STATE.feedback }); // negative-feedback review (new)

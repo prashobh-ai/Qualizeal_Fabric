@@ -76,7 +76,7 @@ function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
  const baked=a.baked?'<span class="pill info" title="'+esc(a.baked.asked_at||'')+'">'+(a.baked.source==='queue'?'full answer':'baked')+'</span>':'';
  const gov=a.kind==='answer'?govLine(a):'';
  const explain=a.kind==='answer'?explainBar(a,i):'';
- return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+baked+'</div>'+stepsHtml(a)+body+gov+explain+roleLens(a)+fb+'</div>'}
+ return '<div class="msg ai" data-i="'+i+'"><div class="kwrap">'+badges+baked+'</div>'+stepsHtml(a)+body+'<div class="cite-expand" data-i="'+i+'" hidden></div>'+gov+explain+roleLens(a)+fb+'</div>'}
 // T85 — the governance line under every answer: source kind, authority, and
 // freshness; amber + a "show newer sources" nudge when the source is stale.
 function govLine(a){const g=a.governance;if(!g)return '';
@@ -167,11 +167,50 @@ function renderAnswer(a){const cs=a.citations||[];
 function chipify(text,cs){return esc(text).replace(/\[(\d+)\]/g,(m,n)=>{const c=cs[+n-1];if(!c)return '';
   const url=((c.coordinate||{}).locator||{}).url||'';
   const label=esc(c.document_title)+' &middot; '+esc(c.coordinate_render);
-  if(url)return '<a class="chipcite gh" href="'+esc(url)+'" target="_blank" rel="noopener" title="Open on GitHub">'+label+' &#8599;</a>';
-  return '<span class="chipcite" data-cite="'+esc(n)+'">'+label+'</span>'})}
+  // Every citation expands inline (T93/T94); a code citation also carries its
+  // GitHub line-anchored URL, shown as "Open on GitHub" inside the expand.
+  return '<span class="chipcite'+(url?' gh':'')+'" data-cite="'+esc(n)+'" title="'+
+   (url?'Show the cited lines':'Show the cited paragraph')+'">'+label+(url?' &#8599;':'')+'</span>'})}
+// T93 — a citation expands inline to the paragraph in context, with the cited
+// sentence highlighted, and offers "Open document". A second click on the same
+// chip collapses it. The paragraph + neighbours come from GET /api/passage/{id}
+// when the server is live; on the static build the cited snippet stands as the
+// paragraph (still highlighted), so the affordance works everywhere.
+function hlSentence(paragraph, snippet){const P=String(paragraph||''),S=String(snippet||'').trim();
+ if(!S)return esc(P);const i=P.toLowerCase().indexOf(S.toLowerCase());
+ if(i<0)return esc(P)+(P?' ':'')+'<mark>'+esc(S)+'</mark>';
+ return esc(P.slice(0,i))+'<mark>'+esc(P.slice(i,i+S.length))+'</mark>'+esc(P.slice(i+S.length))}
+function paraBlock(text,snippet,cls){return '<p class="'+(cls||'')+'">'+(cls==='cited'?hlSentence(text,snippet):esc(text))+'</p>'}
+function codeBlock(text){return '<pre class="codeblock"><code>'+esc(String(text||'').replace(/\s+$/,''))+'</code></pre>'}
+async function renderCiteExpand(box,c){
+ const url=((c.coordinate||{}).locator||{}).url||'';
+ const isCode=!!url||((c.coordinate||{}).kind==='symbol_line');
+ const openBtn=url
+   ? '<a class="btn sm ce-open" href="'+esc(url)+'" target="_blank" rel="noopener">Open on GitHub &#8599;</a>'
+   : '<button class="btn sm ce-open" type="button">Open document</button>';
+ const head='<div class="ce-head"><b>'+esc(c.document_title||'Document')+'</b>'+
+  '<span class="muted small">'+esc(c.coordinate_render||'')+'</span>'+openBtn+'</div>';
+ const first=isCode?codeBlock(c.snippet||''):paraBlock(c.snippet||'',c.snippet,'cited');
+ box.innerHTML=head+'<div class="ce-body">'+first+'</div>';
+ const btn=box.querySelector('button.ce-open');if(btn)btn.onclick=e=>{e.stopPropagation();openPage(c)};
+ if(!c.passage_id)return;
+ try{const d=await api('/api/passage/'+encodeURIComponent(c.passage_id));
+  const body=box.querySelector('.ce-body');if(!body)return;
+  if(isCode){body.innerHTML=codeBlock((d.passage||{}).text||c.snippet||'');return}
+  const before=(d.before||[]).map(x=>paraBlock(x.text,'','')).join('');
+  const target=paraBlock((d.passage||{}).text||c.snippet||'',c.snippet,'cited');
+  const after=(d.after||[]).map(x=>paraBlock(x.text,'','')).join('');
+  body.innerHTML=before+target+after}
+ catch(e){/* static build or 404: the snippet paragraph already stands */}}
 function wireCites(){const t=curThread();if(!t)return;
  $$('#messages span.chipcite').forEach(el=>el.onclick=ev=>{ev.stopPropagation();
-  const turn=t.turns[+el.closest('.msg.ai').dataset.i];openPage((turn.a.citations||[])[+el.dataset.cite-1])})}
+  const msg=el.closest('.msg.ai');const turn=t.turns[+msg.dataset.i];
+  const c=(turn.a.citations||[])[+el.dataset.cite-1];if(!c)return;
+  const box=msg.querySelector('.cite-expand');if(!box)return;
+  const already=!box.hidden&&box.dataset.cite===el.dataset.cite;
+  KF.$$('#messages span.chipcite.active').forEach(x=>x.classList.remove('active'));
+  if(already){box.hidden=true;box.innerHTML='';return}
+  box.dataset.cite=el.dataset.cite;box.hidden=false;el.classList.add('active');renderCiteExpand(box,c)})}
 // L6 — a reader flags an answer; 👎 records negative feedback for the curators.
 function wireFeedback(){const t=curThread();if(!t)return;
  $$('#messages .fbbar').forEach(bar=>{const turn=t.turns[+bar.dataset.i];if(!turn)return;

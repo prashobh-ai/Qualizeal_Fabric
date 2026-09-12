@@ -159,6 +159,32 @@ def _table_query_fn():
     return None
 
 
+def _passage_context(p, tenant: str, ctx: dict) -> dict:
+    """T93 — shape a passage-context result for the citation expand: the cited
+    passage and its neighbours as reading-ordered paragraphs, each with its
+    resolvable coordinate render, plus the document title and a source URL when
+    the passage carries one (code/citation link)."""
+
+    def _one(pas) -> dict:
+        loc = pas.coordinate.locator or {}
+        return {
+            "passage_id": pas.id,
+            "text": pas.text,
+            "coordinate_render": pas.coordinate.render(),
+            "url": loc.get("citation_url") or loc.get("url") or "",
+        }
+
+    target = ctx["passage"]
+    doc = p.documents.get(tenant, target.document_id) or {}
+    return {
+        "document_id": target.document_id,
+        "document_title": doc.get("title") or "",
+        "before": [_one(x) for x in ctx.get("before", [])],
+        "passage": _one(target),
+        "after": [_one(x) for x in ctx.get("after", [])],
+    }
+
+
 def _provider_badge(p) -> dict:
     """T52 — the active provider for the top-bar badge and the answer card.
 
@@ -577,6 +603,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(401, {"error": str(e)})
             detail = galaxy_view.node_detail(p, prin.tenant, first("id", ""))
             return self._send(200, detail or {"id": first("id", ""), "passages": []})
+        if u.path.startswith("/api/passage/"):
+            # T93 — a cited passage plus its in-document neighbours, so the
+            # Workspace can expand a citation to the paragraph in context. Any
+            # signed-in principal may ask; the passage ACL still gates access, so
+            # a review-held or restricted passage never leaks.
+            try:
+                prin = self._principal()
+            except PermissionError as e:
+                return self._send(401, {"error": str(e)})
+            pid = u.path[len("/api/passage/") :]
+            ctx = p.passages.context(prin.tenant, pid)
+            if not ctx:
+                return self._send(404, {"error": "passage not found"})
+            acl = set(p.passages.acl_of(prin.tenant, pid))
+            if acl and not (acl & set(prin.accessible_acls())):
+                return self._send(403, {"error": "not permitted"})
+            return self._send(200, _passage_context(p, prin.tenant, ctx))
         if u.path == "/api/galaxy/full":
             # T51/T57 — the whole-fabric galaxy for the Curator graph, coloured
             # by community with cohesion flags and the insight lists.

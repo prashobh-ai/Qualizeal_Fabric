@@ -155,6 +155,17 @@ main{max-width:none;padding:0;display:flex;flex-direction:column}
 .chip{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:4px 11px;font-size:12px;cursor:pointer;color:var(--fg)}
 .chip:hover{border-color:var(--accent)}
 
+/* T93 — inline citation expand: the cited paragraph in context, highlighted */
+.chipcite.active{outline:2px solid var(--qz-blue);outline-offset:1px}
+.cite-expand{margin:8px 0 4px;border:1px solid var(--line);border-radius:8px;
+ background:var(--panel);padding:10px}
+.cite-expand .ce-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+ margin-bottom:6px}
+.cite-expand .ce-head .ce-open{margin-left:auto}
+.cite-expand .ce-body p{margin:6px 0;font-size:13px;line-height:1.5;color:var(--mut)}
+.cite-expand .ce-body p.cited{color:var(--qz-ink)}
+.cite-expand .ce-body p.cited mark{background:#FFE9A8;padding:0 2px;border-radius:3px}
+
 /* T56 — the phase / active-idle bar in the card details */
 .phasebar{display:flex;height:8px;border-radius:5px;overflow:hidden;background:var(--panel2);margin-top:4px}
 .phasebar i{display:block;height:100%}
