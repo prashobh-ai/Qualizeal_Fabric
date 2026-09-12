@@ -191,7 +191,7 @@ class TestProvisioning(unittest.TestCase):
         from knowledge_fabric.connectors import admin
 
         provisioning.configure_jira_v1(self.p, T)
-        cfg = admin.effective_config(self.p, T, "jira_live", {})
+        cfg = admin.effective_config(self.p, T, "jira", {})  # T115: canonical key
         self.assertEqual(cfg["projects"], ["V1"])
         self.assertEqual(cfg["board_id"], 34)
         self.assertEqual(cfg["interval"], "15m")

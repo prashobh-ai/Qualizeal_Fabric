@@ -911,7 +911,7 @@ def sync(platform, tenant: str, transport=None, runner=None) -> dict:
     from ..ingestion.sync import SyncManager
     from . import admin
 
-    cfg = admin.effective_config(platform, tenant, "github_live", {})
+    cfg = admin.effective_config(platform, tenant, "github", {})
     token = cfg.get("token") or os.environ.get("KF_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not token:
         return {"status": "skipped", "reason": "GITHUB_TOKEN / KF_GITHUB_TOKEN not set"}
@@ -928,7 +928,7 @@ def sync(platform, tenant: str, transport=None, runner=None) -> dict:
         kwargs["transport"] = transport
     if runner is not None:
         kwargs["runner"] = runner
-    res = SyncManager(platform).sync(tenant, "github_live", cfg, **kwargs)
+    res = SyncManager(platform).sync(tenant, "github", cfg, **kwargs)
     factsmod.write_documents_facts(platform, tenant)
     res["status"] = "ran"
     return res

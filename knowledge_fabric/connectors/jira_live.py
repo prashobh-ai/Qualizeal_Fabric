@@ -508,7 +508,7 @@ def sync(platform, tenant: str, transport=None) -> dict:
     from ..ingestion.sync import SyncManager
     from . import admin
 
-    cfg = admin.effective_config(platform, tenant, "jira_live", {})
+    cfg = admin.effective_config(platform, tenant, "jira", {})
     if not cfg.get("projects") and os.environ.get("JIRA_PROJECTS"):
         cfg["projects"] = [p.strip() for p in os.environ["JIRA_PROJECTS"].split(",") if p.strip()]
     have = all(
@@ -519,6 +519,6 @@ def sync(platform, tenant: str, transport=None) -> dict:
         return {"status": "skipped", "reason": "JIRA_URL / JIRA_EMAIL / JIRA_TOKEN not set"}
     if not cfg.get("projects"):
         return {"status": "skipped", "reason": "no Jira projects allow-listed (JIRA_PROJECTS)"}
-    res = SyncManager(platform).sync(tenant, "jira_live", cfg, transport=transport)
+    res = SyncManager(platform).sync(tenant, "jira", cfg, transport=transport)
     res["status"] = "ran"
     return res

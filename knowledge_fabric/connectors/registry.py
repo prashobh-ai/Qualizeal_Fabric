@@ -17,22 +17,37 @@ from .jira import JiraConnector
 from .jira_live import JiraLiveConnector
 from .website import WebsiteConnector
 
+# T115 — ONE source key per connector, everywhere (card, API, admin, scheduler,
+# registry): the five keys ``website / files / github / jira / confluence``. The
+# ``github`` and ``jira`` keys resolve to the **live** connector classes for real
+# syncs; records-injection (offline demos and tests) selects the replay classes
+# instead — see :func:`build`. The live class *names* are unchanged.
 REGISTRY = {
     "files": FilesConnector,
-    "github": GitHubConnector,  # replay (in-memory records) — offline demos and tests
-    "github_live": GitHubLiveConnector,  # T37: GitHub REST + GraphQL (facts, activity, clone)
+    "github": GitHubLiveConnector,  # T37: GitHub REST + GraphQL (facts, activity, clone)
     "website": WebsiteConnector,  # bounded same-host crawl of the public site
-    "jira": JiraConnector,  # replay (in-memory records) — offline demos and tests
-    "jira_live": JiraLiveConnector,  # T41: Jira Cloud REST (JQL window, comments, facts)
+    "jira": JiraLiveConnector,  # T41: Jira Cloud REST (JQL window, comments, facts)
     "confluence": ConfluenceConnector,  # T41: Confluence REST v2 (pages, attachments, facts)
     # additive: "sharepoint": ..., "drive": ...
+}
+
+#: the replay (in-memory records) classes, chosen when ``records=`` is injected
+#: so offline demos and tests never touch the network.
+REPLAY = {
+    "github": GitHubConnector,
+    "jira": JiraConnector,
 }
 
 
 def build(source: str, tenant: str, config: dict, **kwargs):
     if source not in REGISTRY:
         raise KeyError(f"unknown connector '{source}'. Registered: {sorted(REGISTRY)}")
-    return REGISTRY[source](tenant, config, **kwargs)
+    cls = REGISTRY[source]
+    # records-injection (offline replay) picks the replay class for github/jira,
+    # so a real sync uses the live client and a test/demo uses the records.
+    if kwargs.get("records") is not None and source in REPLAY:
+        cls = REPLAY[source]
+    return cls(tenant, config, **kwargs)
 
 
 def available() -> list[str]:
