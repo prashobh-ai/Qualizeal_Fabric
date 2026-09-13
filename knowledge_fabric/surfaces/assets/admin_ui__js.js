@@ -126,8 +126,19 @@ async function upload(){let files=BATCH.slice();const raw=$('#upload-json').valu
  try{const out=await api('/admin/upload',{method:'POST',body:{files}});
   const held=out.held_for_review?(' · '+out.held_for_review+' held for review'):'';
   $('#upload-status').textContent='uploaded '+out.uploaded+' · ingested '+out.ingested+held+(out.noops?' · '+out.noops+' unchanged':'')+' · dataset v'+out.dataset_version+' · run '+out.run_id;
-  toast('Bulk upload done'+(out.held_for_review?' · '+out.held_for_review+' awaiting curator review':'')+' · dataset v'+out.dataset_version,'good');BATCH=[];renderBatch();$('#upload-json').value='';await Promise.all([loadRuns(),loadAudit()])}
+  toast('Bulk upload done'+(out.held_for_review?' · '+out.held_for_review+' awaiting curator review':'')+' · dataset v'+out.dataset_version,'good');BATCH=[];renderBatch();$('#upload-json').value='';await Promise.all([loadRuns(),loadAudit(),refreshUploads()])}
  catch(e){$('#upload-status').textContent=e.message;toast(e.message,'bad')}finally{$('#upload-btn').disabled=false}}
+// T131 — the documents already in the Files source, each with a Delete that
+// removes it (on the static demo the delete also fires the repo-commit workflow,
+// so the file leaves the repository too). Absent endpoint → the list stays empty.
+async function refreshUploads(){const box=$('#upload-list');if(!box)return;
+ try{const d=await api('/admin/uploads');const ups=(d&&d.uploads)||[];
+  box.innerHTML=ups.map(u=>'<li><b>'+esc(u.title)+'</b> <span class="muted">Files'+(u.has_text?'':' · title only until rebuild')+'</span> <a href="#" data-doc="'+esc(u.document_id)+'">delete</a></li>').join('');
+  KF.$$('#upload-list a').forEach(a=>a.onclick=e=>{e.preventDefault();deleteUpload(a.dataset.doc)})}
+ catch(e){box.innerHTML=''}}
+async function deleteUpload(docId){if(!confirm('Delete this uploaded document?\nIt is removed from the Files source (and, when a commit endpoint is configured, from the repository).'))return;
+ try{await api('/admin/uploads/delete',{method:'POST',body:{document_id:docId}});toast('Document deleted','good');await refreshUploads()}
+ catch(e){toast(e.message,'bad')}}
 
 async function bulkDelete(){const ids=$('#delete-ids').value.split(/[\s,]+/).map(s=>s.trim()).filter(Boolean);const source=$('#delete-source').value.trim();const prefix=$('#delete-prefix').value.trim();
  if(!ids.length&&!source&&!prefix){toast('Give document ids, a source or a uri prefix','warn');return}
@@ -309,7 +320,7 @@ async function loadAll(){
  // T116 — every admin panel loads INDEPENDENTLY: one loader failing (e.g. a
  // transient error on /admin/connectors) must never blank the others. Each
  // loader catches and shows its own empty state; allSettled never short-circuits.
- await Promise.allSettled([loadConnectors(),loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources(),loadCoverage(),loadSLA(),loadOverview(),loadObservability()]);
+ await Promise.allSettled([loadConnectors(),loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources(),loadCoverage(),loadSLA(),loadOverview(),loadObservability(),refreshUploads()]);
  try{if(await loadRuns())schedulePoll()}catch(e){}}
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{$('#connectors').innerHTML='';gate({status:401,message:''},'admin')}};
 KF.initBar({preferRole:'admin'});

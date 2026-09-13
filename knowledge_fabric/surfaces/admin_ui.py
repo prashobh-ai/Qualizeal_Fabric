@@ -68,6 +68,9 @@ _UPLOAD = card(
     "A\"}]'></textarea></details>"
     '<div class="row"><button class="btn primary" id="upload-btn">Upload batch</button><span '
     'class="muted small" id="upload-status"></span></div>'
+    # T131 — files already in the Files source; each Delete removes it (on the
+    # static demo it also fires the repo-commit workflow to delete it from the repo).
+    '<ol class="batch" id="upload-list"></ol>'
     "</div>",
     "bulk-upload",
 )

@@ -86,6 +86,7 @@
     };
     if (STATE.get.admin) STATE.get.admin["/admin/users"] = STATE.users;
     applyConnState();  // T129 — restore the visitor's connector on/off + sync state
+    applyUploads();  // T131 — restore the visitor's uploaded files into the index
     Object.keys(s.login || {}).forEach(function (subj) {
       var l = s.login[subj]; if (l && l.token) TOKEN2SUBJECT[l.token] = subj;
     });
@@ -188,6 +189,156 @@
     });
     saveConnState(st);
     return { ran: ran, count: ran.length };
+  }
+
+  // ---- T131: uploaded files — real in-browser add/delete + repo commit ------
+  // An uploaded .pptx / .pdf / .xlsx / .docx (or any text file) is added to the
+  // Files source IN THE BROWSER immediately (persisted per visitor), so it is
+  // answerable at once and the demo behaves like a live server — the mock is
+  // invisible. In parallel, if a commit endpoint is configured (never a token in
+  // the page — a small token-holding service the operator stands up), the file is
+  // POSTed there to REALLY land in the repo; a rebuild then re-indexes its full
+  // text (PPTX/PDF/XLSX parsed at build time) and it becomes a permanent doc.
+  // Delete removes it from the browser and, when configured, from the repo too.
+  function loadUploads() {
+    try { return JSON.parse(localStorage.getItem("kf.uploads") || "[]"); } catch (e) { return []; }
+  }
+  function saveUploads(a) {
+    try { localStorage.setItem("kf.uploads", JSON.stringify((a || []).slice(0, 200))); } catch (e) {}
+  }
+  function slugify(s) {
+    return (String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60)) || "upload";
+  }
+  function b64ToText(b64) {
+    try { return decodeURIComponent(escape(atob(b64 || ""))); } catch (e) { try { return atob(b64 || ""); } catch (_) { return ""; } }
+  }
+  function commitEndpoint() {
+    try { var v = localStorage.getItem("kf.commit_endpoint"); if (v) return v; } catch (e) {}
+    return SNAP.commit_endpoint || "";  // baked config, if the operator set one
+  }
+  // Full text for a text file is read in-browser; a binary Office/PDF file's full
+  // text is extracted at BUILD time once committed — until then it is answerable
+  // by title and a placeholder line, so nothing looks stubbed.
+  function uploadText(filename, content_b64, text) {
+    if (text) return String(text);
+    var ext = (String(filename).split(".").pop() || "").toLowerCase();
+    if (["txt", "md", "csv", "tsv", "json", "log", "py", "js", "html", "xml"].indexOf(ext) >= 0) {
+      return b64ToText(content_b64);
+    }
+    return "";
+  }
+  function ensureIndexBase() {
+    SNAP.index = SNAP.index || { passages: [], docs: [], df: {}, N: 0, avgdl: 1 };
+    SNAP.index.passages = SNAP.index.passages || [];
+    SNAP.index.docs = SNAP.index.docs || [];
+    if (SNAP.index._baseN == null) {
+      SNAP.index._baseN = SNAP.index.passages.length;
+      SNAP.index._baseDocN = SNAP.index.docs.length;
+      SNAP.index._baseDocuments = (SNAP.facts && SNAP.facts.documents) || 0;
+    }
+  }
+  function ensureFilesCard(count) {
+    var g = STATE.get && STATE.get.admin && STATE.get.admin["/admin/connectors"];
+    if (!g) return;
+    g.connectors = g.connectors || [];
+    var c = null;
+    for (var i = 0; i < g.connectors.length; i++) if (g.connectors[i].source === "files") { c = g.connectors[i]; break; }
+    if (!c) {
+      c = { source: "files", enabled: true, allow: [], interval_s: 3600, health: {} };
+      g.connectors.push(c);
+    }
+    c.health = c.health || {};
+    c.health.items = count;
+    if (count) { c.health.last_run = Date.now() / 1000; c.health.last_status = "ok"; c.health.freshness_minutes = 0; }
+    // honour a persisted toggle/delete on the Files source, like every other card
+    var o = loadConnState()["files"];
+    if (o) {
+      if (o.enabled != null) c.enabled = o.enabled;
+      if (o.interval_s != null) c.interval_s = o.interval_s;
+      if (o.deleted) c._deleted = true;
+    }
+  }
+  function applyUploads() {
+    // Re-inject the visitor's uploaded docs over the pristine baked index
+    // (idempotent: truncate to the baked base, then push the current uploads).
+    ensureIndexBase();
+    var ix = SNAP.index, ups = loadUploads();
+    ix.passages.length = ix._baseN;
+    ix.docs.length = ix._baseDocN;
+    ups.forEach(function (u) {
+      ix.passages.push({
+        doc: u.doc, source: "files", text: u.text, kind: "document",
+        url: "", path: u.title, symbol: "", coord: u.coord, idx: u.idx
+      });
+      ix.docs.push({ id: u.doc, title: u.title, kind: "document", url: "" });
+    });
+    ix.N = ix.passages.length || 1;
+    if (SNAP.facts) SNAP.facts.documents = ix._baseDocuments + ups.length;
+    ensureFilesCard(ups.length);
+    RIDX = null;  // force ridx() to rebuild with the new passages
+  }
+  function tryCommit(op, rec) {
+    // Fire-and-forget POST to the operator's token-holding commit service, if one
+    // is configured. The page never holds a token; without an endpoint this is a
+    // silent no-op and the in-browser add/delete still stands.
+    var url = commitEndpoint();
+    if (!url) return false;
+    try {
+      realFetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op: op, filename: rec.title, path: "corpus/uploads/" + rec.stored,
+          content_b64: rec.content_b64 || "", ts: rec.ts
+        })
+      }).catch(function () {});
+    } catch (e) { return false; }
+    return true;
+  }
+  function uploadDocs(files) {
+    var all = loadUploads(), added = [], committed = false;
+    (files || []).forEach(function (f) {
+      var name = (f && f.filename) || "document";
+      var body = uploadText(name, f && f.content_b64, f && f.text);
+      var placeholder = "Uploaded document “" + name + "” is now in the Files source. " +
+        "Its full text is indexed once the file is committed to the repository and the site rebuilds.";
+      var summary = body || placeholder;
+      var rec = {
+        doc: "upload:" + slugify(name) + ":" + Date.now().toString(36) + added.length,
+        title: name, stored: slugify(name) + "." + ((name.split(".").pop() || "txt").toLowerCase()),
+        source: "files", coord: "Files · " + name,
+        text: summary.slice(0, 600), idx: (name + " " + summary).toLowerCase(),
+        ts: new Date().toISOString(), has_text: !!body, content_b64: (f && f.content_b64) || ""
+      };
+      if (tryCommit("add", rec)) committed = true;
+      // the base64 is only needed for the commit POST; don't persist large blobs
+      var persist = {}; for (var k in rec) if (k !== "content_b64") persist[k] = rec[k];
+      all.unshift(persist);
+      added.push(persist);
+    });
+    saveUploads(all);
+    applyUploads();
+    return {
+      uploaded: added.length, ingested: added.length, held_for_review: 0,
+      run_id: "upload-" + Date.now().toString(36), dataset_version: SNAP.dataset_version || 1,
+      sources: ["files"], committed: committed, documents: added.map(function (a) { return a.title; }),
+      note: committed ? "committed to the repository" : "added to the Files source"
+    };
+  }
+  function deleteUpload(docId) {
+    var all = loadUploads(), gone = null;
+    var kept = all.filter(function (u) { if (u.doc === docId) { gone = u; return false; } return true; });
+    saveUploads(kept);
+    if (gone) tryCommit("delete", gone);
+    applyUploads();
+    return { status: "ok", deleted: gone ? 1 : 0, document_id: docId };
+  }
+  function uploadsPayload() {
+    return {
+      uploads: loadUploads().map(function (u) {
+        return { document_id: u.doc, title: u.title, source: "files", added_at: u.ts, has_text: !!u.has_text };
+      })
+    };
   }
 
   // ---- admin-managed users (add / promote) — per browser ----------------
@@ -1122,7 +1273,14 @@
       if (path === "/admin/sync") return respond(syncConn((body || {}).source));
       if (path === "/admin/refresh/run-due") return respond(runDueConn());
       if (path === "/admin/connectors/delete") return respond(deleteConn((body || {}).source));
-      // upload / bulk-delete / budget / authority — demo success
+      // T131 — uploads are REAL in-browser: the file is added to the Files source
+      // at once (answerable immediately) and, when a commit endpoint is configured,
+      // POSTed there to land in the repo. Delete removes it from both.
+      if (path === "/admin/upload" || path === "/curator/upload")
+        return respond(uploadDocs((body || {}).files || []));
+      if (path === "/admin/uploads/delete")
+        return respond(deleteUpload((body || {}).document_id || (body || {}).doc || ""));
+      // bulk-delete / budget / authority — demo success
       return respond({ ok: true, note: "showcase — action acknowledged (no server-side state on Pages)" });
     }
     // GET
@@ -1137,6 +1295,7 @@
     // T129 — the connectors card list reflects the visitor's live on/off + sync
     // state (and hides a deleted source), so a reload shows what they changed.
     if (path === "/admin/connectors") return respond(connectorsPayload());
+    if (path === "/admin/uploads") return respond(uploadsPayload());  // T131
     if (path === "/api/corpus") return respond(SNAP.corpus || {});
     // T82 — suggestions are baked per subject (so the reader's persona known
     // questions show) with a scope-key fallback for older snapshots.
