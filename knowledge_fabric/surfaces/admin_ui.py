@@ -231,12 +231,16 @@ _SLA = card(
     right='<span class="muted small">median · p95 · fast/agent · explain rate · cost</span>',
 )
 
-# T96 — the leadership ROI page: value (hours saved), cost + cost avoided, the
-# ROI ratio, adoption, quality and the service SLA line. Two Settings knobs drive
-# the money math. Everything reconciles with the panels below.
+# T96 + T125 — the leadership ROI page. Value delivered and the ROI ratio are now
+# REAL-TIME, driven by the live question count and the real token consumption of
+# every answer (paid, open-source LLM, or extractive NLP alike): value is the
+# frontier-equivalent worth of that answering, spend is the real cost (paid API +
+# imputed self-hosted compute). The minutes-saved / loaded-rate knobs drive only
+# the secondary labour view now. Everything reconciles with the panels below.
 _OVERVIEW = card(
     "Overview — value &amp; ROI",
     '<div class="row" id="roi-settings" style="gap:10px;flex-wrap:wrap;margin-bottom:6px">'
+    '<span class="muted small">Labour view (secondary):</span>'
     '<label class="muted small">Minutes saved / question <input type="number" id="roi-minutes" '
     'min="0" step="1" style="width:70px"></label>'
     '<label class="muted small">Loaded rate $/h <input type="number" id="roi-rate" min="0" '
@@ -251,7 +255,8 @@ _OVERVIEW = card(
     '<div><div class="section-title">Quality &amp; service</div><div id="roi-quality" '
     'class="muted small"></div></div></div>',
     "overview-panel",
-    right='<span class="muted small">hours saved &middot; cost avoided &middot; ROI ratio</span>',
+    right='<span class="muted small">real-time · tokens &middot; market-rate value '
+    "&middot; ROI ratio</span>",
 )
 
 # T96 — the technical OTel view: a recent-trace list (click for the span

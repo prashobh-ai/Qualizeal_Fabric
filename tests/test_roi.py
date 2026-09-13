@@ -61,25 +61,42 @@ class TestSettings(Base):
 
 
 class TestRoiMath(Base):
-    def test_hours_saved_value_and_ratio(self):
-        roi.set_settings({"minutes_saved_per_question": 15, "loaded_rate_per_hour": 100})
+    def test_value_and_ratio_are_consumption_driven(self):
+        """T125 — value delivered and the ROI ratio derive from the live question
+        count and the real token consumption of EVERY answer, not a fed calculator.
+        In extractive mode (no key) tokens are still measured and the compute cost
+        is imputed, so MODEL SPEND is non-zero and the ROI ratio is a real number."""
         o = roi.overview(self.p, T)
         answered = o["value"]["questions_answered"]
         self.assertEqual(answered, len(_QS))
-        # hours saved = answered * minutes / 60
-        self.assertAlmostEqual(o["value"]["hours_saved"], round(answered * 15 / 60.0, 2), places=2)
-        # value delivered = hours saved * loaded rate
-        self.assertAlmostEqual(
-            o["roi"]["value_delivered_usd"], round(o["value"]["hours_saved"] * 100, 2), places=2
+
+        # real token consumption is recorded even keyless (extractive path)
+        self.assertGreater(o["value"]["total_tokens"], 0)
+        self.assertEqual(
+            o["value"]["total_tokens"], o["value"]["tokens_in"] + o["value"]["tokens_out"]
         )
-        # ratio = value / spend (or None when spend is zero, as in extractive mode)
+
+        # value delivered = the frontier-equivalent worth of those tokens
+        expected_value = roi._frontier_value(o["value"]["tokens_in"], o["value"]["tokens_out"])
+        self.assertAlmostEqual(o["roi"]["value_delivered_usd"], expected_value, places=6)
+
+        # spend is real (imputed self-hosted compute), so the ratio is a real number
         spend = o["roi"]["spend_usd"]
-        if spend:
-            self.assertAlmostEqual(
-                o["roi"]["ratio"], round(o["roi"]["value_delivered_usd"] / spend, 2)
-            )
-        else:
-            self.assertIsNone(o["roi"]["ratio"])
+        self.assertGreater(spend, 0.0)
+        self.assertAlmostEqual(o["roi"]["ratio"], round(expected_value / spend, 2))
+        # the frontier baseline is named for auditability
+        self.assertIn("frontier_model", o["roi"])
+
+    def test_labour_view_still_settings_driven(self):
+        """The secondary labour view stays tunable (hours saved × rate), but no
+        longer defines value delivered or the ratio."""
+        roi.set_settings({"minutes_saved_per_question": 15, "loaded_rate_per_hour": 100})
+        o = roi.overview(self.p, T)
+        answered = o["value"]["questions_answered"]
+        self.assertAlmostEqual(o["value"]["hours_saved"], round(answered * 15 / 60.0, 2), places=2)
+        self.assertAlmostEqual(
+            o["value"]["labour_value_usd"], round(o["value"]["hours_saved"] * 100, 2), places=2
+        )
 
     def test_adoption_and_quality_reconcile_with_analytics(self):
         o = roi.overview(self.p, T)
