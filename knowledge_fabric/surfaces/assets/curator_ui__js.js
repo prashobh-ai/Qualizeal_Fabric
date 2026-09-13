@@ -292,4 +292,6 @@ $('#doc-refresh').onclick=loadAll;$('#history-close').onclick=()=>$('#history-pa
 $('#add-doc-form').addEventListener('submit',addDoc);
 $('#repo-refresh').onclick=loadFabricViews;$('#repo-close').onclick=()=>$('#repo-panel').classList.add('hidden');$('#tq-run').onclick=runTableQuery;
 $('#registry-form').addEventListener('submit',addKnown);
+// T134 — recompute the readiness rings, gaps and timeline live on any change.
+if(KF.onChange)KF.onChange(()=>{if(KF.session)loadAll()});
 if(KF.session)loadAll();else gate({status:401,message:''},'curator');

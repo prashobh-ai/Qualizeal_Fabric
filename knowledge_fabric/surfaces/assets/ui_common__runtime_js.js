@@ -69,5 +69,19 @@ const KF=(()=>{
  function initBar(opts){opts=opts||{};load();applyBase();renderWho()}
  function bar(pctv,color){const v=Math.max(0,Math.min(1,Number(pctv)||0));return '<div class="trk"><i style="width:'+(v*100).toFixed(0)+'%;background:'+(color||'var(--accent)')+'"></i></div>'}
  function level(x,good,warn){x=Number(x)||0;return x>=good?'good':x>=warn?'warn':'bad'}
- return {DIR,$,$$,esc,num,pct,money,ms,when,ago,api,login,authLogin,whoami,authConfig,ssoFromHash,logout,hasRole,toast,gate,initBar,applyBase,nav,base:()=>BASE,bar,level,get session(){return session}};
+ // T134 — one live-refresh bus every surface shares. onChange fires on same-tab
+ // "kf:changed" (dispatched by the engine's evAppend) AND on cross-tab "storage"
+ // writes to the ledger keys, debounced so a burst of events causes one repaint —
+ // so a question asked in one tab moves the Admin counters in another with no reload.
+ function onChange(fn){let t=null;const run=()=>{clearTimeout(t);t=setTimeout(fn,250)};
+  window.addEventListener('kf:changed',run);
+  window.addEventListener('storage',e=>{if(e&&(e.key==='kf.events'||e.key==='kf.ledger'||e.key==='kf.consumption'||e.key==='kf.connectors'||e.key==='kf.uploads'||e.key==='kf.settings'))run()});
+  return run}
+ // UI-side events (speech, session) append to the SAME store the engine reads and
+ // ping the bus. Kept ≤1000 rows; a private-mode write failure is swallowed.
+ function event(kind,row){try{const a=JSON.parse(localStorage.getItem('kf.events')||'[]');
+  a.push(Object.assign({id:'e'+Date.now()+Math.random().toString(36).slice(2,6),ts:Date.now(),kind:kind},row||{}));
+  localStorage.setItem('kf.events',JSON.stringify(a.slice(-1000)))}catch(e){}
+  try{window.dispatchEvent(new CustomEvent('kf:changed',{detail:{kind:kind}}))}catch(e){}}
+ return {DIR,$,$$,esc,num,pct,money,ms,when,ago,api,login,authLogin,whoami,authConfig,ssoFromHash,logout,hasRole,toast,gate,initBar,applyBase,nav,base:()=>BASE,bar,level,onChange,event,get session(){return session}};
 })();

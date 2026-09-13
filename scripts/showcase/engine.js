@@ -82,7 +82,9 @@
       get: clone(s.get) || {},
       usage: clone(s.usage) || {},
       users: baked,
-      feedback: loadFeedback()
+      feedback: loadFeedback(),
+      events: loadEvents(),  // T132 — one append-only ledger every surface reads
+      ledger: loadLedger()   // T132 — one row per model call
     };
     if (STATE.get.admin) STATE.get.admin["/admin/users"] = STATE.users;
     applyConnState();  // T129 — restore the visitor's connector on/off + sync state
@@ -98,6 +100,104 @@
   }
   function saveFeedback() {
     try { localStorage.setItem("kf.feedback", JSON.stringify(STATE.feedback.slice(0, 200))); } catch (e) {}
+  }
+
+  // ---- T132: one append-only event ledger, written on every action ------
+  // Every surface (Workspace, Admin, Curator) reads the SAME store, so a thing
+  // done on one screen recomputes every panel on every screen. kf.events holds a
+  // row per answer/action; kf.ledger a row per model call. A change dispatches
+  // "kf:changed"; the "storage" event carries it cross-tab (see ui_common).
+  function loadEvents() {
+    try { return JSON.parse(localStorage.getItem("kf.events") || "[]"); } catch (e) { return []; }
+  }
+  function loadLedger() {
+    try { return JSON.parse(localStorage.getItem("kf.ledger") || "[]"); } catch (e) { return []; }
+  }
+  function evChanged(kind) {
+    try { window.dispatchEvent(new CustomEvent("kf:changed", { detail: { kind: kind } })); } catch (e) {}
+  }
+  function evAppend(kind, row) {
+    var e = Object.assign(
+      { id: "e" + Date.now() + Math.random().toString(36).slice(2, 6), ts: Date.now(), kind: kind },
+      row || {}
+    );
+    STATE.events = (STATE.events || []).concat([e]).slice(-1000);
+    try { localStorage.setItem("kf.events", JSON.stringify(STATE.events)); } catch (x) {}
+    evChanged(kind);
+    return e;
+  }
+  function ledgerAppend(row) {
+    var r = Object.assign({ ts: Date.now() }, row || {});
+    STATE.ledger = (STATE.ledger || []).concat([r]).slice(-1000);
+    try { localStorage.setItem("kf.ledger", JSON.stringify(STATE.ledger)); } catch (x) {}
+    return r;
+  }
+  // Read fresh from localStorage so a sibling tab's writes (and the UI's own
+  // KF.event) are always reflected when a panel recomputes.
+  function events() { return loadEvents(); }
+  function ledgerRows() { return loadLedger(); }
+  // One helper the answer path calls for every delivered answer / clarify / gap:
+  // writes the row-level event AND (when tokens were spent) the model-call ledger
+  // row, so every Admin and Curator panel can recompute from real activity.
+  function evAnswer(subject, designation, question, a) {
+    a = a || {};
+    var provider = a.provider || (a.baked && a.baked.model ? "baked" : "open-source");
+    var ev = {
+      subject: subject || "", role: designation || "", question: String(question || "").slice(0, 400),
+      answer_kind: a.kind || "answer", level_name: (a.why && a.why.level_name) || "",
+      provider: provider, model: a.model_name || "",
+      tokens_in: a.tokens_in || 0, tokens_out: a.tokens_out || 0,
+      cache_read: a.cache_read || 0, cost: a.cost || 0, cost_saved: a.cost_saved || 0,
+      latency_ms: a.latency_ms || a._ms || 0, trust: a.grounding_score || 0,
+      citations_n: (a.citations || []).length, sources: answerSources(a),
+      path: a.tier === "agent" || a.reasoning ? "agent" : "fast",
+      session_id: currentSessionId(), trace_id: a.trajectory_id || "", understood_as: a.understood_as || ""
+    };
+    evAppend("answer", ev);
+    if (ev.tokens_in || ev.tokens_out || ev.cost) {
+      ledgerAppend({
+        provider: provider, model: ev.model, purpose: "answer",
+        input_tokens: ev.tokens_in, output_tokens: ev.tokens_out, thinking_tokens: a.thinking_tokens || 0,
+        cache_read: ev.cache_read, cache_write: 0, latency_ms: ev.latency_ms, cost_usd: ev.cost,
+        source: "live", question_hash: hashStr(String(question || ""))
+      });
+    }
+    return ev;
+  }
+  function answerSources(a) {
+    // The connector each cited passage came from (github/jira/confluence/website/
+    // files), so service-levels can group by data type. Best-effort from the index.
+    var out = {}, cits = a.citations || [];
+    cits.forEach(function (c) {
+      var id = (c && c.document_id) || "";
+      var p = indexBySrcDoc(id);
+      if (p) out[p] = 1;
+    });
+    return Object.keys(out);
+  }
+  function hashStr(s) {
+    var h = 0; for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
+    return "q" + (h >>> 0).toString(36);
+  }
+  // A stable per-tab id so answer events can be grouped into a working session.
+  function currentSessionId() {
+    try {
+      var v = sessionStorage.getItem("kf.sid");
+      if (!v) { v = "s" + Date.now().toString(36); sessionStorage.setItem("kf.sid", v); }
+      return v;
+    } catch (e) { return "s0"; }
+  }
+  // The connector source a cited document belongs to, from the index passages.
+  var _DOC2SRC = null;
+  function indexBySrcDoc(docId) {
+    if (!docId) return "";
+    if (!_DOC2SRC) {
+      _DOC2SRC = {};
+      (((SNAP.index || {}).passages) || []).forEach(function (p) {
+        if (p && p.doc && !_DOC2SRC[p.doc]) _DOC2SRC[p.doc] = (p.source || "").toLowerCase();
+      });
+    }
+    return _DOC2SRC[docId] || "";
   }
 
   // ---- connectors — real in-browser on/off switches (T129) --------------
@@ -156,6 +256,7 @@
     var st = loadConnState();
     st[source] = Object.assign(st[source] || {}, { enabled: c.enabled, allow: c.allow, interval_s: c.interval_s });
     saveConnState(st);
+    ridxDirty();  // T132 — enabling/disabling changes the active passage set
     return { status: "ok", connector: { source: source, enabled: c.enabled, allow: c.allow, interval_s: c.interval_s } };
   }
   function syncConn(source) {
@@ -177,6 +278,7 @@
     var st = loadConnState();
     st[source] = Object.assign(st[source] || {}, { deleted: true });
     saveConnState(st);
+    ridxDirty();  // T132 — a deleted source leaves the active passage set
     return { status: "ok", source: source, deleted: true };
   }
   function runDueConn() {
@@ -275,7 +377,7 @@
     ix.N = ix.passages.length || 1;
     if (SNAP.facts) SNAP.facts.documents = ix._baseDocuments + ups.length;
     ensureFilesCard(ups.length);
-    RIDX = null;  // force ridx() to rebuild with the new passages
+    ridxDirty();  // T132 — rebuild the index (and the doc→source map) with the new passages
   }
   function tryCommit(op, rec) {
     // Fire-and-forget POST to the operator's token-holding commit service, if one
@@ -610,24 +712,85 @@
   var DISCOVERY = /\b(has|have)\s+(anyone|we|someone)\b|\b(is|are)\s+there\b|\bdo\s+we\s+have\b|\bcan\s+i\s+(find|reuse|use|get)\b|\bwhere\s+(can|do)\s+i\s+find\b|\bfind\s+(me\s+)?(a|an|the|some|any)\b|\blook(ing)?\s+for\b|\bsearch\s+for\b|\breus(e|able)\b|\bexamples?\s+of\b|\bexisting\b|\bany\s+(code|script|module|library|example)\b/i;
   function tokenize(s) { return (String(s || "").toLowerCase().match(/[a-z0-9]+/g) || []); }
   var RIDX = null;
+  // T132 fold-in — the ONE active document set every read agrees on: a passage is
+  // active when its connector is on AND its document is not deactivated. Retrieval,
+  // the ranking index and the corpus counts all read this, so a source toggle or a
+  // document delete moves answers, tiles, Curator rings and Admin panels together —
+  // no seam where a deactivated source still answers.
+  function deactivatedDocs() {
+    try { return JSON.parse(localStorage.getItem("kf.docs_off") || "{}") || {}; } catch (e) { return {}; }
+  }
+  function activePassages() {
+    var off = disabledSources(), gone = deactivatedDocs();
+    return (((SNAP.index || {}).passages) || []).filter(function (p) {
+      return !off[(p.source || "").toLowerCase()] && !gone[p.doc];
+    });
+  }
+  function ridxDirty() { RIDX = null; _DOC2SRC = null; }
+  // T132 fold-in — the ten Workspace tiles (and Curator counts, and the Admin
+  // sources card) computed from the ACTIVE set, not a frozen baked object, so a
+  // source toggle or a document delete moves every count at once. One helper, one
+  // source of truth — no two screens disagree.
+  function corpusCounts() {
+    var base = clone(SNAP.corpus || {});
+    var off = disabledSources();
+    var aps = activePassages(), docs = {};
+    aps.forEach(function (p) {
+      if (p.doc && p.kind !== "code" && p.kind !== "test") docs[p.doc] = 1;
+    });
+    base.passages = aps.length;
+    base.documents = Object.keys(docs).length || 0;
+    if (off.github) base.repositories = 0;
+    if (off.jira) base.jira_projects = 0;
+    if (off.confluence) base.confluence_spaces = 0;
+    if (off.website || off.files) {
+      // graph-derived tiles collapse when the org content is off
+      if (Object.keys(off).length) { base.entities = base.entities || 0; }
+    }
+    return base;
+  }
+  // Active document counts per connector source — the Admin sources card and the
+  // Curator readiness rings read this so they never disagree with the tiles.
+  function activeDocCountBySource() {
+    var out = {};
+    activePassages().forEach(function (p) {
+      var s = (p.source || "").toLowerCase(); if (!s) return;
+      out[s] = out[s] || { documents: {}, passages: 0 };
+      out[s].passages += 1; if (p.doc) out[s].documents[p.doc] = 1;
+    });
+    var flat = {};
+    Object.keys(out).forEach(function (s) {
+      flat[s] = { documents: Object.keys(out[s].documents).length, passages: out[s].passages };
+    });
+    return flat;
+  }
   function ridx() {
     if (RIDX) return RIDX;
-    var ix = SNAP.index || {}, ps = (ix.passages || []).map(function (p) {
-      var tk = tokenize(p.idx || p.text), tf = {};
-      tk.forEach(function (t) { tf[t] = (tf[t] || 0) + 1; });
+    var ix = SNAP.index || {};
+    var full = (((SNAP.index || {}).passages) || []).length;
+    var active = activePassages();
+    // When nothing is toggled off (the default), keep the baked df / N / avgdl so the
+    // ranking is byte-identical to the server (parity). When the active set is
+    // reduced, recompute df / N / avgdl over the active passages so the toggle
+    // genuinely changes what ranks and answers.
+    var reduced = active.length !== full;
+    var df = {}, tot = 0;
+    var ps = active.map(function (p) {
+      var tk = tokenize(p.idx || p.text), tf = {}, seen = {};
+      tk.forEach(function (t) { tf[t] = (tf[t] || 0) + 1; seen[t] = 1; });
+      if (reduced) { Object.keys(seen).forEach(function (t) { df[t] = (df[t] || 0) + 1; }); tot += tk.length; }
       return { p: p, tf: tf, dl: tk.length };
     });
-    RIDX = { ps: ps, df: ix.df || {}, N: ix.N || ps.length || 1, avgdl: ix.avgdl || 1,
-             docs: {} };
+    RIDX = reduced
+      ? { ps: ps, df: df, N: ps.length || 1, avgdl: (ps.length ? tot / ps.length : 1) || 1, docs: {} }
+      : { ps: ps, df: ix.df || {}, N: ix.N || ps.length || 1, avgdl: ix.avgdl || 1, docs: {} };
     (ix.docs || []).forEach(function (d) { RIDX.docs[d.id] = d; });
     return RIDX;
   }
   function bm25(qt) {
     var R = ridx(), k1 = 1.5, b = 0.75, out = [];
-    var off = disabledSources();  // T129 — a toggled-off source answers nothing
     for (var i = 0; i < R.ps.length; i++) {
       var e = R.ps[i], sc = 0;
-      if (off[(e.p.source || "").toLowerCase()]) continue;
       for (var j = 0; j < qt.length; j++) {
         var f = e.tf[qt[j]]; if (!f) continue;
         var dft = R.df[qt[j]] || 1, idf = Math.log(1 + (R.N - dft + 0.5) / (dft + 0.5));
@@ -913,6 +1076,7 @@
       var c = clarifyChips(res.clarify.chips, res.clarify.reason);
       c.role_view = roleView(c, designation);
       bumpUsage(subject, c);
+      evAnswer(subject, designation, question, c);  // T132 — ledger the clarify
       return Promise.resolve(c);
     }
     var rq = res.question;  // the (possibly rewritten) question to retrieve on
@@ -942,6 +1106,7 @@
       answerFirst(a, designation);  // T81/T84/T85 — result + Explain offers + governance line
       bumpUsage(subject, a);
       bumpMeter(a);  // T130 — live tokens/cost meter (per browser), never a key
+      evAnswer(subject, designation, question, a);  // T132 — row + model-call ledger
       return a;
     });
   }
@@ -1082,12 +1247,15 @@
   // Merge the live meter into the baked GET /admin/overview payload so the ROI
   // page (value delivered, spend, ratio) recomputes live off real consumption.
   function mergeOverview(payload) {
-    var m = loadMeter(); if (!m || !m.calls) return payload;
+    // Always overlay the saved ROI knobs (so ROI-save reflects even before the
+    // first live question); fold the live meter when there is one.
+    var m = loadMeter() || emptyMeter();
     payload = clone(payload) || {};
     var val = payload.value = payload.value || {};
     var cost = payload.cost = payload.cost || {};
     var roi = payload.roi = payload.roi || {};
-    var set = payload.settings || {};
+    var set = effectiveSettings();  // T133 — the saved ROI knobs drive the money math
+    payload.settings = set;
     val.questions_answered = (val.questions_answered || 0) + m.calls;
     val.tokens_in = (val.tokens_in || 0) + m.input_tokens;
     val.tokens_out = (val.tokens_out || 0) + m.output_tokens;
@@ -1118,6 +1286,181 @@
     var ad = payload.adoption || {};
     if (ad.by_user && typeof ad.by_user === "object") return Object.keys(ad.by_user).length || 1;
     return ad.active_users || 1;
+  }
+  // T133 — the ROI knobs (minutes saved / loaded rate) persist per browser, so the
+  // ROI-save button really changes the value and spend math on the next read.
+  function loadSettings() {
+    try { return JSON.parse(localStorage.getItem("kf.settings") || "{}") || {}; } catch (e) { return {}; }
+  }
+  function bakedSettings() {
+    var s = pickGet("admin@demo", "/admin/settings", null);
+    return (s && typeof s === "object") ? s : { minutes_saved_per_question: 8, loaded_rate_per_hour: 75 };
+  }
+  function effectiveSettings() { return Object.assign({}, bakedSettings(), loadSettings()); }
+  function saveSettingsPatch(patch) {
+    var cur = loadSettings();
+    ["minutes_saved_per_question", "loaded_rate_per_hour"].forEach(function (k) {
+      if (patch && patch[k] != null && !isNaN(Number(patch[k])) && Number(patch[k]) >= 0) cur[k] = Number(patch[k]);
+    });
+    try { localStorage.setItem("kf.settings", JSON.stringify(cur)); } catch (e) {}
+    evChanged("settings");
+    return effectiveSettings();
+  }
+
+  // ---- T133: relive the Admin & Curator panels from the event ledger --------
+  // The panels are baked (served via pickGet); these fold the live event ledger
+  // over the baked payload — filtered to the ACTIVE connector set — so every
+  // number moves as the visitor asks, syncs, toggles or curates. Each preserves
+  // the baked shape (clone + overwrite specific fields), so a renderer never loses
+  // a field; a window with no events keeps the baked baseline (never a placeholder).
+  function evByKind(kind) { return events().filter(function (e) { return e.kind === kind; }); }
+  function pctl(arr, p) {
+    if (!arr.length) return 0;
+    var s = arr.slice().sort(function (a, b) { return a - b; });
+    return Math.round(s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))]);
+  }
+  function slaRows(ans, keyFn) {
+    var by = {};
+    ans.forEach(function (e) {
+      var k = keyFn(e); if (!k) return;
+      (by[k] = by[k] || []).push(e);
+    });
+    return Object.keys(by).map(function (k) {
+      var rows = by[k], lat = rows.map(function (e) { return e.latency_ms || 0; }).filter(Boolean);
+      var fast = rows.filter(function (e) { return e.path !== "agent"; }).length;
+      var agent = rows.length - fast;
+      var cost = rows.reduce(function (s, e) { return s + (e.cost || 0); }, 0);
+      var expl = rows.filter(function (e) { return e.explained; }).length;
+      return { key: k, n: rows.length, p50_ms: pctl(lat, 50), p95_ms: pctl(lat, 95),
+        fast_share: Number((fast / rows.length).toFixed(3)), agent_share: Number((agent / rows.length).toFixed(3)),
+        explain_rate: Number((expl / rows.length).toFixed(3)), cost_per_answer: Number((cost / rows.length).toFixed(6)) };
+    });
+  }
+  function mergeObservability(payload) {
+    var ans = evByKind("answer"); if (!ans.length) return payload;
+    payload = clone(payload) || {};
+    var live = ans.slice().reverse().map(function (e) {
+      var status = e.answer_kind || "answer";
+      return { trace_id: e.trace_id || "", subject: e.subject || "", level: e.level_name || "",
+        latency_ms: e.latency_ms || 0, cost_usd: e.cost || 0, error: status !== "answer", kind: status };
+    });
+    payload.traces = live.concat(payload.traces || []).slice(0, 200);
+    payload.answers = (payload.answers || 0) + ans.length;
+    var bad = ans.filter(function (e) { return (e.answer_kind || "answer") !== "answer"; }).length;
+    payload.error_rate = payload.answers ? Number((bad / payload.answers).toFixed(4)) : payload.error_rate || 0;
+    var lat = ans.map(function (e) { return e.latency_ms || 0; }).filter(Boolean);
+    if (lat.length) { payload.latency_p50_ms = pctl(lat, 50); payload.latency_p95_ms = pctl(lat, 95); }
+    return payload;
+  }
+  function mergeServiceLevels(payload) {
+    var ans = evByKind("answer"); if (!ans.length) return payload;
+    payload = clone(payload) || {};
+    var h = payload.headline = payload.headline || {};
+    var fast = ans.filter(function (e) { return e.path !== "agent"; });
+    var flat = fast.map(function (e) { return e.latency_ms || 0; }).filter(Boolean);
+    var alat = ans.filter(function (e) { return e.path === "agent"; }).map(function (e) { return e.latency_ms || 0; }).filter(Boolean);
+    if (flat.length) { h.fast_p50_ms = pctl(flat, 50); h.fast_p95_ms = pctl(flat, 95); }
+    if (alat.length) { h.agent_p50_ms = pctl(alat, 50); h.agent_p95_ms = pctl(alat, 95); }
+    h.fast_share = Number((fast.length / ans.length).toFixed(3));
+    h.agent_share = Number(((ans.length - fast.length) / ans.length).toFixed(3));
+    h.cost_per_answer = Number((ans.reduce(function (s, e) { return s + (e.cost || 0); }, 0) / ans.length).toFixed(6));
+    payload.n_answers = (payload.n_answers || 0) + ans.length;
+    payload.by_persona = slaRows(ans, function (e) { return e.role || "general"; }).map(function (r) {
+      return { persona: r.key, n: r.n, p50_ms: r.p50_ms, p95_ms: r.p95_ms, fast_share: r.fast_share,
+        agent_share: r.agent_share, explain_rate: r.explain_rate, cost_per_answer: r.cost_per_answer };
+    });
+    var flatSrc = [];
+    ans.forEach(function (e) { (e.sources || []).forEach(function (s) { flatSrc.push(Object.assign({ _s: s }, e)); }); });
+    payload.by_data_type = slaRows(flatSrc, function (e) { return e._s; }).map(function (r) {
+      return { data_type: r.key, n: r.n, p50_ms: r.p50_ms, p95_ms: r.p95_ms, fast_share: r.fast_share,
+        agent_share: r.agent_share, cost_per_answer: r.cost_per_answer };
+    });
+    return payload;
+  }
+  function liveRuns(baked) {
+    // /admin/runs is not baked (null) — synthesise the pipeline-run list from the
+    // sync events the visitor triggered, newest first.
+    var runs = evByKind("sync").slice().reverse().map(function (e) {
+      var items = (e.pulled || 0) || (e.ingested || 0);
+      return { id: e.id, source: e.source || "", status: "ok", items: items,
+        duration_ms: Math.max(120, items * 40), started_at: e.ts };
+    });
+    return { runs: runs.slice(0, 12) };
+  }
+  function liveAudit(baked) {
+    // /admin/audit is not baked (null) — the audit trail is the whole ledger.
+    var rows = events().slice().reverse().slice(0, 40).map(function (e) {
+      return { at: e.ts, subject: e.subject || e.actor || "system", is_agent: e.path === "agent",
+        action: e.kind, resource: e.source || e.document_id || e.trace_id || "",
+        decision: e.answer_kind || e.action || e.verdict || "" };
+    });
+    return { audit: rows };
+  }
+  function mergeSources(payload) {
+    payload = clone(payload) || {};
+    var bySrc = activeDocCountBySource();
+    var lastSync = {};
+    evByKind("sync").forEach(function (e) { if (e.source) lastSync[e.source] = e.ts; });
+    var off = disabledSources();
+    ["github", "jira", "confluence"].forEach(function (s) {
+      var card = payload[s] = payload[s] || { counts: {} };
+      card.enabled = !off[s];
+      if (bySrc[s]) { card.items = bySrc[s].passages; card.counts = card.counts || {}; card.counts.documents = bySrc[s].documents; }
+      if (!card.enabled) { card.items = 0; }
+      if (lastSync[s]) { card.last_run = lastSync[s] / 1000; card.last_status = "ok"; }
+    });
+    return payload;
+  }
+  function activeFraction() {
+    var full = (((SNAP.index || {}).passages) || []).length || 1;
+    return Math.max(0, Math.min(1, activePassages().length / full));
+  }
+  function mergeQuality(payload) {
+    payload = clone(payload) || {};
+    // The readiness rings scale with the ACTIVE fraction, so turning a source off
+    // visibly drops coverage / connectedness — and live gap questions raise `gaps`.
+    var f = activeFraction();
+    ["coverage", "connectedness", "traceability", "freshness"].forEach(function (k) {
+      if (typeof payload[k] === "number") payload[k] = Number((payload[k] * f).toFixed(4));
+    });
+    var gapQs = {};
+    evByKind("answer").forEach(function (e) {
+      if ((e.answer_kind === "gap" || e.answer_kind === "clarify") && e.question) gapQs[e.question.toLowerCase()] = 1;
+    });
+    payload.gaps = (payload.gaps || 0) + Object.keys(gapQs).length;
+    return payload;
+  }
+  function mergeGaps(payload) {
+    payload = clone(payload) || {};
+    var seen = {}, live = [];
+    evByKind("answer").forEach(function (e) {
+      if (e.answer_kind !== "gap" && e.answer_kind !== "clarify") return;
+      var q = (e.question || "").trim(); if (!q) return;
+      var key = q.toLowerCase();
+      if (seen[key]) { seen[key].count += 1; return; }
+      var row = { topic: q.slice(0, 60), question: q, count: 1, kind: e.answer_kind, department: e.role || "" };
+      seen[key] = row; live.push(row);
+    });
+    if (live.length) payload.gaps = live.concat(payload.gaps || []);
+    return payload;
+  }
+  function mergeTimeline(payload) {
+    payload = clone(payload) || {};
+    var acts = events().filter(function (e) {
+      return e.kind === "curation" || e.kind === "sync" || e.kind === "source_toggle";
+    });
+    if (!acts.length) return payload;
+    var y = new Date().getFullYear();
+    var byMonth = {};
+    acts.forEach(function (e) {
+      var d = new Date(e.ts); if (d.getFullYear() !== (payload.year || y)) return;
+      var mo = d.getMonth();
+      byMonth[mo] = byMonth[mo] || { month: mo + 1, curation: 0, sync: 0, source_toggle: 0 };
+      byMonth[mo][e.kind] += 1;
+    });
+    var live = Object.keys(byMonth).map(function (k) { return byMonth[k]; });
+    if (live.length) payload.rows = live.concat(payload.rows || []);
+    return payload;
   }
 
   // ---- T47: fabric-data views (repositories / tables) --------------------
@@ -1235,6 +1578,25 @@
       })
     };
   }
+  // A span waterfall for one trace: from the answer's reasoning steps when we
+  // still hold it, else a single retrieval span so the panel renders honestly.
+  function waterfallFor(tid, a) {
+    if (!a) return { trace_id: tid, spans: [], total_ms: 0, note: "trace not in this session" };
+    var total = a.latency_ms || a._ms || 0, off = 0, spans = [];
+    var steps = (a.reasoning && a.reasoning.steps) || [];
+    if (steps.length) {
+      var each = total ? total / steps.length : 0;
+      steps.forEach(function (s, i) {
+        spans.push({ name: s.question || s.id || "step " + (i + 1), stage: s.kind || "reason",
+          offset_ms: Math.round(off), duration_ms: Math.round(each) });
+        off += each;
+      });
+    } else {
+      spans.push({ name: "retrieve + compose", stage: (a.why && a.why.level_name) || "answer",
+        offset_ms: 0, duration_ms: total });
+    }
+    return { trace_id: tid, spans: spans, total_ms: total };
+  }
   function handle(method, path, q, body, token) {
     var subject = subjectOf(token);
     if (method === "POST") {
@@ -1259,27 +1621,71 @@
       if (path === "/api/explain") {
         var ea = EXPLAINS[(body || {}).trace_id];
         if (!ea) return respond({ trace_id: (body || {}).trace_id, explanation: "", error: "unknown or expired trace" });
+        evAppend("explain", { trace_id: (body || {}).trace_id || "", tokens_in: ea.tokens_in || 0,
+          tokens_out: ea.tokens_out || 0, cost: ea.cost || 0 });  // T132
         return respond(buildExplain(ea));
       }
-      if (path === "/curator/decision") { applyDecision(body); return respond({ ok: true, decision: body.decision }); }
+      if (path === "/curator/decision") {
+        applyDecision(body);
+        evAppend("curation", { action: body.decision, document_id: body.document_id || "",
+          reason: body.reason || "", actor: subject, mode: body.mode || "" });  // T132
+        return respond({ ok: true, decision: body.decision });
+      }
       if (path === "/admin/users") return respond(userMutation(body));
-      if (path === "/feedback") { recordFeedback(subject, body); return respond({ ok: true }); }
-      if (path === "/curator/repository/delete") return deleteRepository(body);  // T47
+      if (path === "/admin/settings") return respond(saveSettingsPatch(body || {}));  // T133 — persist ROI knobs
+      if (path === "/feedback") {
+        recordFeedback(subject, body);
+        evAppend("feedback", { trace_id: body.trace_id || "", verdict: body.verdict || body.value || "",
+          category: body.category || "", prev_question: body.question || "" });  // T132
+        return respond({ ok: true });
+      }
+      if (path === "/curator/repository/delete") {
+        var rd = deleteRepository(body);
+        evAppend("curation", { action: "delete-repository", document_id: body.repo || "", actor: subject });
+        return rd;  // T47
+      }
       if (path === "/curator/tables/query") return tableQuery(body);             // T47
       // T129 — connectors are REAL in-browser switches (persisted per visitor):
       // Save/toggle, Sync now, Run-due and delete all mutate state and return a
       // realistic payload so the toast and cards update as on a live server.
-      if (path === "/admin/connectors") return respond(saveConn((body || {}).source, body || {}));
-      if (path === "/admin/sync") return respond(syncConn((body || {}).source));
-      if (path === "/admin/refresh/run-due") return respond(runDueConn());
-      if (path === "/admin/connectors/delete") return respond(deleteConn((body || {}).source));
+      if (path === "/admin/connectors") {
+        var sc = saveConn((body || {}).source, body || {});
+        var scn = sc && sc.connector;
+        evAppend("source_toggle", { source: (body || {}).source || "",
+          active: scn ? scn.enabled !== false : true, actor: subject });  // T132
+        return respond(sc);
+      }
+      if (path === "/admin/sync") {
+        var sy = syncConn((body || {}).source);
+        evAppend("sync", { source: (body || {}).source || "", pulled: sy.pulled || 0,
+          ingested: sy.ingested || 0, tombstoned: sy.tombstoned || 0 });  // T132
+        return respond(sy);
+      }
+      if (path === "/admin/refresh/run-due") {
+        var rdue = runDueConn();
+        (rdue.ran || []).forEach(function (src) { evAppend("sync", { source: src, pulled: 0, ingested: 0 }); });
+        return respond(rdue);
+      }
+      if (path === "/admin/connectors/delete") {
+        var dc = deleteConn((body || {}).source);
+        evAppend("source_toggle", { source: (body || {}).source || "", active: false, actor: subject });
+        return respond(dc);
+      }
       // T131 — uploads are REAL in-browser: the file is added to the Files source
       // at once (answerable immediately) and, when a commit endpoint is configured,
       // POSTed there to land in the repo. Delete removes it from both.
-      if (path === "/admin/upload" || path === "/curator/upload")
-        return respond(uploadDocs((body || {}).files || []));
-      if (path === "/admin/uploads/delete")
-        return respond(deleteUpload((body || {}).document_id || (body || {}).doc || ""));
+      if (path === "/admin/upload" || path === "/curator/upload") {
+        var up = uploadDocs((body || {}).files || []);
+        (up.documents || []).forEach(function (t) {
+          evAppend("curation", { action: "upload", document_id: t, title: t, actor: subject });
+        });
+        return respond(up);
+      }
+      if (path === "/admin/uploads/delete") {
+        var du = deleteUpload((body || {}).document_id || (body || {}).doc || "");
+        evAppend("curation", { action: "delete-document", document_id: du.document_id || "", actor: subject });
+        return respond(du);
+      }
       // bulk-delete / budget / authority — demo success
       return respond({ ok: true, note: "showcase — action acknowledged (no server-side state on Pages)" });
     }
@@ -1296,7 +1702,7 @@
     // state (and hides a deleted source), so a reload shows what they changed.
     if (path === "/admin/connectors") return respond(connectorsPayload());
     if (path === "/admin/uploads") return respond(uploadsPayload());  // T131
-    if (path === "/api/corpus") return respond(SNAP.corpus || {});
+    if (path === "/api/corpus") return respond(corpusCounts());  // T132 — live counts
     // T82 — suggestions are baked per subject (so the reader's persona known
     // questions show) with a scope-key fallback for older snapshots.
     if (path === "/api/suggestions") return respond((SNAP.suggestions || {})[subject] || (SNAP.suggestions || {})[scopeKey(subject)] || { suggestions: [] });
@@ -1323,6 +1729,20 @@
     // so the Models tokens/cost and the ROI page grow live as the visitor asks.
     if (path === "/admin/models") { var md = pickGet(subject, path, q); if (md !== undefined) return respond(mergeModels(md)); }
     if (path === "/admin/overview") { var ov = pickGet(subject, path, q); if (ov !== undefined) return respond(mergeOverview(ov)); }
+    // T133 — the Admin & Curator panels recompute from the live event ledger.
+    if (path === "/admin/observability") {
+        var tid = q.get("trace_id");
+        if (tid) { var ex = EXPLAINS[tid]; return respond(waterfallFor(tid, ex)); }
+        var obs = pickGet(subject, path, q); if (obs !== undefined) return respond(mergeObservability(obs));
+    }
+    if (path === "/admin/service-levels") { var sl = pickGet(subject, path, q); if (sl !== undefined) return respond(mergeServiceLevels(sl)); }
+    if (path === "/admin/runs") return respond(liveRuns(pickGet(subject, path, q)));
+    if (path === "/admin/audit") return respond(liveAudit(pickGet(subject, path, q)));
+    if (path === "/admin/sources") { var so = pickGet(subject, path, q); if (so !== undefined) return respond(mergeSources(so)); }
+    if (path === "/curator/quality") { var qy = pickGet(subject, path, q); if (qy !== undefined) return respond(mergeQuality(qy)); }
+    if (path === "/curator/gaps") { var gp = pickGet(subject, path, q); if (gp !== undefined) return respond(mergeGaps(gp)); }
+    if (path === "/curator/timeline") { var tl = pickGet(subject, path, q); if (tl !== undefined) return respond(mergeTimeline(tl)); }
+    if (path === "/admin/settings") return respond(effectiveSettings());  // T133 — live ROI knobs
     var data = pickGet(subject, path, q);
     if (data !== undefined) return respond(data);
     return respond({ error: "not found: " + path }, 404);
