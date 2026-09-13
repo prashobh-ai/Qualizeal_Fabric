@@ -491,6 +491,58 @@
     return DISCOVERY.test(question) ? discoveryAnswer(scored) : composeAnswer(question, scored, prof);
   }
 
+  // T126 — the facts / inventory tier, mirroring the server's aggregate path. A
+  // count question ("how many repos / Jira issues / Confluence pages / documents")
+  // is answered from the baked facts summary BEFORE BM25 retrieval, so it returns
+  // the real number instead of a matching code/test symbol. Only count intent
+  // fires it, so "where is the login" still routes to the code/prose tiers.
+  var COUNT_INTENT = /\b(how many|how much|number of|count of|total (?:number )?of)\b/i;
+  function factCite(title, url) {
+    return {
+      document_id: url || title, document_title: title,
+      coordinate: { kind: "page_paragraph", locator: url ? { url: url } : { path: "data/facts.json" } },
+      coordinate_render: "", passage_id: "", snippet: ""
+    };
+  }
+  function factsAnswer(question) {
+    var f = SNAP.facts;
+    if (!f || !COUNT_INTENT.test(question)) return null;
+    var ql = question.toLowerCase();
+    var asOf = SNAP.as_of || "as of the last fabric build";
+    if (/\b(repos?|repositor(?:y|ies))\b/.test(ql) && f.repo_count != null) {
+      return mkAnswer("facts", 1,
+        "The fabric covers " + f.repo_count + " repositories (" + asOf + "): " +
+          (f.repositories || []).join(", ") + " [1].",
+        [factCite("facts.json", "")], 0.95);
+    }
+    if (/\bbugs?\b/.test(ql) && f.jira && f.jira.by_type) {
+      var nb = f.jira.by_type.Bug || 0;
+      return mkAnswer("facts", 1,
+        "Jira project " + f.jira.name + " (" + f.jira.project + ") has " + nb +
+          " bugs of " + f.jira.total + " issues [1].",
+        [factCite("Jira " + f.jira.project, f.jira.url)], 0.95);
+    }
+    if (/\b(issues?|tickets?|stories|story|tasks?|epics?|jira)\b/.test(ql) && f.jira) {
+      var done = (f.jira.by_status && f.jira.by_status.Done) || 0;
+      return mkAnswer("facts", 1,
+        "Jira project " + f.jira.name + " (" + f.jira.project + ") has " + f.jira.total +
+          " issues (" + done + " done) [1].",
+        [factCite("Jira " + f.jira.project, f.jira.url)], 0.95);
+    }
+    if (/\b(pages?|confluence|space)\b/.test(ql) && f.confluence) {
+      return mkAnswer("facts", 1,
+        "Confluence space " + f.confluence.name + " (" + f.confluence.space + ") has " +
+          f.confluence.pages + " pages [1].",
+        [factCite("Confluence " + f.confluence.space, f.confluence.url)], 0.95);
+    }
+    if (/\b(documents?|docs|files)\b/.test(ql) && f.documents != null) {
+      return mkAnswer("facts", 1,
+        "The fabric holds " + f.documents + " documents (" + asOf + ") [1].",
+        [factCite("facts.json", "")], 0.95);
+    }
+    return null;
+  }
+
   // ---- T27: role-conditioned lens ---------------------------------------
   // The role is the signed-in identity's org DESIGNATION (granted by the admin
   // at access time), read via designationOf — never chosen on the ask window.
@@ -620,7 +672,7 @@
       if (!a) {
         // 2) in-browser retrieval and facts. A snapshot answer is persona-agnostic;
         // live retrieval applies the persona's emphasis + depth.
-        a = lookup(rq) || retrieve(rq, prof);
+        a = lookup(rq) || factsAnswer(rq) || retrieve(rq, prof);
         if (!a) {
           var s2 = subjectInText(rq);
           if (s2) a = clarifyAnswer(s2, question, turns.map(function (t) { return t.question; }));

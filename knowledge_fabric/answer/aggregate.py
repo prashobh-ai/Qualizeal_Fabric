@@ -1321,9 +1321,18 @@ def _p_jira(p, principal, q, ql, facts, caps, ents, context, live_jql=None) -> F
 
 def _p_confluence(p, principal, q, ql, facts, caps, ents, context) -> FactsResult | None:
     r = ents["space"]
+    conf_words = re.search(r"\bpages?\b|\bspace\b|\bconfluence\b|\bupdated\b", ql)
     if r.kind == "ambiguous" and re.search(r"\bpages?\b|\bspace\b|\bconfluence\b", ql):
         return _clarify("Which Confluence space do you mean?", r.options)
-    if r.kind != "ok" or not re.search(r"\bpages?\b|\bspace\b|\bconfluence\b|\bupdated\b", ql):
+    if r.kind != "ok":
+        # A generic "how many pages are in Confluence" with a single space resolves
+        # to it (mirrors the single-project fallback in _p_jira), so the count
+        # answers without the reader naming the space.
+        if conf_words and len(facts.get("confluence_spaces") or {}) == 1:
+            r = Resolved("ok", next(iter(facts["confluence_spaces"])), 0.8)
+        else:
+            return None
+    if not conf_words:
         return None
     block = facts["confluence_spaces"].get(r.name) or {}
     text = (

@@ -108,6 +108,106 @@ TEST_FILES = [
 # learning material and must not hit a blind gap.
 ORG_DIR = os.path.join(ROOT, "corpus", "org")
 
+# --------------------------------------------------------------------------
+# T126/T127 — Jira + Confluence in the demo. The GitHub Pages showcase is static,
+# so it cannot call Atlassian at runtime. Instead the build seeds a representative
+# QualiZeal Jira project and Confluence space (the company's OWN demo dataset,
+# clearly the Internal showcase — no external record is impersonated), ingests
+# their items through the SAME 7-step pipeline as every other source, and writes
+# the facts the count/inventory answers read. So the baked demo ships all four
+# sources connected-with-data and answering, exactly like GitHub.
+SAMPLE_REPOS = [
+    (
+        "Qualizeal/qualizeal-fabric",
+        "Python",
+        "Enterprise knowledge fabric — governed answers, telemetry, cost-aware model switching.",
+    ),
+    ("Qualizeal/qmentisai", "Python", "QMentisAI — agentic AI testing platform."),
+    ("Qualizeal/validaite", "TypeScript", "ValidAIte — AI system validation and evaluation."),
+    ("Qualizeal/nexaai", "Python", "NexaAI — AI accelerators for quality engineering."),
+    ("Qualizeal/qualicentral", "TypeScript", "QualiCentral — central quality command centre."),
+    ("Qualizeal/qualisec", "Go", "QualiSec — security testing automation."),
+]
+
+JIRA_SITE = "https://qualizeal-team-aicoe.atlassian.net"
+JIRA_KEY = "QF"
+JIRA_NAME = "QualiZeal Fabric"
+JIRA_BOARD = 34
+JIRA_DASHBOARDS = ["10001"]
+# (summary, type, status, priority) — the demo backlog. Totals + by_* are counted
+# from this list so the connector card, the facts and the answers all agree.
+JIRA_ISSUES = [
+    ("Ground every answer in a citation", "Story", "Done", "High"),
+    ("Cost-aware model switching (4-level selector)", "Story", "Done", "High"),
+    ("Real-time ROI from token consumption", "Story", "In Progress", "High"),
+    ("Live GitHub connector with code understanding", "Story", "Done", "Medium"),
+    ("Jira and Confluence connectors", "Story", "In Review", "Medium"),
+    ("PPT and PDF ingestion (stdlib-first)", "Task", "To Do", "Medium"),
+    ("Passwordless login gated behind a dev flag", "Bug", "Done", "High"),
+    ("Showcase build bakes the login directory", "Bug", "Done", "High"),
+    ("Persona-conditioned answer lens", "Story", "Done", "Low"),
+    ("Cross-source verification (Jira and code)", "Story", "In Progress", "Medium"),
+    ("Telemetry Explorer pivot table", "Task", "In Review", "Low"),
+    ("Curator review gate holds documents out of answers", "Task", "To Do", "Medium"),
+]
+
+CONFLUENCE_SITE = "https://aicoe-genq.atlassian.net/wiki"
+CONFLUENCE_SPACE = "AICOE"
+CONFLUENCE_SPACE_NAME = "AI CoE"
+# (page_id, title, body) — the demo space. Page count comes from this list.
+CONFLUENCE_PAGES = [
+    (
+        "1703938",
+        "Project Plan",
+        "The QualiZeal Fabric project plan. The project lead is the AI-COE architecture team. "
+        "Milestones cover ingestion, governed answering, telemetry and the showcase. "
+        "Delivery runs in two-week sprints tracked on Jira board 34.",
+    ),
+    (
+        "1703940",
+        "Architecture Overview",
+        "The fabric connects GitHub, Jira, Confluence and files into one governed index. "
+        "Retrieval is hybrid lexical and vector with an authority boost; answering is "
+        "grounded, cited and cost-aware.",
+    ),
+    (
+        "1703941",
+        "Governance and Telemetry",
+        "Every answer records subject, roles, model, tokens, cost and grounding. "
+        "Leadership reads value and ROI; engineering reads the trace waterfall.",
+    ),
+    (
+        "1703942",
+        "Onboarding a New Source",
+        "Paste a source URL into its Admin card, set the allow-list, then Sync. "
+        "GitHub, Jira dashboards and boards, Confluence pages and websites are supported.",
+    ),
+    (
+        "1703943",
+        "Security and SSO Standard",
+        "Access is role-scoped. Login is PBKDF2 password auth; OIDC and OAuth2 are supported. "
+        "Secrets live in the environment, never in the repository.",
+    ),
+    (
+        "1703944",
+        "Model Cost Playbook",
+        "The selector escalates only when confidence fails. Open-source and extractive "
+        "answers are metered too, so spend and ROI reflect real consumption.",
+    ),
+    (
+        "1703945",
+        "Release Checklist",
+        "A release must be grounded, cited, lint-clean and green in CI before promotion. "
+        "The showcase build must bake answers and pass verification.",
+    ),
+    (
+        "1703946",
+        "Glossary",
+        "Fabric, passage, grounding score, authority, persona lens, telemetry span and "
+        "dataset version — the vocabulary used across the platform.",
+    ),
+]
+
 # A realistic run over the real corpus so analytics / usage / cache have
 # something to show — QualiZeal products, services and company knowledge.
 SCRIPT = [
@@ -160,6 +260,17 @@ EXTRA_Q = [
     "what is our single sign-on and authentication standard",
     "find learning material for onboarding",
     "what does the test automation playbook say",
+    # T126/T127 — count / inventory questions across every source, answered from
+    # facts.json (repositories, Jira issues, Confluence pages, documents), so the
+    # chat returns the real number instead of a matching test function.
+    "how many repos are there in the github",
+    "how many repositories does QualiZeal have",
+    "how many issues are in the Jira project",
+    "how many bugs are in Jira",
+    "how many pages are in the Confluence space",
+    "how many documents are in the fabric",
+    "who is the project lead in the Project Plan page",
+    "what is in progress on the board",
 ]
 
 # T30 — two-turn follow-ups (subject, first question, follow-up) whose pronoun
@@ -430,6 +541,193 @@ def _load_org(p):
     return len(paths)
 
 
+def _load_jira(p):
+    """T127 — ingest the demo Jira backlog through the pipeline and set the
+    connector cursor so the card reads healthy · synced · items, like GitHub. Each
+    issue is one cited document, so "what is in progress on the board" retrieves."""
+    import time as _time
+
+    from knowledge_fabric.ingestion.intake import IngestWorker, Intake
+
+    intake, worker = Intake(p), IngestWorker(p, None)
+    worker.intake = intake
+    for i, (summary, itype, status, prio) in enumerate(JIRA_ISSUES, 1):
+        key = f"{JIRA_KEY}-{i}"
+        body = (
+            f"# {key} — {summary}\n\n"
+            f"Type: {itype}\nStatus: {status}\nPriority: {prio}\n"
+            f"Project: {JIRA_NAME} ({JIRA_KEY}) · board {JIRA_BOARD}\n\n"
+            f"{summary}."
+        ).encode()
+        intake.submit(
+            intake.canonical(
+                TENANT,
+                "jira",
+                f"{JIRA_SITE}/browse/{key}",
+                f"{key} {summary}",
+                body,
+                mime="text/markdown",
+                acl=["public"],
+            )
+        )
+    worker.drain()
+    p.db.execute(
+        "INSERT INTO connector_cursors(tenant,source,cursor,last_sync,items) "
+        "VALUES(?,?,?,?,?) ON CONFLICT(tenant,source) DO UPDATE SET "
+        "cursor=excluded.cursor, last_sync=excluded.last_sync, items=excluded.items",
+        (TENANT, "jira", str(len(JIRA_ISSUES)), int(_time.time() * 1000), len(JIRA_ISSUES)),
+    )
+    return len(JIRA_ISSUES)
+
+
+def _load_confluence(p):
+    """T127 — ingest the demo Confluence space so page questions ("who is the
+    project lead in the Project Plan page") answer, and the card reads synced."""
+    import time as _time
+
+    from knowledge_fabric.ingestion.intake import IngestWorker, Intake
+
+    intake, worker = Intake(p), IngestWorker(p, None)
+    worker.intake = intake
+    for pid, title, body in CONFLUENCE_PAGES:
+        data = f"# {title}\n\n{body}".encode()
+        intake.submit(
+            intake.canonical(
+                TENANT,
+                "confluence",
+                f"{CONFLUENCE_SITE}/pages/{pid}",
+                title,
+                data,
+                mime="text/markdown",
+                acl=["public"],
+            )
+        )
+    worker.drain()
+    p.db.execute(
+        "INSERT INTO connector_cursors(tenant,source,cursor,last_sync,items) "
+        "VALUES(?,?,?,?,?) ON CONFLICT(tenant,source) DO UPDATE SET "
+        "cursor=excluded.cursor, last_sync=excluded.last_sync, items=excluded.items",
+        (
+            TENANT,
+            "confluence",
+            str(len(CONFLUENCE_PAGES)),
+            int(_time.time() * 1000),
+            len(CONFLUENCE_PAGES),
+        ),
+    )
+    return len(CONFLUENCE_PAGES)
+
+
+def _write_facts(p):
+    """T126 — write ``data/facts.json`` so the count / inventory answers read real,
+    consistent numbers: repositories, Jira issues (with by_status / by_type),
+    Confluence pages and the document total. Counted from what was seeded/ingested,
+    so the cards, the facts and the answers all agree. Returns a compact summary
+    for the browser engine to answer the same counts client-side."""
+    from collections import Counter
+
+    from knowledge_fabric import facts as factsmod
+
+    now_ms = int(_now_ms())
+    repos = {
+        full: {"full_name": full, "language": lang, "description": desc, "as_of": now_ms}
+        for full, lang, desc in SAMPLE_REPOS
+    }
+    by_status = dict(Counter(s for _, _, s, _ in JIRA_ISSUES))
+    by_type = dict(Counter(t for _, t, _, _ in JIRA_ISSUES))
+    by_priority = dict(Counter(pr for _, _, _, pr in JIRA_ISSUES))
+    # The board is a dict (id/name/columns) — a column is a named group of
+    # statuses, so "how many are in the In Progress column" sums by_status (T97).
+    board = {
+        "id": JIRA_BOARD,
+        "name": f"{JIRA_NAME} board",
+        "columns": [
+            {"name": status, "statuses": [status]} for status in by_status
+        ],
+    }
+    jira = {
+        JIRA_KEY: {
+            "name": JIRA_NAME,
+            "url": JIRA_SITE,
+            "board": board,
+            "dashboards": list(JIRA_DASHBOARDS),
+            "as_of": now_ms,
+            "issues": {
+                "total": len(JIRA_ISSUES),
+                "by_status": by_status,
+                "by_type": by_type,
+                "by_priority": by_priority,
+            },
+            "sprint": {"name": "Sprint 14", "state": "active"},
+        }
+    }
+    conf = {
+        CONFLUENCE_SPACE: {
+            "name": CONFLUENCE_SPACE_NAME,
+            "url": CONFLUENCE_SITE,
+            "pages": len(CONFLUENCE_PAGES),
+            "last_updated": _now_ms_date(),
+            "as_of": now_ms,
+        }
+    }
+    try:
+        total_docs = len(p.documents.list(TENANT))
+    except Exception:
+        total_docs = 0
+    facts = {
+        "repositories": repos,
+        "jira_projects": jira,
+        "jira_dashboards": {
+            d: {"project": JIRA_KEY, "url": f"{JIRA_SITE}/jira/dashboards/{d}"}
+            for d in JIRA_DASHBOARDS
+        },
+        "jira_boards": {
+            str(JIRA_BOARD): {
+                "project": JIRA_KEY,
+                "url": f"{JIRA_SITE}/jira/software/boards/{JIRA_BOARD}",
+            }
+        },
+        "confluence_spaces": conf,
+        "documents": {"total": total_docs, "by_area": {}, "by_type": {}},
+        "as_of": now_ms,
+    }
+    factsmod.fd.write_json(factsmod.fd.data_path("facts.json", mkdir=True), facts)
+    # Compact summary the browser engine answers counts from (mirrors _p_inventory).
+    return {
+        "as_of": now_ms,
+        "repositories": [full for full, _l, _d in SAMPLE_REPOS],
+        "repo_count": len(SAMPLE_REPOS),
+        "jira": {
+            "project": JIRA_KEY,
+            "name": JIRA_NAME,
+            "url": JIRA_SITE,
+            "board": JIRA_BOARD,
+            "total": len(JIRA_ISSUES),
+            "by_status": by_status,
+            "by_type": by_type,
+        },
+        "confluence": {
+            "space": CONFLUENCE_SPACE,
+            "name": CONFLUENCE_SPACE_NAME,
+            "url": CONFLUENCE_SITE,
+            "pages": len(CONFLUENCE_PAGES),
+        },
+        "documents": total_docs,
+    }
+
+
+def _now_ms():
+    import time as _time
+
+    return _time.time() * 1000
+
+
+def _now_ms_date():
+    import datetime as _dt
+
+    return _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%d")
+
+
 def _seed():
     p = http_api.Platform(
         db_path=":memory:", blob_root=os.path.join(ROOT, "data", "showcase-blobs")
@@ -439,6 +737,12 @@ def _seed():
     _load_corpus(p)  # real QualiZeal knowledge, ingested through the live pipeline
     _load_code(p)  # this repository's own source, so code questions cite real functions
     _load_org(p)  # HR / learning / standards, so any-role questions never blind-gap
+    _load_jira(p)  # T127 — the demo Jira backlog, connected + synced like GitHub
+    _load_confluence(p)  # T127 — the demo Confluence space, connected + synced
+    # T126 — write facts.json AFTER every loader so the count/inventory answers
+    # (repos, Jira issues, Confluence pages, documents) read real, consistent
+    # numbers; the returned summary is baked for the browser engine to mirror.
+    p.facts_summary = _write_facts(p)
     qbank.generate(p, TENANT)  # bank from the loaded corpus
     svc = AnswerService(p)
     for subject, q in SCRIPT:
@@ -642,6 +946,10 @@ def _bake(client, p=None) -> dict:
         # T29 — flat telemetry rows for the self-serve Explorer (filter/pivot any
         # dimension in one table).
         snap["events"] = p.telemetry.events(TENANT)
+        # T126 — the compact facts summary the browser engine answers count /
+        # inventory questions from (repos, Jira issues, Confluence pages, docs),
+        # mirroring the server's facts tier so a typed "how many repos" is a count.
+        snap["facts"] = getattr(p, "facts_summary", None) or {}
 
     # per-subject usage
     for subject in ROLES:
