@@ -85,6 +85,7 @@
       feedback: loadFeedback()
     };
     if (STATE.get.admin) STATE.get.admin["/admin/users"] = STATE.users;
+    applyConnState();  // T129 — restore the visitor's connector on/off + sync state
     Object.keys(s.login || {}).forEach(function (subj) {
       var l = s.login[subj]; if (l && l.token) TOKEN2SUBJECT[l.token] = subj;
     });
@@ -96,6 +97,97 @@
   }
   function saveFeedback() {
     try { localStorage.setItem("kf.feedback", JSON.stringify(STATE.feedback.slice(0, 200))); } catch (e) {}
+  }
+
+  // ---- connectors — real in-browser on/off switches (T129) --------------
+  // The baked connector cards are a permanent hidden preload; the visitor's
+  // toggle / Save / Sync / delete are held here and persisted per browser, so
+  // the demo behaves exactly like a live server — the mock is invisible. A
+  // disabled (or deleted) source is excluded from retrieval, so deactivating it
+  // really removes its answers.
+  function connList() {
+    var g = (STATE.get.admin && STATE.get.admin["/admin/connectors"]) || {};
+    return g.connectors || [];
+  }
+  function connBySource(source) {
+    var l = connList();
+    for (var i = 0; i < l.length; i++) if (l[i].source === source) return l[i];
+    return null;
+  }
+  function loadConnState() {
+    try { return JSON.parse(localStorage.getItem("kf.connectors") || "{}"); } catch (e) { return {}; }
+  }
+  function saveConnState(st) {
+    try { localStorage.setItem("kf.connectors", JSON.stringify(st)); } catch (e) {}
+  }
+  function applyConnState() {
+    // Apply the visitor's persisted overrides onto the baked connector rows.
+    var st = loadConnState();
+    connList().forEach(function (c) {
+      var o = st[c.source]; if (!o) return;
+      c.health = c.health || {};
+      if (o.enabled != null) c.enabled = o.enabled;
+      if (o.allow != null) c.allow = o.allow;
+      if (o.interval_s != null) { c.interval_s = o.interval_s; c.health.interval_s = o.interval_s; }
+      if (o.items != null) c.health.items = o.items;
+      if (o.last_run != null) { c.health.last_run = o.last_run; c.health.last_status = "ok"; c.health.freshness_minutes = 0; }
+      if (o.deleted) c._deleted = true;
+    });
+  }
+  function disabledSources() {
+    var out = {};
+    connList().forEach(function (c) {
+      if (c.enabled === false || c._deleted) out[(c.source || "").toLowerCase()] = 1;
+    });
+    return out;
+  }
+  function connectorsPayload() {
+    var g = (STATE.get.admin && STATE.get.admin["/admin/connectors"]) || {};
+    return { connectors: connList().filter(function (c) { return !c._deleted; }), schedules: g.schedules || [] };
+  }
+  function saveConn(source, patch) {
+    var c = connBySource(source);
+    if (!c) return { status: "error", message: "unknown source " + source };
+    c.health = c.health || {};
+    if (patch.enabled != null) c.enabled = !!patch.enabled;
+    if (patch.allow != null) c.allow = patch.allow;
+    if (patch.interval_s != null) { c.interval_s = patch.interval_s; c.health.interval_s = patch.interval_s; }
+    var st = loadConnState();
+    st[source] = Object.assign(st[source] || {}, { enabled: c.enabled, allow: c.allow, interval_s: c.interval_s });
+    saveConnState(st);
+    return { status: "ok", connector: { source: source, enabled: c.enabled, allow: c.allow, interval_s: c.interval_s } };
+  }
+  function syncConn(source) {
+    var c = connBySource(source);
+    if (!c) return { status: "error", message: "unknown source " + source };
+    c.health = c.health || {};
+    var items = c.health.items || 0;
+    var now = Date.now() / 1000;
+    c.health.last_run = now; c.health.last_status = "ok"; c.health.freshness_minutes = 0; c.health.error_count = 0;
+    var st = loadConnState();
+    st[source] = Object.assign(st[source] || {}, { items: items, last_run: now });
+    saveConnState(st);
+    return { status: "ok", pulled: items, ingested: items, tombstoned: 0, dataset_version: SNAP.dataset_version || 1 };
+  }
+  function deleteConn(source) {
+    var c = connBySource(source);
+    if (!c) return { status: "error", message: "unknown source " + source };
+    c._deleted = true;
+    var st = loadConnState();
+    st[source] = Object.assign(st[source] || {}, { deleted: true });
+    saveConnState(st);
+    return { status: "ok", source: source, deleted: true };
+  }
+  function runDueConn() {
+    var ran = [], now = Date.now() / 1000, st = loadConnState();
+    connList().forEach(function (c) {
+      if (c.enabled === false || c._deleted) return;
+      c.health = c.health || {}; c.health.last_run = now; c.health.last_status = "ok"; c.health.freshness_minutes = 0;
+      st[c.source] = Object.assign(st[c.source] || {}, { last_run: now });
+      ran.push(c.source);
+    });
+    saveConnState(st);
+    return { ran: ran, count: ran.length };
   }
 
   // ---- admin-managed users (add / promote) — per browser ----------------
@@ -381,8 +473,10 @@
   }
   function bm25(qt) {
     var R = ridx(), k1 = 1.5, b = 0.75, out = [];
+    var off = disabledSources();  // T129 — a toggled-off source answers nothing
     for (var i = 0; i < R.ps.length; i++) {
       var e = R.ps[i], sc = 0;
+      if (off[(e.p.source || "").toLowerCase()]) continue;
       for (var j = 0; j < qt.length; j++) {
         var f = e.tf[qt[j]]; if (!f) continue;
         var dft = R.df[qt[j]] || 1, idf = Math.log(1 + (R.N - dft + 0.5) / (dft + 0.5));
@@ -509,6 +603,10 @@
     if (!f || !COUNT_INTENT.test(question)) return null;
     var ql = question.toLowerCase();
     var asOf = SNAP.as_of || "as of the last fabric build";
+    var off = disabledSources();  // T129 — a deactivated source answers no counts
+    if (/\b(repos?|repositor(?:y|ies)|github)\b/.test(ql) && off.github) return null;
+    if (/\b(issues?|tickets?|bugs?|jira)\b/.test(ql) && off.jira) return null;
+    if (/\b(pages?|confluence|space)\b/.test(ql) && off.confluence) return null;
     if (/\b(repos?|repositor(?:y|ies))\b/.test(ql) && f.repo_count != null) {
       return mkAnswer("facts", 1,
         "The fabric covers " + f.repo_count + " repositories (" + asOf + "): " +
@@ -667,12 +765,18 @@
       return Promise.resolve(c);
     }
     var rq = res.question;  // the (possibly rewritten) question to retrieve on
-    return bakedAnswer(rq).then(function (b) {
+    // T129 — when the admin has deactivated a source, the baked-answer cache and
+    // the fuzzy lookup are bypassed (they don't know a source is off), so the
+    // question is answered by LIVE retrieval, which excludes the disabled source.
+    // With every source enabled (the default), the fast baked path is used.
+    var anyOff = Object.keys(disabledSources()).length > 0;
+    var baked = anyOff ? Promise.resolve({ answer: null }) : bakedAnswer(rq);
+    return baked.then(function (b) {
       var a = b.answer;
       if (!a) {
         // 2) in-browser retrieval and facts. A snapshot answer is persona-agnostic;
         // live retrieval applies the persona's emphasis + depth.
-        a = lookup(rq) || factsAnswer(rq) || retrieve(rq, prof);
+        a = (anyOff ? null : lookup(rq)) || factsAnswer(rq) || retrieve(rq, prof);
         if (!a) {
           var s2 = subjectInText(rq);
           if (s2) a = clarifyAnswer(s2, question, turns.map(function (t) { return t.question; }));
@@ -894,7 +998,14 @@
       if (path === "/feedback") { recordFeedback(subject, body); return respond({ ok: true }); }
       if (path === "/curator/repository/delete") return deleteRepository(body);  // T47
       if (path === "/curator/tables/query") return tableQuery(body);             // T47
-      // upload / sync / bulk-delete / budget / authority / connectors — demo success
+      // T129 — connectors are REAL in-browser switches (persisted per visitor):
+      // Save/toggle, Sync now, Run-due and delete all mutate state and return a
+      // realistic payload so the toast and cards update as on a live server.
+      if (path === "/admin/connectors") return respond(saveConn((body || {}).source, body || {}));
+      if (path === "/admin/sync") return respond(syncConn((body || {}).source));
+      if (path === "/admin/refresh/run-due") return respond(runDueConn());
+      if (path === "/admin/connectors/delete") return respond(deleteConn((body || {}).source));
+      // upload / bulk-delete / budget / authority — demo success
       return respond({ ok: true, note: "showcase — action acknowledged (no server-side state on Pages)" });
     }
     // GET
@@ -906,6 +1017,9 @@
       var wl = loginOf(subject) || {};
       return respond({ subject: subject, roles: wl.roles || ["asker"], scopes: wl.scopes || ["public"], designation: wl.designation || "" });
     }
+    // T129 — the connectors card list reflects the visitor's live on/off + sync
+    // state (and hides a deleted source), so a reload shows what they changed.
+    if (path === "/admin/connectors") return respond(connectorsPayload());
     if (path === "/api/corpus") return respond(SNAP.corpus || {});
     // T82 — suggestions are baked per subject (so the reader's persona known
     // questions show) with a scope-key fallback for older snapshots.
