@@ -34,7 +34,7 @@ Zero external dependencies: inline CSS/JS/SVG only.
 
 from __future__ import annotations
 
-from .ui_common import _read_asset, card, shell
+from .ui_common import UPLOAD_HEAD, _read_asset, card, shell
 
 __all__ = ["CURATOR_HTML"]
 
@@ -330,4 +330,4 @@ _BODY = (
 
 _JS = _read_asset("curator_ui__js.js")
 
-CURATOR_HTML = shell("Curator", "", _BODY, _JS, "Curator", _CSS)
+CURATOR_HTML = shell("Curator", "", _BODY, _JS, "Curator", _CSS, head=UPLOAD_HEAD)

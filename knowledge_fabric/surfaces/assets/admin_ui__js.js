@@ -119,15 +119,47 @@ async function addFilesToBatch(files){const acl=[$('#upload-file-acl').value];le
  for(const file of files){try{const content_b64=await readFileB64(file);BATCH.push({filename:file.name,content_b64,acl});added++}
   catch(e){toast('Could not read '+file.name+': '+e.message,'bad')}}
  if(added){renderBatch();toast(added+' file(s) staged — press "Upload batch" to ingest','good')}}
+// T138 — the seven-stage ingestion strip. It animates while the browser unzips and
+// parses each file (JSZip + KFUpload, no network), then stamps the REAL counts the
+// upload produced onto the stages that yield them (convert→documents, chunk/embed→
+// passages, extract→tables), so the visitor watches a genuine measurement, not a mock.
+const STAGE_LABEL={detect:'detect',convert:'convert',chunk:'chunk',extract:'extract',graph:'graph',embed:'embed',health:'health'};
+function paintUploadStages(active,counts){const box=$('#upload-stages');if(!box)return;box.hidden=false;
+ const cnt=counts?{convert:counts.documents,chunk:counts.passages,extract:counts.tables,graph:counts.images,embed:counts.passages,health:counts.documents}:{};
+ box.innerHTML=PIPELINE.map((n,i)=>{const st=i<active?'ok':(i===active?'running':'pending');
+  const c=(st==='ok'&&cnt[n]!=null&&cnt[n]!=='')?(' · '+num(cnt[n])):'';
+  return '<span class="stage '+st+'">'+esc(STAGE_LABEL[n])+c+'</span>'}).join('')}
 async function upload(){let files=BATCH.slice();const raw=$('#upload-json').value.trim();
  if(raw){try{const arr=JSON.parse(raw);if(!Array.isArray(arr))throw new Error('JSON must be an array');files=files.concat(arr)}catch(e){toast('Invalid JSON: '+e.message,'bad');return}}
  if(!files.length){toast('Nothing to upload — add files to the batch first','warn');return}
- $('#upload-btn').disabled=true;$('#upload-status').textContent='uploading '+files.length+' file(s)…';FORCE=4;schedulePoll();
- try{const out=await api('/admin/upload',{method:'POST',body:{files}});
-  const held=out.held_for_review?(' · '+out.held_for_review+' held for review'):'';
-  $('#upload-status').textContent='uploaded '+out.uploaded+' · ingested '+out.ingested+held+(out.noops?' · '+out.noops+' unchanged':'')+' · dataset v'+out.dataset_version+' · run '+out.run_id;
-  toast('Bulk upload done'+(out.held_for_review?' · '+out.held_for_review+' awaiting curator review':'')+' · dataset v'+out.dataset_version,'good');BATCH=[];renderBatch();$('#upload-json').value='';await Promise.all([loadRuns(),loadAudit()])}
- catch(e){$('#upload-status').textContent=e.message;toast(e.message,'bad')}finally{$('#upload-btn').disabled=false}}
+ $('#upload-btn').disabled=true;$('#upload-status').textContent='parsing '+files.length+' file(s) in your browser…';
+ paintUploadStages(0,null);let step=0;const tick=setInterval(()=>{step=Math.min(PIPELINE.length-1,step+1);paintUploadStages(step,null)},110);
+ FORCE=4;schedulePoll();
+ try{const out=await api('/admin/upload',{method:'POST',body:{files}});clearInterval(tick);
+  const counts={documents:(out.documents||[]).length,passages:out.passages_added||0,tables:out.tables_added||0,images:out.images_added||0};
+  paintUploadStages(PIPELINE.length,counts);
+  const dup=(out.duplicates||[]).length;
+  const parts=['added '+out.uploaded+' doc'+(out.uploaded===1?'':'s'),'+'+num(counts.passages)+' passages'];
+  if(counts.tables)parts.push('+'+num(counts.tables)+' tables');
+  if(counts.images)parts.push('+'+num(counts.images)+' images');
+  if(dup)parts.push(dup+' already in the fabric');
+  $('#upload-status').textContent=parts.join(' · ')+' · run '+out.run_id;
+  toast(out.uploaded?('Indexed '+out.uploaded+' document'+(out.uploaded===1?'':'s')+' — ask about '+(out.uploaded===1?'it':'them')+' now'):(dup?'Already in the fabric — nothing added':'Upload done'),out.uploaded?'good':'warn');
+  BATCH=[];renderBatch();$('#upload-json').value='';await Promise.all([loadRuns(),loadAudit(),refreshUploads()])}
+ catch(e){clearInterval(tick);$('#upload-stages').hidden=true;$('#upload-status').textContent=e.message;toast(e.message,'bad')}
+ finally{$('#upload-btn').disabled=false}}
+// T131 — the documents already in the Files source, each with a Delete that
+// removes it (on the static demo the delete also fires the repo-commit workflow,
+// so the file leaves the repository too). Absent endpoint → the list stays empty.
+async function refreshUploads(){const box=$('#upload-list');if(!box)return;
+ try{const d=await api('/admin/uploads');const ups=(d&&d.uploads)||[];
+  box.innerHTML=ups.map(u=>{const meta=(u.parsed!==false)?(num(u.passages||0)+' passage'+((u.passages||0)===1?'':'s')+((u.tables)?' · '+num(u.tables)+' table'+(u.tables===1?'':'s'):'')+((u.images)?' · '+num(u.images)+' image'+(u.images===1?'':'s'):'')):((u.ext==='pdf')?'stored · text extracted on rebuild':'stored');
+   return '<li><b>'+esc(u.title)+'</b> <span class="muted">'+esc(meta)+'</span> <a href="#" data-doc="'+esc(u.document_id)+'">delete</a></li>'}).join('');
+  KF.$$('#upload-list a').forEach(a=>a.onclick=e=>{e.preventDefault();deleteUpload(a.dataset.doc)})}
+ catch(e){box.innerHTML=''}}
+async function deleteUpload(docId){if(!confirm('Delete this uploaded document?\nIt is removed from the Files source (and, when a commit endpoint is configured, from the repository).'))return;
+ try{await api('/admin/uploads/delete',{method:'POST',body:{document_id:docId}});toast('Document deleted','good');await refreshUploads()}
+ catch(e){toast(e.message,'bad')}}
 
 async function bulkDelete(){const ids=$('#delete-ids').value.split(/[\s,]+/).map(s=>s.trim()).filter(Boolean);const source=$('#delete-source').value.trim();const prefix=$('#delete-prefix').value.trim();
  if(!ids.length&&!source&&!prefix){toast('Give document ids, a source or a uri prefix','warn');return}
@@ -242,7 +274,7 @@ function showCoverageCell(dt,persona){if(!COVERAGE)return;
  if(!c){$('#coverage-detail').textContent='';return}
  $('#coverage-detail').innerHTML='<b>'+esc(m.label)+' · '+esc(persona)+'</b> — '+esc(c.status)+' ('+(c.passed||0)+'/'+(c.n||0)+')<ul class="queue">'+
    (c.questions||[]).map(q=>'<li><span class="pill '+(q.ok?'good':'bad')+'">'+(q.ok?'ok':q.kind)+'</span> '+esc(q.question)+(q.cited&&q.cited.length?' <span class="muted small">→ '+esc((q.cited||[]).join(', '))+'</span>':'')+'</li>').join('')+'</ul>'}
-async function loadCoverage(){try{renderCoverage(await api('/admin/coverage'))}catch(e){if(e.status!==404)toast(e.message,'bad')}}
+async function loadCoverage(){try{renderCoverage(await api('/admin/coverage'))}catch(e){if(e.status!==401)toast(e.message,'bad')}}
 
 // ---------------------------------------------------------------- T86 service levels
 function pctm(x){return (x==null)?'—':Math.round(x)+' ms'}
@@ -261,7 +293,7 @@ function renderSLA(rep){const h=rep.headline||{};
  $('#sla-persona').querySelector('tbody').innerHTML=pr||'<tr><td colspan="8" class="empty">No answers recorded yet.</td></tr>';
  const dr=(rep.by_data_type||[]).map(r=>'<tr><td>'+esc(r.data_type)+'</td><td>'+num(r.n)+'</td><td>'+pctm(r.p50_ms)+'</td><td>'+pctm(r.p95_ms)+'</td><td>'+shr(r.fast_share)+'</td><td>'+shr(r.agent_share)+'</td><td>$'+Number(r.cost_per_answer||0).toFixed(5)+'</td></tr>').join('');
  $('#sla-datatype').querySelector('tbody').innerHTML=dr||'<tr><td colspan="7" class="empty">No answers recorded yet.</td></tr>'}
-async function loadSLA(){try{renderSLA(await api('/admin/service-levels'))}catch(e){if(e.status!==404)toast(e.message,'bad')}}
+async function loadSLA(){try{renderSLA(await api('/admin/service-levels'))}catch(e){if(e.status!==401)toast(e.message,'bad')}}
 
 // ---------------------------------------------------------------- T96: ROI overview
 function kpi(label,value,sub,cls){return '<div class="kpi'+(cls?' '+cls:'')+'"><div class="l">'+label+'</div><div class="v">'+value+'</div>'+(sub?'<div class="d muted small">'+sub+'</div>':'')+'</div>'}
@@ -278,7 +310,7 @@ function renderOverview(o){const v=o.value||{},c=o.cost||{},r=o.roi||{},ad=o.ado
  $('#roi-adoption').innerHTML='<b>'+num(ad.active_users)+'</b> active users &middot; <b>'+num(ad.questions_per_user)+'</b> questions/user &middot; WoW '+pctOf(ad.wow_growth)+
   ' &middot; '+num(v.hours_saved)+'h saved ≈ '+usd(v.labour_value_usd)+' labour value';
  $('#roi-quality').innerHTML='trust '+pctOf(ql.trust_avg)+' &middot; citation coverage '+pctOf(ql.citation_coverage)+' &middot; negative feedback '+pctOf(ql.negative_feedback_rate)+'<br>'+esc(sv.sla_line||'')+' &middot; fast '+pctOf(sv.fast_share)+' / agent '+pctOf(sv.agent_share)}
-async function loadOverview(){try{renderOverview(await api('/admin/overview'))}catch(e){if(e.status!==404&&e.status!==401)toast(e.message,'bad')}}
+async function loadOverview(){try{renderOverview(await api('/admin/overview'))}catch(e){if(e.status!==401)toast(e.message,'bad')}}
 async function saveSettings(){try{const out=await api('/admin/settings',{method:'POST',body:{minutes_saved_per_question:+$('#roi-minutes').value,loaded_rate_per_hour:+$('#roi-rate').value}});
   $('#roi-status').textContent='saved';toast('ROI settings saved','good');await loadOverview()}catch(e){$('#roi-status').textContent=e.message;toast(e.message,'bad')}}
 
@@ -295,7 +327,7 @@ function renderObservability(o){const rc=o.reconciliation||{};
  const rr=[];if(rc.answers)rr.push('answers: analytics '+rc.answers.analytics+' vs metrics '+rc.answers.metrics+' (Δ'+rc.answers.delta_pct+'%)');
  if(rc.cost)rr.push('cost: analytics '+usd(rc.cost.analytics)+' vs metrics '+usd(rc.cost.metrics)+' (Δ'+rc.cost.delta_pct+'%)');
  $('#obs-recon').innerHTML='<b>Reconciliation</b> (dashboard vs raw counters, tolerance ±1%): '+esc(rr.join(' · '))+' — '+(rc.ok?'<span class="pill good">consistent</span>':'<span class="pill warn">drift</span>')}
-async function loadObservability(){try{renderObservability(await api('/admin/observability?limit=20'))}catch(e){if(e.status!==404&&e.status!==401)toast(e.message,'bad')}}
+async function loadObservability(){try{renderObservability(await api('/admin/observability?limit=20'))}catch(e){if(e.status!==401)toast(e.message,'bad')}}
 async function openWaterfall(tid){const box=$('#obs-waterfall');box.hidden=false;box.innerHTML='<div class="muted small">loading trace '+esc(String(tid).slice(0,16))+'…</div>';
  try{const w=await api('/admin/observability?trace_id='+encodeURIComponent(tid));const tot=w.total_ms||1;
   box.innerHTML='<div class="section-title">Span waterfall <span class="muted small">'+esc(String(tid).slice(0,24))+' · '+ms(w.total_ms)+'</span></div>'+
@@ -309,7 +341,7 @@ async function loadAll(){
  // T116 — every admin panel loads INDEPENDENTLY: one loader failing (e.g. a
  // transient error on /admin/connectors) must never blank the others. Each
  // loader catches and shows its own empty state; allSettled never short-circuits.
- await Promise.allSettled([loadConnectors(),loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources(),loadCoverage(),loadSLA(),loadOverview(),loadObservability()]);
+ await Promise.allSettled([loadConnectors(),loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources(),loadCoverage(),loadSLA(),loadOverview(),loadObservability(),refreshUploads()]);
  try{if(await loadRuns())schedulePoll()}catch(e){}}
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{$('#connectors').innerHTML='';gate({status:401,message:''},'admin')}};
 KF.initBar({preferRole:'admin'});
@@ -319,4 +351,6 @@ $('#upload-files').onchange=e=>{addFilesToBatch(Array.from(e.target.files||[]));
 $('#budget-btn').onclick=setBudget;$('#authority-btn').onclick=setAuthority;$('#audit-refresh').onclick=loadAudit;$('#doctor-btn').onclick=doctor;$('#models-refresh').onclick=loadModels;$('#models-days').onchange=loadModels;
 $('#add-user-btn').onclick=addUser;
 $('#roi-save').onclick=saveSettings;
+// T134 — a change anywhere (this tab or another) recomputes every panel live.
+if(KF.onChange)KF.onChange(()=>{if(KF.session)loadAll()});
 if(KF.session)loadAll();else gate({status:401,message:''},'admin');

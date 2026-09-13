@@ -28,7 +28,7 @@ dependencies: inline CSS/JS/SVG only.
 
 from __future__ import annotations
 
-from .ui_common import _read_asset, card, shell
+from .ui_common import UPLOAD_HEAD, _read_asset, card, shell
 
 __all__ = ["ADMIN_HTML"]
 
@@ -54,8 +54,10 @@ _UPLOAD = card(
     '<input id="upload-files" type="file" multiple style="display:none">'
     '<select id="upload-file-acl"><option value="public">public</option>'
     '<option value="restricted">restricted</option></select>'
-    '<span class="muted small" id="upload-files-hint">Documents are read in your browser and '
-    "uploaded as-is — nothing is sent until you press Upload.</span></div>"
+    '<span class="muted small" id="upload-files-hint">DOCX / PPTX / XLSX / CSV / MD are '
+    "parsed in your browser — real passages, tables and slides are indexed and "
+    "answerable on the next question; a PDF is stored until the build extracts it."
+    "</span></div>"
     # Door 2 — type/paste a document inline.
     '<div class="row"><input id="upload-filename" placeholder="filename" style="flex:1">'
     '<select id="upload-acl"><option value="public">public</option><option '
@@ -68,6 +70,13 @@ _UPLOAD = card(
     "A\"}]'></textarea></details>"
     '<div class="row"><button class="btn primary" id="upload-btn">Upload batch</button><span '
     'class="muted small" id="upload-status"></span></div>'
+    # T138 — the seven-stage ingestion strip animates while the browser parses each
+    # file (detect→convert→chunk→extract→graph→embed→health), then shows the real
+    # documents / passages / tables / images it added.
+    '<div class="stages" id="upload-stages" hidden></div>'
+    # T131 — files already in the Files source; each Delete removes it (on the
+    # static demo it also fires the repo-commit workflow to delete it from the repo).
+    '<ol class="batch" id="upload-list"></ol>'
     "</div>",
     "bulk-upload",
 )
@@ -292,4 +301,4 @@ _BODY = (
 
 _JS = _read_asset("admin_ui__js.js")
 
-ADMIN_HTML = shell("Admin", "", _BODY, _JS, "Admin", _CSS)
+ADMIN_HTML = shell("Admin", "", _BODY, _JS, "Admin", _CSS, head=UPLOAD_HEAD)

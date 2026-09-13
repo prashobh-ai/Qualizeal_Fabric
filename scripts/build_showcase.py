@@ -75,6 +75,23 @@ DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 # under GitHub — so toggling the Website source off deactivates the org knowledge.
 WEBSITE_SOURCE = "website"
 WEBSITE_URL = "https://www.qualizeal.com"
+# T131 — documents uploaded from the Admin UI land in the repo under corpus/uploads/
+# (committed by the upload-commit workflow). The build ingests them under the
+# "files" source, so a committed .pptx / .pdf / .xlsx / .docx becomes a permanent,
+# full-text-indexed, citeable document — parsed by the stdlib-first converter.
+UPLOADS_DIR = os.path.join(CORPUS_DIR, "uploads")
+FILES_SOURCE = "files"
+_UPLOAD_MIME = {
+    ".pdf": "application/pdf",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".docx": DOCX_MIME,
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".csv": "text/csv",
+    ".tsv": "text/tab-separated-values",
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+}
 
 # T25 — code into the fabric. The showcase ingests this repository's OWN source
 # (the checkout is already present in the Pages build), so code questions answer
@@ -410,6 +427,63 @@ def _load_corpus(p):
         (TENANT, WEBSITE_SOURCE, str(len(paths)), int(_time.time() * 1000), len(paths)),
     )
     return len(paths)
+
+
+def _load_uploads(p):
+    """Ingest documents committed under corpus/uploads/ (the Admin UI upload path,
+    landed in the repo by the upload-commit workflow) through the real 7-step
+    pipeline, grouped under the FILES source. PPTX / PDF / XLSX / DOCX parse with
+    the stdlib-first converter, so a committed slide deck or spreadsheet becomes a
+    permanent, full-text-indexed, citeable document after the build. Returns the
+    number ingested (0 when there is no uploads directory, so a normal build and
+    the test fixtures are unaffected)."""
+    import glob
+    import re
+    import time as _time
+
+    from knowledge_fabric.ingestion.intake import IngestWorker, Intake
+
+    if not os.path.isdir(UPLOADS_DIR):
+        return 0
+    intake, worker = Intake(p), IngestWorker(p, None)
+    worker.intake = intake
+    paths = [
+        x
+        for x in sorted(glob.glob(os.path.join(UPLOADS_DIR, "*")))
+        if os.path.isfile(x) and not os.path.basename(x).startswith(".")
+    ]
+    n = 0
+    for path in paths:
+        name = os.path.basename(path)
+        ext = os.path.splitext(name)[1].lower()
+        title = re.sub(r"[_-]+", " ", os.path.splitext(name)[0]).strip() or name
+        with open(path, "rb") as fh:
+            data = fh.read()
+        try:
+            raw = intake.canonical(
+                TENANT,
+                FILES_SOURCE,
+                f"file://{name}",
+                title,
+                data,
+                mime=_UPLOAD_MIME.get(ext, "text/plain"),
+                acl=["public"],
+            )
+            intake.submit(raw)
+            n += 1
+        except Exception:
+            # A single unparseable upload (e.g. a scanned PDF without Docling) must
+            # not fail the whole build — skip it and keep the rest.
+            continue
+    if n:
+        worker.drain()
+        p.db.execute(
+            "INSERT INTO connector_cursors(tenant,source,cursor,last_sync,items) "
+            "VALUES(?,?,?,?,?) ON CONFLICT(tenant,source) DO UPDATE SET "
+            "cursor=excluded.cursor, last_sync=excluded.last_sync, items=excluded.items",
+            (TENANT, FILES_SOURCE, str(len(paths)), int(_time.time() * 1000), n),
+        )
+    return n
 
 
 def _repo_card() -> str:
@@ -781,6 +855,7 @@ def _seed():
     _load_corpus(p)  # real QualiZeal knowledge, ingested through the live pipeline
     _load_code(p)  # this repository's own source, so code questions cite real functions
     _load_org(p)  # HR / learning / standards, so any-role questions never blind-gap
+    _load_uploads(p)  # T131 — documents committed via the UI upload → repo path
     # T127 — the self-contained showcase OWNS its facts, so it reseeds fresh each
     # build (a leftover facts.json must never make it skip its own connectors). A
     # real fabric-data deployment (or the test fixture) sets KF_DATA_ROOT and is

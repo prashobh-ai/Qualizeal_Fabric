@@ -2,8 +2,9 @@
 document kind (T41). ``convert()`` routes by mime / extension:
 
   Word, PDF, PowerPoint      Docling (``engines`` extra) → page + bbox passages,
-                             tables kept whole. Without Docling: .docx keeps the
-                             stdlib path; PDF/PPTX raise ConverterUnavailableError.
+                             tables kept whole. Without Docling, a stdlib-first
+                             fallback: .docx and .pptx (zipped XML) reliably, .pdf
+                             best-effort (text PDFs); scans still need Docling.
   Excel, CSV/TSV             ingestion.tables → typed SQLite per sheet + row and
                              summary passages (CELL), facts.json["tables"].
   Images                     ingestion.images → OCR + one model description
@@ -327,8 +328,16 @@ class DoclingLite:
         try:
             from docling.document_converter import DocumentConverter
         except ImportError as e:
+            # Stdlib-first fallbacks so an uploaded Office/PDF document still
+            # ingests on a runner without the (heavy) Docling extra installed —
+            # the static-showcase build path. .docx / .pptx are reliable (zipped
+            # XML); .pdf is best-effort (text PDFs, not scans).
             if ext == ".docx":
                 return self._docx(raw.bytes_, raw.language)
+            if ext == ".pptx":
+                return self._pptx(raw.bytes_, raw.language)
+            if ext == ".pdf":
+                return self._pdf(raw.bytes_, raw.language)
             raise ConverterUnavailableError(
                 f"{ext or raw.mime} conversion needs Docling: install the engines extra "
                 "(pip install 'qualizeal-knowledge-fabric[engines]')"
@@ -382,6 +391,105 @@ class DoclingLite:
                 )
             )
         return ConvertedDocument(language=lang, regions=regions)
+
+    def _pptx(self, data: bytes, lang: str) -> ConvertedDocument:
+        """Extract slide text from a .pptx (Office Open XML) with stdlib only:
+        each slide's ``<a:t>`` runs, in slide order, one region per slide."""
+        import html as _html
+        import io as _io
+        import zipfile
+
+        def _num(name: str) -> int:
+            m = re.search(r"slide(\d+)\.xml$", name)
+            return int(m.group(1)) if m else 0
+
+        try:
+            z = zipfile.ZipFile(_io.BytesIO(data))
+            names = [n for n in z.namelist() if re.match(r"ppt/slides/slide\d+\.xml$", n)]
+        except Exception:
+            return self._text(data.decode("utf-8", "replace"), lang)
+
+        regions = []
+        for i, name in enumerate(sorted(names, key=_num)):
+            try:
+                xml = z.read(name).decode("utf-8", "replace")
+            except Exception:
+                continue
+            runs = re.findall(r"<a:t[^>]*>(.*?)</a:t>", xml, re.S)
+            # XML entities become their characters, so the passage is clean prose.
+            text = _html.unescape(re.sub(r"<[^>]+>", "", " ".join(runs)))
+            text = re.sub(r"\s+", " ", text).strip()
+            if text:
+                sn = _num(name) or (i + 1)
+                regions.append(
+                    _region(text, CoordinateKind.PAGE_PARAGRAPH, {"page": sn, "paragraph": 1})
+                )
+        if not regions:
+            raise ConverterUnavailableError(
+                "no extractable text in the .pptx (it may be image-only); Docling handles those"
+            )
+        return ConvertedDocument(language=lang, regions=regions)
+
+    def _pdf(self, data: bytes, lang: str) -> ConvertedDocument:
+        """Best-effort stdlib PDF text extraction: inflate the content streams
+        (FlateDecode) and pull the string literals shown inside text objects
+        (``BT``…``ET``). Good for text PDFs; scanned/image-only or exotically
+        encoded PDFs still need Docling and raise loudly rather than emit noise."""
+        import zlib
+
+        def _unescape(s: str) -> str:
+            out, i, n = [], 0, len(s)
+            simple = {
+                "n": "\n",
+                "r": "\r",
+                "t": "\t",
+                "b": "\b",
+                "f": "\f",
+                "(": "(",
+                ")": ")",
+                "\\": "\\",
+            }
+            while i < n:
+                c = s[i]
+                if c == "\\" and i + 1 < n:
+                    nxt = s[i + 1]
+                    if nxt in simple:
+                        out.append(simple[nxt])
+                        i += 2
+                        continue
+                    m = re.match(r"[0-7]{1,3}", s[i + 1 : i + 4])
+                    if m:
+                        out.append(chr(int(m.group(0), 8) & 0xFF))
+                        i += 1 + len(m.group(0))
+                        continue
+                    out.append(nxt)
+                    i += 2
+                    continue
+                out.append(c)
+                i += 1
+            return "".join(out)
+
+        texts: list[str] = []
+        for stream in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", data, re.S):
+            raw = stream
+            try:
+                raw = zlib.decompress(stream)
+            except Exception:
+                pass
+            content = raw.decode("latin-1", "replace")
+            blocks = re.findall(r"BT(.*?)ET", content, re.S) if "BT" in content else [content]
+            for block in blocks:
+                for lit in re.findall(r"\(((?:\\.|[^\\()])*)\)", block):
+                    t = _unescape(lit).strip()
+                    if t:
+                        texts.append(t)
+        joined = re.sub(r"[ \t]+", " ", " ".join(texts)).strip()
+        if len(joined) < 8:
+            raise ConverterUnavailableError(
+                "no extractable text in the PDF (scanned/image-only); Docling handles those"
+            )
+        paras = [p.strip() for p in re.split(r"\n\s*\n", joined) if p.strip()] or [joined]
+        return ConvertedDocument(language=lang, regions=_paragraph_regions(paras))
 
     # -- text-ish -----------------------------------------------------------
     def _text(self, text: str, lang: str) -> ConvertedDocument:
