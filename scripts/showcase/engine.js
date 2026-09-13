@@ -790,6 +790,7 @@
       a.role_view = roleView(a, designation);  // T27 — the designation/persona lens
       answerFirst(a, designation);  // T81/T84/T85 — result + Explain offers + governance line
       bumpUsage(subject, a);
+      bumpMeter(a);  // T130 — live tokens/cost meter (per browser), never a key
       return a;
     });
   }
@@ -850,6 +851,122 @@
   function emptyUsage(subject) {
     var w = { questions: 0, answered: 0, declined: 0, tokens_in: 0, tokens_out: 0, cost: 0, cost_saved: 0, cache_hit_rate: 0, by_level: {} };
     return { subject: subject, windows: { today: clone(w), "7d": clone(w), "30d": clone(w) }, budget: null, speech_seconds: null };
+  }
+
+  // ---- T130: live in-browser consumption meter --------------------------
+  // The build bakes REAL provider tokens/cost from the driven Q&A (showcase.yml
+  // builds with the Anthropic key when the provider check passes). On the static
+  // page every visitor question is answered by the open-source / extractive path,
+  // which still counts real tokens and imputes its self-hosted compute cost onto
+  // the answer (a.tokens_in / a.tokens_out / a.cost — T125). We accumulate those
+  // per browser so the Admin → Models tokens/cost and the ROI page GROW LIVE as
+  // the visitor asks. The Anthropic key never ships to the page; the meter only
+  // ever sums what an answer already carries.
+  function r6(x) { return Number((Number(x) || 0).toFixed(6)); }
+  function loadMeter() {
+    try { return JSON.parse(localStorage.getItem("kf.consumption") || "null"); } catch (e) { return null; }
+  }
+  function saveMeter(m) {
+    try { localStorage.setItem("kf.consumption", JSON.stringify(m)); } catch (e) {}
+  }
+  function emptyMeter() {
+    return { calls: 0, input_tokens: 0, output_tokens: 0, cost_usd: 0, by_model: {}, by_day: {}, last_calls: [] };
+  }
+  function bumpMeter(a) {
+    // Only a delivered answer consumes; clarifies and gaps carry no tokens.
+    if (!a || a.kind !== "answer") return;
+    var tin = a.tokens_in || 0, tout = a.tokens_out || 0, cost = a.cost || 0;
+    if (!tin && !tout && !cost) return;
+    var m = loadMeter() || emptyMeter();
+    var model = a.model_name || "Open-source LLM · Extractive-NLG";
+    var day = new Date().toISOString().slice(0, 10);
+    m.calls += 1; m.input_tokens += tin; m.output_tokens += tout; m.cost_usd = r6(m.cost_usd + cost);
+    var bm = m.by_model[model] || (m.by_model[model] = { calls: 0, input_tokens: 0, output_tokens: 0, cache_read: 0, cost_usd: 0 });
+    bm.calls += 1; bm.input_tokens += tin; bm.output_tokens += tout; bm.cost_usd = r6(bm.cost_usd + cost);
+    var bd = m.by_day[day] || (m.by_day[day] = { calls: 0, input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0, cost_usd: 0 });
+    bd.calls += 1; bd.input_tokens += tin; bd.output_tokens += tout; bd.cost_usd = r6(bd.cost_usd + cost);
+    m.last_calls.unshift({
+      ts: new Date().toISOString(), purpose: "answer", model: model, workflow: "showcase",
+      input_tokens: tin, output_tokens: tout, cache_read_input_tokens: 0, latency_ms: a.latency_ms || 0,
+      cost_usd: cost, request_id: "live-" + Date.now().toString(36)
+    });
+    m.last_calls = m.last_calls.slice(0, 25);
+    saveMeter(m);
+  }
+  function foldRows(baked, live) {
+    var out = clone(baked) || {};
+    Object.keys(live || {}).forEach(function (k) {
+      var b = out[k] || (out[k] = { calls: 0, input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0, cost_usd: 0 });
+      var l = live[k];
+      b.calls = (b.calls || 0) + (l.calls || 0);
+      b.input_tokens = (b.input_tokens || 0) + (l.input_tokens || 0);
+      b.output_tokens = (b.output_tokens || 0) + (l.output_tokens || 0);
+      b.cost_usd = r6((b.cost_usd || 0) + (l.cost_usd || 0));
+    });
+    return out;
+  }
+  // Merge the live meter into the baked GET /admin/models payload so the tokens /
+  // cost totals, per-model / per-day tables and recent-calls list grow as asked.
+  function mergeModels(payload) {
+    var m = loadMeter(); if (!m || !m.calls) return payload;
+    payload = clone(payload) || {};
+    var c = payload.consumption = payload.consumption || {};
+    var t = c.totals = c.totals || {};
+    t.calls = (t.calls || 0) + m.calls;
+    t.input_tokens = (t.input_tokens || 0) + m.input_tokens;
+    t.output_tokens = (t.output_tokens || 0) + m.output_tokens;
+    t.cost_usd = r6((t.cost_usd || 0) + m.cost_usd);
+    c.by_model = foldRows(c.by_model, m.by_model);
+    c.by_day = foldRows(c.by_day, m.by_day);
+    c.last_calls = m.last_calls.concat(c.last_calls || []).slice(0, 50);
+    var tel = payload.telemetry;
+    if (tel && tel.totals) {
+      tel.totals.calls = (tel.totals.calls || 0) + m.calls;
+      tel.totals.input_tokens = (tel.totals.input_tokens || 0) + m.input_tokens;
+      tel.totals.output_tokens = (tel.totals.output_tokens || 0) + m.output_tokens;
+      tel.totals.cost_usd = r6((tel.totals.cost_usd || 0) + m.cost_usd);
+    }
+    return payload;
+  }
+  // Merge the live meter into the baked GET /admin/overview payload so the ROI
+  // page (value delivered, spend, ratio) recomputes live off real consumption.
+  function mergeOverview(payload) {
+    var m = loadMeter(); if (!m || !m.calls) return payload;
+    payload = clone(payload) || {};
+    var val = payload.value = payload.value || {};
+    var cost = payload.cost = payload.cost || {};
+    var roi = payload.roi = payload.roi || {};
+    var set = payload.settings || {};
+    val.questions_answered = (val.questions_answered || 0) + m.calls;
+    val.tokens_in = (val.tokens_in || 0) + m.input_tokens;
+    val.tokens_out = (val.tokens_out || 0) + m.output_tokens;
+    val.total_tokens = val.tokens_in + val.tokens_out;
+    val.tokens_per_answer = val.questions_answered ? Number((val.total_tokens / val.questions_answered).toFixed(1)) : 0;
+    var minutes = Number(set.minutes_saved_per_question) || 0;
+    var rate = Number(set.loaded_rate_per_hour) || 0;
+    val.hours_saved = Number((val.questions_answered * minutes / 60.0).toFixed(2));
+    val.labour_value_usd = Number((val.hours_saved * rate).toFixed(2));
+    var spend = r6((cost.total_spend_usd || 0) + m.cost_usd);
+    cost.total_spend_usd = spend;
+    cost.cost_per_answer_usd = val.questions_answered ? r6(spend / val.questions_answered) : 0;
+    // Value delivered = the same real token volume at the frontier model's rate
+    // (the baked per-Mtok rates), recomputed off the combined token totals.
+    var fin = Number(roi.frontier_input_per_mtok) || 3.0;
+    var fout = Number(roi.frontier_output_per_mtok) || 15.0;
+    var value = r6(val.tokens_in * fin / 1e6 + val.tokens_out * fout / 1e6);
+    roi.value_delivered_usd = value;
+    roi.spend_usd = spend;
+    roi.ratio = spend ? Number((value / spend).toFixed(2)) : null;
+    roi.labour_value_usd = val.labour_value_usd;
+    var per = adoptionPerUser(payload);
+    payload.adoption = payload.adoption || {};
+    payload.adoption.questions_per_user = per ? Number((val.questions_answered / per).toFixed(2)) : val.questions_answered;
+    return payload;
+  }
+  function adoptionPerUser(payload) {
+    var ad = payload.adoption || {};
+    if (ad.by_user && typeof ad.by_user === "object") return Object.keys(ad.by_user).length || 1;
+    return ad.active_users || 1;
   }
 
   // ---- T47: fabric-data views (repositories / tables) --------------------
@@ -1043,6 +1160,10 @@
     if (path === "/admin/doctor") { var tg = q.get("target") || ""; return respond((SNAP.doctor || {})[tg] || (SNAP.doctor || {})[""] || { checks: [] }); }
     if (path === "/curator/feedback") return respond({ feedback: STATE.feedback }); // negative-feedback review (new)
     if (path === "/curator/repository") return repositoryCard(q.get("repo") || "");  // T47 card overlay
+    // T130 — fold the live in-browser consumption meter over the baked payloads
+    // so the Models tokens/cost and the ROI page grow live as the visitor asks.
+    if (path === "/admin/models") { var md = pickGet(subject, path, q); if (md !== undefined) return respond(mergeModels(md)); }
+    if (path === "/admin/overview") { var ov = pickGet(subject, path, q); if (ov !== undefined) return respond(mergeOverview(ov)); }
     var data = pickGet(subject, path, q);
     if (data !== undefined) return respond(data);
     return respond({ error: "not found: " + path }, 404);
