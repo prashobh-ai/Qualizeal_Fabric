@@ -618,100 +618,138 @@ def _load_confluence(p):
     return len(CONFLUENCE_PAGES)
 
 
+def _demo_facts_present(source: str) -> bool:
+    """True when ``facts.json`` already carries this source's facts — a real
+    ``fabric-data`` deployment (or a test fixture). The demo seed is FILL-ABSENT:
+    it never overwrites real facts, only fills a source the deployment is missing.
+    ``source`` is one of ``repositories`` / ``jira_projects`` / ``confluence_spaces``."""
+    from knowledge_fabric import facts as factsmod
+
+    return bool(factsmod.load_facts().get(source))
+
+
 def _write_facts(p):
-    """T126 — write ``data/facts.json`` so the count / inventory answers read real,
-    consistent numbers: repositories, Jira issues (with by_status / by_type),
-    Confluence pages and the document total. Counted from what was seeded/ingested,
-    so the cards, the facts and the answers all agree. Returns a compact summary
-    for the browser engine to answer the same counts client-side."""
+    """T126/T127 — fill ``data/facts.json`` with the demo facts a source is MISSING
+    (repositories, the Jira project, the Confluence space, the document total), so
+    the count / inventory answers read real numbers. Fill-absent: an existing
+    fabric-data fact (real repos / Jira / Confluence) is preserved, never clobbered,
+    so a real deployment and the test fixture are untouched."""
     from collections import Counter
 
     from knowledge_fabric import facts as factsmod
 
     now_ms = int(_now_ms())
-    repos = {
-        full: {"full_name": full, "language": lang, "description": desc, "as_of": now_ms}
-        for full, lang, desc in SAMPLE_REPOS
-    }
-    by_status = dict(Counter(s for _, _, s, _ in JIRA_ISSUES))
-    by_type = dict(Counter(t for _, t, _, _ in JIRA_ISSUES))
-    by_priority = dict(Counter(pr for _, _, _, pr in JIRA_ISSUES))
-    # The board is a dict (id/name/columns) — a column is a named group of
-    # statuses, so "how many are in the In Progress column" sums by_status (T97).
-    board = {
-        "id": JIRA_BOARD,
-        "name": f"{JIRA_NAME} board",
-        "columns": [{"name": status, "statuses": [status]} for status in by_status],
-    }
-    jira = {
-        JIRA_KEY: {
-            "name": JIRA_NAME,
-            "url": JIRA_SITE,
-            "board": board,
-            "dashboards": list(JIRA_DASHBOARDS),
-            "as_of": now_ms,
-            "issues": {
-                "total": len(JIRA_ISSUES),
-                "by_status": by_status,
-                "by_type": by_type,
-                "by_priority": by_priority,
-            },
-            "sprint": {"name": "Sprint 14", "state": "active"},
+    facts = factsmod.load_facts()  # EMPTY_FACTS-filled; existing keys preserved
+
+    if not facts.get("repositories"):
+        facts["repositories"] = {
+            full: {"full_name": full, "language": lang, "description": desc, "as_of": now_ms}
+            for full, lang, desc in SAMPLE_REPOS
         }
-    }
-    conf = {
-        CONFLUENCE_SPACE: {
-            "name": CONFLUENCE_SPACE_NAME,
-            "url": CONFLUENCE_SITE,
-            "pages": len(CONFLUENCE_PAGES),
-            "last_updated": _now_ms_date(),
-            "as_of": now_ms,
-        }
-    }
-    try:
-        total_docs = len(p.documents.list(TENANT))
-    except Exception:
-        total_docs = 0
-    facts = {
-        "repositories": repos,
-        "jira_projects": jira,
-        "jira_dashboards": {
-            d: {"project": JIRA_KEY, "url": f"{JIRA_SITE}/jira/dashboards/{d}"}
-            for d in JIRA_DASHBOARDS
-        },
-        "jira_boards": {
-            str(JIRA_BOARD): {
-                "project": JIRA_KEY,
-                "url": f"{JIRA_SITE}/jira/software/boards/{JIRA_BOARD}",
+    if not facts.get("jira_projects"):
+        by_status = dict(Counter(s for _, _, s, _ in JIRA_ISSUES))
+        by_type = dict(Counter(t for _, t, _, _ in JIRA_ISSUES))
+        by_priority = dict(Counter(pr for _, _, _, pr in JIRA_ISSUES))
+        # The board is a dict (id/name/columns) — a column is a named group of
+        # statuses, so "how many are in the In Progress column" sums by_status (T97).
+        facts["jira_projects"] = {
+            JIRA_KEY: {
+                "name": JIRA_NAME,
+                "url": JIRA_SITE,
+                "board": {
+                    "id": JIRA_BOARD,
+                    "name": f"{JIRA_NAME} board",
+                    "columns": [{"name": s, "statuses": [s]} for s in by_status],
+                },
+                "dashboards": list(JIRA_DASHBOARDS),
+                "as_of": now_ms,
+                "issues": {
+                    "total": len(JIRA_ISSUES),
+                    "by_status": by_status,
+                    "by_type": by_type,
+                    "by_priority": by_priority,
+                },
+                "sprint": {"name": "Sprint 14", "state": "active"},
             }
-        },
-        "confluence_spaces": conf,
-        "documents": {"total": total_docs, "by_area": {}, "by_type": {}},
-        "as_of": now_ms,
-    }
+        }
+        if not facts.get("jira_dashboards"):
+            facts["jira_dashboards"] = {
+                d: {"project": JIRA_KEY, "url": f"{JIRA_SITE}/jira/dashboards/{d}"}
+                for d in JIRA_DASHBOARDS
+            }
+        if not facts.get("jira_boards"):
+            facts["jira_boards"] = {
+                str(JIRA_BOARD): {
+                    "project": JIRA_KEY,
+                    "url": f"{JIRA_SITE}/jira/software/boards/{JIRA_BOARD}",
+                }
+            }
+    if not facts.get("confluence_spaces"):
+        facts["confluence_spaces"] = {
+            CONFLUENCE_SPACE: {
+                "name": CONFLUENCE_SPACE_NAME,
+                "url": CONFLUENCE_SITE,
+                "pages": len(CONFLUENCE_PAGES),
+                "last_updated": _now_ms_date(),
+                "as_of": now_ms,
+            }
+        }
+    if not (facts.get("documents") or {}).get("total"):
+        try:
+            total_docs = len(p.documents.list(TENANT))
+        except Exception:
+            total_docs = 0
+        docs = facts.get("documents") or {}
+        facts["documents"] = {
+            "total": total_docs,
+            "by_area": docs.get("by_area", {}),
+            "by_type": docs.get("by_type", {}),
+        }
+    facts.setdefault("as_of", now_ms)
     factsmod.fd.write_json(factsmod.fd.data_path("facts.json", mkdir=True), facts)
-    # Compact summary the browser engine answers counts from (mirrors _p_inventory).
-    return {
-        "as_of": now_ms,
-        "repositories": [full for full, _l, _d in SAMPLE_REPOS],
-        "repo_count": len(SAMPLE_REPOS),
-        "jira": {
-            "project": JIRA_KEY,
-            "name": JIRA_NAME,
-            "url": JIRA_SITE,
-            "board": JIRA_BOARD,
-            "total": len(JIRA_ISSUES),
-            "by_status": by_status,
-            "by_type": by_type,
-        },
-        "confluence": {
-            "space": CONFLUENCE_SPACE,
-            "name": CONFLUENCE_SPACE_NAME,
-            "url": CONFLUENCE_SITE,
-            "pages": len(CONFLUENCE_PAGES),
-        },
-        "documents": total_docs,
+
+
+def _facts_summary() -> dict:
+    """The compact summary the browser engine answers counts from (T126), derived
+    from ``facts.json`` — so it mirrors whatever the fabric holds (demo or real)."""
+    from knowledge_fabric import facts as factsmod
+
+    f = factsmod.load_facts()
+    repos = f.get("repositories") or {}
+    jira = f.get("jira_projects") or {}
+    conf = f.get("confluence_spaces") or {}
+    out = {
+        "as_of": f.get("as_of"),
+        "repositories": sorted(repos.keys()),
+        "repo_count": len(repos),
+        "documents": (f.get("documents") or {}).get("total", 0),
+        "jira": None,
+        "confluence": None,
     }
+    jkey = next(iter(jira), None)
+    if jkey:
+        jb = jira.get(jkey) or {}
+        issues = jb.get("issues") or {}
+        board = jb.get("board")
+        out["jira"] = {
+            "project": jkey,
+            "name": jb.get("name") or jkey,
+            "url": jb.get("url"),
+            "board": board.get("id") if isinstance(board, dict) else board,
+            "total": issues.get("total", 0),
+            "by_status": issues.get("by_status", {}),
+            "by_type": issues.get("by_type", {}),
+        }
+    ckey = next(iter(conf), None)
+    if ckey:
+        cb = conf.get(ckey) or {}
+        out["confluence"] = {
+            "space": ckey,
+            "name": cb.get("name") or ckey,
+            "url": cb.get("url"),
+            "pages": cb.get("pages", 0),
+        }
+    return out
 
 
 def _now_ms():
@@ -735,12 +773,26 @@ def _seed():
     _load_corpus(p)  # real QualiZeal knowledge, ingested through the live pipeline
     _load_code(p)  # this repository's own source, so code questions cite real functions
     _load_org(p)  # HR / learning / standards, so any-role questions never blind-gap
-    _load_jira(p)  # T127 — the demo Jira backlog, connected + synced like GitHub
-    _load_confluence(p)  # T127 — the demo Confluence space, connected + synced
-    # T126 — write facts.json AFTER every loader so the count/inventory answers
-    # (repos, Jira issues, Confluence pages, documents) read real, consistent
-    # numbers; the returned summary is baked for the browser engine to mirror.
-    p.facts_summary = _write_facts(p)
+    # T127 — the self-contained showcase OWNS its facts, so it reseeds fresh each
+    # build (a leftover facts.json must never make it skip its own connectors). A
+    # real fabric-data deployment (or the test fixture) sets KF_DATA_ROOT and is
+    # fill-absent instead, so its real repos / Jira / Confluence are never clobbered.
+    if not os.environ.get("KF_DATA_ROOT"):
+        from knowledge_fabric import facts as _fm
+
+        try:
+            os.remove(_fm.fd.data_path("facts.json"))
+        except OSError:
+            pass
+    if not _demo_facts_present("jira_projects"):
+        _load_jira(p)  # the demo Jira backlog, connected + synced like GitHub
+    if not _demo_facts_present("confluence_spaces"):
+        _load_confluence(p)  # the demo Confluence space, connected + synced
+    # T126 — fill facts.json AFTER every loader (repos, Jira issues, Confluence
+    # pages, documents), preserving any real facts; the compact summary is baked
+    # for the browser engine to answer the same counts.
+    _write_facts(p)
+    p.facts_summary = _facts_summary()
     qbank.generate(p, TENANT)  # bank from the loaded corpus
     svc = AnswerService(p)
     for subject, q in SCRIPT:
