@@ -69,6 +69,12 @@ CORPUS_DIR = os.path.join(ROOT, "corpus")
 CORPUS_SOURCE = "github"
 CORPUS_REPO = "prashobh-ai/Knowledge-Fabric"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+# T129 — the QualiZeal product / service briefs are the organisation's own
+# published information, which lives on the website (www.qualizeal.com). They are
+# grouped under the "website" connector (one activatable source), not duplicated
+# under GitHub — so toggling the Website source off deactivates the org knowledge.
+WEBSITE_SOURCE = "website"
+WEBSITE_URL = "https://www.qualizeal.com"
 
 # T25 — code into the fabric. The showcase ingests this repository's OWN source
 # (the checkout is already present in the Pages build), so code questions answer
@@ -357,11 +363,11 @@ REPO_CARD_GET = "/curator/repository?repo="
 
 
 def _load_corpus(p):
-    """Ingest the vendored QualiZeal .docx corpus through the real 7-step
-    pipeline, tagged as the GitHub source it came from. Provenance is
-    ``github://prashobh-ai/Knowledge-Fabric/docs_source/<file>`` so the Admin
-    console shows GitHub as the origin; the reference converter reads .docx with
-    the standard library (no engine needed).
+    """Ingest the vendored QualiZeal .docx corpus (the organisation's product /
+    service information) through the real 7-step pipeline, grouped under the
+    WEBSITE source it is published on (www.qualizeal.com). Provenance is the real
+    website URL so citations link to the page; the reference converter reads .docx
+    with the standard library (no engine needed).
     """
     import glob
     import re
@@ -379,12 +385,13 @@ def _load_corpus(p):
     for path in paths:
         name = os.path.basename(path)
         title = re.sub(r"^\d+_", "", os.path.splitext(name)[0]).replace("_", " ")
+        slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
         with open(path, "rb") as fh:
             data = fh.read()
         raw = intake.canonical(
             TENANT,
-            CORPUS_SOURCE,
-            f"github://{CORPUS_REPO}/docs_source/{name}",
+            WEBSITE_SOURCE,
+            f"{WEBSITE_URL}/{slug}",
             title,
             data,
             mime=DOCX_MIME,
@@ -392,16 +399,15 @@ def _load_corpus(p):
         )
         intake.submit(raw)
     worker.drain()
-    # Register the GitHub repo as the source in the Admin console (freshness,
-    # item count). Other repos are added by an admin via the allow-list — this
-    # one ships enabled so the fabric is useful on day one.
+    # Register the Website as the source in the Admin console (freshness, item
+    # count) — one activatable group holding the organisation's own information.
     import time as _time
 
     p.db.execute(
         "INSERT INTO connector_cursors(tenant,source,cursor,last_sync,items) "
         "VALUES(?,?,?,?,?) ON CONFLICT(tenant,source) DO UPDATE SET "
         "cursor=excluded.cursor, last_sync=excluded.last_sync, items=excluded.items",
-        (TENANT, CORPUS_SOURCE, str(len(paths)), int(_time.time() * 1000), len(paths)),
+        (TENANT, WEBSITE_SOURCE, str(len(paths)), int(_time.time() * 1000), len(paths)),
     )
     return len(paths)
 
@@ -494,11 +500,13 @@ def _load_code(p):
         )
     )
     worker.drain()
+    # T129 — the code is the GitHub source, so its cursor populates the GitHub
+    # connector card (items / synced), now that the org briefs group under Website.
     p.db.execute(
         "INSERT INTO connector_cursors(tenant,source,cursor,last_sync,items) "
         "VALUES(?,?,?,?,?) ON CONFLICT(tenant,source) DO UPDATE SET "
         "cursor=excluded.cursor, last_sync=excluded.last_sync, items=items+excluded.items",
-        (TENANT, "github-code", str(n + 1), int(_time.time() * 1000), n + 1),
+        (TENANT, CORPUS_SOURCE, str(n + 1), int(_time.time() * 1000), n + 1),
     )
     return n + 1
 
@@ -872,6 +880,9 @@ def _export_index(p) -> dict:
         passages.append(
             {
                 "doc": did,
+                # T129 — the source that owns this passage, so the browser engine
+                # can DEACTIVATE a toggled-off connector's documents from answers.
+                "source": (d.get("source") or "").lower(),
                 "text": shown[:600],
                 "kind": kind,
                 "url": loc.get("url", ""),

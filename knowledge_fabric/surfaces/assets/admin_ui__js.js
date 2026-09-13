@@ -32,7 +32,8 @@ function connCard(c){const h=c.health||{};const sched=h.interval_s||'';
   '<label>Allow-list — paste a URL, or comma-separated ids (empty = everything the scopes permit)</label>'+
   '<input type="text" data-role="allow" value="'+esc((c.allow||[]).join(', '))+'" placeholder="'+esc(ph)+'">'+
   '<div class="row" style="margin-top:8px"><label>Refresh every</label><input type="number" data-role="interval" min="30" step="30" value="'+esc(sched)+'" placeholder="seconds"><span class="muted small">s</span>'+
-   '<button class="btn sm" data-act="save">Save</button><button class="btn sm primary" data-act="sync" '+(c.enabled?'':'disabled')+'>Sync now</button></div>'+
+   '<button class="btn sm" data-act="save">Save</button><button class="btn sm primary" data-act="sync" '+(c.enabled?'':'disabled')+'>Sync now</button>'+
+   '<button class="btn sm danger" data-act="delete" style="margin-left:auto" title="remove this source">Delete</button></div>'+
   '</div>'}
 
 // T116 — a visible "Add source" affordance listing the five source types, so a
@@ -53,7 +54,8 @@ function renderConnectors(list){SOURCES=list.map(c=>c.source);
   card.querySelector('[data-role=enabled]').onchange=e=>saveConnector(source,{enabled:e.target.checked});
   card.querySelector('[data-act=save]').onclick=()=>{const allow=card.querySelector('[data-role=allow]').value.split(',').map(s=>s.trim()).filter(Boolean);
    const iv=card.querySelector('[data-role=interval]').value;const body={allow,enabled:card.querySelector('[data-role=enabled]').checked};if(iv)body.interval_s=+iv;saveConnector(source,body)};
-  card.querySelector('[data-act=sync]').onclick=()=>syncNow(source)});
+  card.querySelector('[data-act=sync]').onclick=()=>syncNow(source);
+  const del=card.querySelector('[data-act=delete]');if(del)del.onclick=()=>deleteConnector(source)});
  const sel=$('#authority-source');const cur=sel.value;sel.innerHTML='';SOURCES.forEach(s=>{const o=document.createElement('option');o.value=o.text=s;sel.add(o)});if(cur)sel.value=cur}
 
 async function loadConnectors(){try{const d=await api('/admin/connectors');gate(null);renderConnectors(d.connectors||[])}
@@ -75,6 +77,12 @@ async function syncNow(source){try{$('#runs-status').textContent='syncing '+sour
  toast(source+': pulled '+num(out&&out.pulled)+', ingested '+num(out&&out.ingested)+', tombstoned '+num(out&&out.tombstoned)+' · '+st,st==='ok'?'good':'warn')}
  catch(e){toast(e.message,'bad');$('#runs-status').textContent=e.message}
  finally{try{await Promise.all([loadConnectors(),loadRuns(),loadAudit()])}catch(e){}}}
+
+async function deleteConnector(source){if(!confirm('Remove the '+source+' source from the fabric? Its answers will stop until you re-add it.'))return;
+ try{const out=await api('/admin/connectors/delete',{method:'POST',body:{source}});
+  if(out&&out.status==='error')toast(source+': '+(out.message||'delete failed'),'bad');else toast(source+' removed','good')}
+ catch(e){toast(e.message,'bad')}
+ finally{try{await loadConnectors()}catch(e){}}}
 
 async function runDue(){try{const out=await api('/admin/refresh/run-due',{method:'POST',body:{}});FORCE=3;schedulePoll();
  toast((out.ran||[]).length+' due source(s) refreshed','good');await Promise.all([loadConnectors(),loadRuns()])}catch(e){toast(e.message,'bad')}}
