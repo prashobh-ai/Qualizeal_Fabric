@@ -37,6 +37,11 @@ ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, ROOT)
 os.environ.setdefault("KF_LEDGER_PURPOSE", "answer_bake")
 os.environ.setdefault("KF_MODEL_MODE", "mock")  # deterministic, no network
+# T117 — the passwordless {tenant, subject} /login path is gated behind
+# KF_DEV_LOGIN; the build is a trusted, local, build-time process that bakes the
+# per-role login directory into the snapshot, so enable it here (never shipped —
+# the static build has no server, and the deployed server leaves it unset).
+os.environ.setdefault("KF_DEV_LOGIN", "1")
 
 from knowledge_fabric.answer.service import AnswerService  # noqa: E402
 from knowledge_fabric.evaluation import bank as qbank  # noqa: E402
