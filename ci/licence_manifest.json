@@ -1236,6 +1236,19 @@
       "evidence": "knowledge_fabric/surfaces/static/vendor/vis-network.min.js"
     },
     {
+      "name": "jszip",
+      "role": "in-browser document unzip for real DOCX/PPTX/XLSX upload parsing, vendored browser asset (T138)",
+      "linkage": "optional-runtime",
+      "licence": "MIT",
+      "licence_name": "MIT License (dual MIT OR GPLv3; used under MIT)",
+      "approved": true,
+      "status": "optional",
+      "import_names": [],
+      "distributions": [],
+      "why": "Vendored standalone UMD build (v3.10.1) at surfaces/static/vendor/jszip.min.js; served same-origin under /static/vendor/, no CDN, no python import; unzips uploaded Office files so upload_parse.js can extract passages/tables/slides in the browser.",
+      "evidence": "knowledge_fabric/surfaces/static/vendor/jszip.min.js"
+    },
+    {
       "name": "token-meter",
       "role": "telemetry concepts reference (T55)",
       "linkage": "optional-runtime",

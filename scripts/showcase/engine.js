@@ -306,28 +306,53 @@
     try { return JSON.parse(localStorage.getItem("kf.uploads") || "[]"); } catch (e) { return []; }
   }
   function saveUploads(a) {
-    try { localStorage.setItem("kf.uploads", JSON.stringify((a || []).slice(0, 200))); } catch (e) {}
+    // T138 — parsed uploads carry real passages, so a naive write can exceed the
+    // ~5 MB localStorage budget. Trim to 200 files, then shed the oldest until the
+    // serialised store fits ~4 MB; the newest uploads (unshifted first) survive.
+    var arr = (a || []).slice(0, 200);
+    for (;;) {
+      var s = JSON.stringify(arr);
+      if (s.length <= 4000000 || arr.length <= 1) { try { localStorage.setItem("kf.uploads", s); } catch (e) {} return; }
+      arr = arr.slice(0, arr.length - 1);
+    }
+  }
+  // T138 — the in-browser parser (upload_parse.js) and JSZip (vendored) are loaded
+  // as page scripts; under Node the test harness sets these globals. When absent we
+  // fall back to a stored-but-not-parsed placeholder so an add still stands.
+  function getKFUpload() {
+    if (typeof KFUpload !== "undefined") return KFUpload;
+    if (typeof window !== "undefined" && window.KFUpload) return window.KFUpload;
+    return null;
+  }
+  function getJSZip() {
+    if (typeof JSZip !== "undefined") return JSZip;
+    if (typeof window !== "undefined" && window.JSZip) return window.JSZip;
+    return null;
+  }
+  function b64ToU8(b64) {
+    try {
+      var bin = atob(b64 || ""), u8 = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      return u8;
+    } catch (e) { return new Uint8Array(0); }
+  }
+  function normName(s) {
+    return String(s || "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]+/g, "");
+  }
+  // Baked document titles, so re-uploading a file already in the fabric is reported
+  // as a duplicate rather than double-indexed.
+  function bakedDocTitleSet() {
+    ensureIndexBase();
+    var out = {}, ix = SNAP.index || {}, n = ix._baseDocN || 0;
+    (ix.docs || []).slice(0, n).forEach(function (d) { if (d && d.title) out[normName(d.title)] = 1; });
+    return out;
   }
   function slugify(s) {
     return (String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60)) || "upload";
   }
-  function b64ToText(b64) {
-    try { return decodeURIComponent(escape(atob(b64 || ""))); } catch (e) { try { return atob(b64 || ""); } catch (_) { return ""; } }
-  }
   function commitEndpoint() {
     try { var v = localStorage.getItem("kf.commit_endpoint"); if (v) return v; } catch (e) {}
     return SNAP.commit_endpoint || "";  // baked config, if the operator set one
-  }
-  // Full text for a text file is read in-browser; a binary Office/PDF file's full
-  // text is extracted at BUILD time once committed — until then it is answerable
-  // by title and a placeholder line, so nothing looks stubbed.
-  function uploadText(filename, content_b64, text) {
-    if (text) return String(text);
-    var ext = (String(filename).split(".").pop() || "").toLowerCase();
-    if (["txt", "md", "csv", "tsv", "json", "log", "py", "js", "html", "xml"].indexOf(ext) >= 0) {
-      return b64ToText(content_b64);
-    }
-    return "";
   }
   function ensureIndexBase() {
     SNAP.index = SNAP.index || { passages: [], docs: [], df: {}, N: 0, avgdl: 1 };
@@ -361,16 +386,29 @@
     }
   }
   function applyUploads() {
-    // Re-inject the visitor's uploaded docs over the pristine baked index
-    // (idempotent: truncate to the baked base, then push the current uploads).
+    // T138 — re-inject the visitor's uploaded docs over the pristine baked index
+    // (idempotent: truncate to the baked base, then push the current uploads). Each
+    // upload now contributes its REAL parsed passages — one per paragraph / slide /
+    // table / row — so it is retrieved, answered and cited exactly like a baked doc,
+    // in the same active set and the same galaxy.
     ensureIndexBase();
     var ix = SNAP.index, ups = loadUploads();
     ix.passages.length = ix._baseN;
     ix.docs.length = ix._baseDocN;
     ups.forEach(function (u) {
-      ix.passages.push({
-        doc: u.doc, source: "files", text: u.text, kind: "document",
-        url: "", path: u.title, symbol: "", coord: u.coord, idx: u.idx
+      var passages = (u.passages && u.passages.length)
+        ? u.passages
+        : [{ text: u.text || ("Document “" + u.title + "” added to the Files source."),
+             coord: u.coord || ("Files · " + u.title), kind: "document" }];
+      passages.forEach(function (p, i) {
+        var text = String(p.text || "");
+        ix.passages.push({
+          doc: u.doc, source: "files", text: text, kind: p.kind || "document",
+          url: "", path: u.title, symbol: "",
+          coord: p.coord || (u.title + " · ¶" + (i + 1)),
+          section_path: p.section_path || "", slide: p.slide,
+          idx: (u.title + " " + text).toLowerCase()
+        });
       });
       ix.docs.push({ id: u.doc, title: u.title, kind: "document", url: "" });
     });
@@ -397,35 +435,102 @@
     } catch (e) { return false; }
     return true;
   }
-  function uploadDocs(files) {
-    var all = loadUploads(), added = [], committed = false;
-    (files || []).forEach(function (f) {
-      var name = (f && f.filename) || "document";
-      var body = uploadText(name, f && f.content_b64, f && f.text);
-      var placeholder = "Uploaded document “" + name + "” is now in the Files source. " +
-        "Its full text is indexed once the file is committed to the repository and the site rebuilds.";
-      var summary = body || placeholder;
-      var rec = {
-        doc: "upload:" + slugify(name) + ":" + Date.now().toString(36) + added.length,
-        title: name, stored: slugify(name) + "." + ((name.split(".").pop() || "txt").toLowerCase()),
-        source: "files", coord: "Files · " + name,
-        text: summary.slice(0, 600), idx: (name + " " + summary).toLowerCase(),
-        ts: new Date().toISOString(), has_text: !!body, content_b64: (f && f.content_b64) || ""
-      };
-      if (tryCommit("add", rec)) committed = true;
-      // the base64 is only needed for the commit POST; don't persist large blobs
-      var persist = {}; for (var k in rec) if (k !== "content_b64") persist[k] = rec[k];
-      all.unshift(persist);
-      added.push(persist);
-    });
-    saveUploads(all);
-    applyUploads();
+  // T138 — parse one uploaded file into real passages/tables/images. DOCX/PPTX/XLSX
+  // are unzipped and read in-browser (JSZip + upload_parse.js, no network); text and
+  // CSV are read directly; a PDF is stored with a metadata passage until the build
+  // extracts it server-side. Always resolves — a parse error degrades to a
+  // stored-but-not-parsed placeholder, never a rejected upload.
+  var BINARY_EXT = { pdf: 1, docx: 1, docm: 1, pptx: 1, pptm: 1, xlsx: 1, xlsm: 1 };
+  function parseOne(f) {
+    var name = (f && f.filename) || "document";
+    var b64 = (f && f.content_b64) || "", text = (f && f.text) || "";
+    var ext = (String(name).split(".").pop() || "").toLowerCase();
+    var KU = getKFUpload();
+    // A text-only add (Curator "add document", pasted JSON) whose name is not a
+    // binary type: index its text directly as plain paragraphs — never route it
+    // through the unzip path, which would fail and drop to a placeholder.
+    if (!b64 && text && !BINARY_EXT[ext]) {
+      var name2 = /\.[a-z0-9]+$/i.test(name) ? name : name + ".txt";
+      var bytesT = typeof TextEncoder !== "undefined" ? new TextEncoder().encode(text) : new Uint8Array(0);
+      if (KU) return KU.parse(name2, bytesT, {}).then(function (r) { r.filename = name; return r; }).catch(function (e) { return placeholderParse(name, e); });
+      return Promise.resolve(placeholderParse(name, null));
+    }
+    var bytes = b64 ? b64ToU8(b64) : new Uint8Array(0);
+    if (KU && bytes.length) {
+      return KU.parse(name, bytes, { JSZip: getJSZip() }).catch(function (e) { return placeholderParse(name, e); });
+    }
+    return Promise.resolve(placeholderParse(name, null));
+  }
+  function placeholderParse(name, e) {
+    var ext = (String(name).split(".").pop() || "").toLowerCase();
     return {
-      uploaded: added.length, ingested: added.length, held_for_review: 0,
-      run_id: "upload-" + Date.now().toString(36), dataset_version: SNAP.dataset_version || 1,
-      sources: ["files"], committed: committed, documents: added.map(function (a) { return a.title; }),
-      note: committed ? "committed to the repository" : "added to the Files source"
+      filename: name, ext: ext, hash: "up_" + Math.abs((name + Date.now()).split("").reduce(function (a, c) { return (a * 31 + c.charCodeAt(0)) >>> 0; }, 7)).toString(16),
+      parsed: false, note: e ? ("could not parse: " + (e.message || e)) : "stored; not parsed in-browser",
+      passages: [{ text: "Document “" + name + "” added to the Files source.", coord: "Files · " + name, kind: "document" }],
+      tables: [], images: []
     };
+  }
+  function buildUploadRecord(parsed) {
+    var name = parsed.filename, slug = slugify(name);
+    var ext = parsed.ext || (name.split(".").pop() || "txt").toLowerCase();
+    var passages = (parsed.passages || []).slice(0, 400).map(function (p, i) {
+      return {
+        text: String(p.text || "").slice(0, 600),
+        coord: p.coord || (name + " · ¶" + (i + 1)),
+        kind: p.kind || "document",
+        section_path: p.section_path || "", slide: p.slide
+      };
+    });
+    if (!passages.length) passages = [{ text: "Document “" + name + "” added to the Files source.", coord: "Files · " + name, kind: "document" }];
+    return {
+      doc: "upload:" + slug + ":" + parsed.hash, hash: parsed.hash,
+      title: name, ext: ext, source: "files",
+      parsed: parsed.parsed !== false, note: parsed.note || "",
+      stored: slug + "." + ext, ts: new Date().toISOString(),
+      tables_count: (parsed.tables || []).length, images_count: (parsed.images || []).length,
+      passages: passages,
+      // legacy single-value fields kept for any older reader
+      text: passages[0].text, coord: passages[0].coord,
+      idx: (name + " " + passages.map(function (p) { return p.text; }).join(" ")).toLowerCase().slice(0, 4000),
+      has_text: parsed.parsed !== false
+    };
+  }
+  function uploadDocs(files) {
+    var all = loadUploads(), seen = {}, added = [], duplicates = [], committed = false;
+    all.forEach(function (u) { if (u.hash) seen[u.hash] = 1; });
+    var baked = bakedDocTitleSet();
+    var chain = Promise.resolve();
+    (files || []).forEach(function (f) {
+      chain = chain.then(function () {
+        return parseOne(f).then(function (parsed) {
+          var name = parsed.filename, hash = parsed.hash;
+          // Dedupe by content hash (same bytes, any name) or by a name already baked
+          // into the fabric — reported, not double-indexed.
+          if (seen[hash]) { duplicates.push({ title: name, reason: "already uploaded" }); return; }
+          if (baked[normName(name)]) { duplicates.push({ title: name, reason: "already in the fabric" }); return; }
+          var rec = buildUploadRecord(parsed);
+          seen[hash] = 1;
+          if (tryCommit("add", { title: rec.title, stored: rec.stored, content_b64: (f && f.content_b64) || "", ts: rec.ts })) committed = true;
+          all.unshift(rec);
+          added.push(rec);
+        });
+      });
+    });
+    return chain.then(function () {
+      saveUploads(all);
+      applyUploads();
+      var sum = function (key) { return added.reduce(function (n, a) { return n + (key === "passages" ? (a.passages ? a.passages.length : 0) : (a[key] || 0)); }, 0); };
+      return {
+        uploaded: added.length, ingested: added.length, held_for_review: 0,
+        duplicates: duplicates,
+        run_id: "upload-" + Date.now().toString(36), dataset_version: SNAP.dataset_version || 1,
+        sources: ["files"], committed: committed,
+        documents: added.map(function (a) { return a.title; }),
+        passages_added: sum("passages"), tables_added: sum("tables_count"), images_added: sum("images_count"),
+        note: (!added.length && duplicates.length) ? "already in the fabric"
+          : (committed ? "committed to the repository" : "added to the Files source")
+      };
+    });
   }
   function deleteUpload(docId) {
     var all = loadUploads(), gone = null;
@@ -438,7 +543,12 @@
   function uploadsPayload() {
     return {
       uploads: loadUploads().map(function (u) {
-        return { document_id: u.doc, title: u.title, source: "files", added_at: u.ts, has_text: !!u.has_text };
+        return {
+          document_id: u.doc, title: u.title, source: "files", added_at: u.ts,
+          has_text: !!u.has_text, parsed: u.parsed !== false, ext: u.ext || "",
+          passages: (u.passages || []).length, tables: u.tables_count || 0, images: u.images_count || 0,
+          note: u.note || ""
+        };
       })
     };
   }
@@ -740,6 +850,18 @@
     });
     base.passages = aps.length;
     base.documents = Object.keys(docs).length || 0;
+    // T138 — a parsed upload's tables and images move the Tables / Images tiles too
+    // (only while the Files source is on and the doc is not deactivated), so a DOCX
+    // with 13 tables or a deck with embedded media visibly grows the corpus.
+    var gone = deactivatedDocs(), upT = 0, upI = 0;
+    if (!off.files) {
+      loadUploads().forEach(function (u) {
+        if (gone[u.doc]) return;
+        upT += u.tables_count || 0; upI += u.images_count || 0;
+      });
+    }
+    base.tables = (base.tables || 0) + upT;
+    base.images = (base.images || 0) + upI;
     if (off.github) base.repositories = 0;
     if (off.jira) base.jira_projects = 0;
     if (off.confluence) base.confluence_spaces = 0;
@@ -1675,11 +1797,12 @@
       // at once (answerable immediately) and, when a commit endpoint is configured,
       // POSTed there to land in the repo. Delete removes it from both.
       if (path === "/admin/upload" || path === "/curator/upload") {
-        var up = uploadDocs((body || {}).files || []);
-        (up.documents || []).forEach(function (t) {
-          evAppend("curation", { action: "upload", document_id: t, title: t, actor: subject });
+        return uploadDocs((body || {}).files || []).then(function (up) {
+          (up.documents || []).forEach(function (t) {
+            evAppend("curation", { action: "upload", document_id: t, title: t, actor: subject });
+          });
+          return respond(up);
         });
-        return respond(up);
       }
       if (path === "/admin/uploads/delete") {
         var du = deleteUpload((body || {}).document_id || (body || {}).doc || "");

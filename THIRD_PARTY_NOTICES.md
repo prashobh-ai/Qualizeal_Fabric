@@ -27,6 +27,7 @@ licence, named against each entry.
 | docling | MIT License | real DocumentConverter adapter for PDF/office/OCR (P2.7) |
 | faster-whisper | MIT License | ASR (speech-to-text) engine (P8.1) |
 | google-api-python-client | Apache License 2.0 | Google Drive connector client (P2.x) |
+| JSZip | MIT License (dual MIT OR GPLv3; used under MIT) | in-browser DOCX/PPTX/XLSX unzip for real upload parsing, vendored browser asset (T138) |
 | kokoro | Apache License 2.0 | TTS (text-to-speech) engine for en/fr/es/ja (P8.1) |
 | lingua-language-detector | Apache License 2.0 | high-accuracy language detection (P3.4) |
 | LiteLLM | MIT License | provider gateway (T08, providers/, guarded) |
