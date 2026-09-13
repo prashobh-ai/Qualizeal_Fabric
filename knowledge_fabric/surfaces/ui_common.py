@@ -99,6 +99,16 @@ GALAXY_HEAD = (
     '<script src="/static/vendor/galaxy.js"></script>'
 )
 
+#: T138 — real in-browser document parsing on the pages that upload files (Admin,
+#: Curator). JSZip (vendored, MIT) unzips DOCX/PPTX/XLSX; ``upload_parse.js`` reads
+#: the OOXML with plain regex and yields real passages / tables / slide references.
+#: Both same-origin (no network), loaded in <head> so ``JSZip`` and ``KFUpload``
+#: exist before the page script wires the uploader.
+UPLOAD_PARSE_JS = _read_asset("upload_parse.js")
+UPLOAD_HEAD = (
+    f'<script src="/static/vendor/jszip.min.js"></script><script>{UPLOAD_PARSE_JS}</script>'
+)
+
 
 def card(title: str, body: str, id_: str = "", extra: str = "", right: str = "") -> str:
     """One brand panel: ``<div class="card"><h3>title</h3>body</div>``."""

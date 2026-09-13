@@ -119,21 +119,42 @@ async function addFilesToBatch(files){const acl=[$('#upload-file-acl').value];le
  for(const file of files){try{const content_b64=await readFileB64(file);BATCH.push({filename:file.name,content_b64,acl});added++}
   catch(e){toast('Could not read '+file.name+': '+e.message,'bad')}}
  if(added){renderBatch();toast(added+' file(s) staged — press "Upload batch" to ingest','good')}}
+// T138 — the seven-stage ingestion strip. It animates while the browser unzips and
+// parses each file (JSZip + KFUpload, no network), then stamps the REAL counts the
+// upload produced onto the stages that yield them (convert→documents, chunk/embed→
+// passages, extract→tables), so the visitor watches a genuine measurement, not a mock.
+const STAGE_LABEL={detect:'detect',convert:'convert',chunk:'chunk',extract:'extract',graph:'graph',embed:'embed',health:'health'};
+function paintUploadStages(active,counts){const box=$('#upload-stages');if(!box)return;box.hidden=false;
+ const cnt=counts?{convert:counts.documents,chunk:counts.passages,extract:counts.tables,graph:counts.images,embed:counts.passages,health:counts.documents}:{};
+ box.innerHTML=PIPELINE.map((n,i)=>{const st=i<active?'ok':(i===active?'running':'pending');
+  const c=(st==='ok'&&cnt[n]!=null&&cnt[n]!=='')?(' · '+num(cnt[n])):'';
+  return '<span class="stage '+st+'">'+esc(STAGE_LABEL[n])+c+'</span>'}).join('')}
 async function upload(){let files=BATCH.slice();const raw=$('#upload-json').value.trim();
  if(raw){try{const arr=JSON.parse(raw);if(!Array.isArray(arr))throw new Error('JSON must be an array');files=files.concat(arr)}catch(e){toast('Invalid JSON: '+e.message,'bad');return}}
  if(!files.length){toast('Nothing to upload — add files to the batch first','warn');return}
- $('#upload-btn').disabled=true;$('#upload-status').textContent='uploading '+files.length+' file(s)…';FORCE=4;schedulePoll();
- try{const out=await api('/admin/upload',{method:'POST',body:{files}});
-  const held=out.held_for_review?(' · '+out.held_for_review+' held for review'):'';
-  $('#upload-status').textContent='uploaded '+out.uploaded+' · ingested '+out.ingested+held+(out.noops?' · '+out.noops+' unchanged':'')+' · dataset v'+out.dataset_version+' · run '+out.run_id;
-  toast('Bulk upload done'+(out.held_for_review?' · '+out.held_for_review+' awaiting curator review':'')+' · dataset v'+out.dataset_version,'good');BATCH=[];renderBatch();$('#upload-json').value='';await Promise.all([loadRuns(),loadAudit(),refreshUploads()])}
- catch(e){$('#upload-status').textContent=e.message;toast(e.message,'bad')}finally{$('#upload-btn').disabled=false}}
+ $('#upload-btn').disabled=true;$('#upload-status').textContent='parsing '+files.length+' file(s) in your browser…';
+ paintUploadStages(0,null);let step=0;const tick=setInterval(()=>{step=Math.min(PIPELINE.length-1,step+1);paintUploadStages(step,null)},110);
+ FORCE=4;schedulePoll();
+ try{const out=await api('/admin/upload',{method:'POST',body:{files}});clearInterval(tick);
+  const counts={documents:(out.documents||[]).length,passages:out.passages_added||0,tables:out.tables_added||0,images:out.images_added||0};
+  paintUploadStages(PIPELINE.length,counts);
+  const dup=(out.duplicates||[]).length;
+  const parts=['added '+out.uploaded+' doc'+(out.uploaded===1?'':'s'),'+'+num(counts.passages)+' passages'];
+  if(counts.tables)parts.push('+'+num(counts.tables)+' tables');
+  if(counts.images)parts.push('+'+num(counts.images)+' images');
+  if(dup)parts.push(dup+' already in the fabric');
+  $('#upload-status').textContent=parts.join(' · ')+' · run '+out.run_id;
+  toast(out.uploaded?('Indexed '+out.uploaded+' document'+(out.uploaded===1?'':'s')+' — ask about '+(out.uploaded===1?'it':'them')+' now'):(dup?'Already in the fabric — nothing added':'Upload done'),out.uploaded?'good':'warn');
+  BATCH=[];renderBatch();$('#upload-json').value='';await Promise.all([loadRuns(),loadAudit(),refreshUploads()])}
+ catch(e){clearInterval(tick);$('#upload-stages').hidden=true;$('#upload-status').textContent=e.message;toast(e.message,'bad')}
+ finally{$('#upload-btn').disabled=false}}
 // T131 — the documents already in the Files source, each with a Delete that
 // removes it (on the static demo the delete also fires the repo-commit workflow,
 // so the file leaves the repository too). Absent endpoint → the list stays empty.
 async function refreshUploads(){const box=$('#upload-list');if(!box)return;
  try{const d=await api('/admin/uploads');const ups=(d&&d.uploads)||[];
-  box.innerHTML=ups.map(u=>'<li><b>'+esc(u.title)+'</b> <span class="muted">Files'+(u.has_text?'':' · title only until rebuild')+'</span> <a href="#" data-doc="'+esc(u.document_id)+'">delete</a></li>').join('');
+  box.innerHTML=ups.map(u=>{const meta=(u.parsed!==false)?(num(u.passages||0)+' passage'+((u.passages||0)===1?'':'s')+((u.tables)?' · '+num(u.tables)+' table'+(u.tables===1?'':'s'):'')+((u.images)?' · '+num(u.images)+' image'+(u.images===1?'':'s'):'')):((u.ext==='pdf')?'stored · text extracted on rebuild':'stored');
+   return '<li><b>'+esc(u.title)+'</b> <span class="muted">'+esc(meta)+'</span> <a href="#" data-doc="'+esc(u.document_id)+'">delete</a></li>'}).join('');
   KF.$$('#upload-list a').forEach(a=>a.onclick=e=>{e.preventDefault();deleteUpload(a.dataset.doc)})}
  catch(e){box.innerHTML=''}}
 async function deleteUpload(docId){if(!confirm('Delete this uploaded document?\nIt is removed from the Files source (and, when a commit endpoint is configured, from the repository).'))return;
