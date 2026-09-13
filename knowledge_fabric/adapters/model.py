@@ -35,6 +35,28 @@ PREFERRED_SMALL = "claude-haiku-4-5"  # used when the key lists it (doctor decid
 
 _TIER_PRICE = {"fast": 1e-6, "deep": 5e-6, "escalation": 1e-5}  # mock/hosted tiers only
 
+# T125 — the open-source LLM and the extractive-NLP fallback are NOT free: every
+# answer still runs on hardware (amortised GPU/CPU). A representative self-hosted
+# rate in USD per MILLION tokens, env-overridable (``KF_OSS_COMPUTE_USD_PER_MTOK``),
+# so MODEL SPEND and the ROI ratio reflect real-time consumption on EVERY answer
+# path — not $0 by construction when no paid provider key is set. Deliberately
+# tiny next to a frontier API (which is the point of the ROI story), but non-zero.
+OSS_COMPUTE_USD_PER_MTOK = 0.05
+
+
+def oss_compute_cost(tokens_in: int, tokens_out: int) -> float:
+    """Imputed self-hosted compute cost for one open-source / extractive answer,
+    from its real token consumption. ``KF_OSS_COMPUTE_USD_PER_MTOK`` overrides the
+    rate; a bad override falls back to the default rather than raising."""
+    try:
+        rate = float(os.environ.get("KF_OSS_COMPUTE_USD_PER_MTOK", OSS_COMPUTE_USD_PER_MTOK))
+    except (TypeError, ValueError):
+        rate = OSS_COMPUTE_USD_PER_MTOK
+    if rate < 0:
+        rate = OSS_COMPUTE_USD_PER_MTOK
+    toks = max(0, int(tokens_in or 0)) + max(0, int(tokens_out or 0))
+    return round(toks * rate / 1_000_000.0, 8)
+
 
 class ProviderUnavailableError(RuntimeError):
     """The configured provider cannot be constructed (missing key/endpoint).

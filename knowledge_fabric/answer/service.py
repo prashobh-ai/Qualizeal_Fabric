@@ -1342,6 +1342,19 @@ class AnswerService:
         toks = len(question.split()) + sum(len(c.passage.text.split()) for c in selected)
         return toks * (5e-6 if tier in ("deep", "escalation") else 1e-6)
 
+    @staticmethod
+    def _oss_meter(input_text: str, output_text: str):
+        """T125 — real token consumption + the imputed self-hosted compute cost
+        for an answer that ran on the open-source / extractive path (no paid
+        provider). Returns ``(cost_usd, tokens_in, tokens_out)`` so every keyless
+        answer is counted on the ROI dashboard instead of reading $0 / 0 tokens."""
+        from ..adapters.model import oss_compute_cost
+        from ..adapters.oss_model import count_tokens
+
+        tin = count_tokens(input_text or "")
+        tout = count_tokens(output_text or "")
+        return oss_compute_cost(tin, tout), tin, tout
+
     def _confidence(self, g, citations, selected):
         return round(min(0.99, g * 0.9 + 0.05 * len(citations) / max(1, len(selected))), 3)
 
@@ -1462,28 +1475,40 @@ class AnswerService:
             ],
         }
         self._audit(principal, "ask", "answered:discovery", trace_id)
+        disc_text = "\n".join(parts)
+        # T125 — the discovery search runs keyless but still consumes compute
+        # (it ranks the assets and emits the list). Count real tokens + impute
+        # the self-hosted compute cost so it lands on the ROI dashboard too.
+        d_cost, d_tin, d_tout = self._oss_meter(rq + "\n" + disc_text, disc_text)
         span.set(
             kind="answer",
             level="discovery",
             tier="none",
+            cost=d_cost,
+            tokens=d_tin + d_tout,
+            tokens_in=d_tin,
+            tokens_out=d_tout,
             citations_count=len(citations),
             complexity="simple",
+            model_name=model_for_tier("none"),
             dataset_version=dsv,
         )
         return Answer(
             AnswerKind.ANSWER,
-            "\n".join(parts),
+            disc_text,
             citations,
             0.85,
             trace_id,
-            0.0,
-            0,
+            d_cost,
+            d_tin + d_tout,
             "none",
             grounding_score=0.85,
             tenant=principal.tenant,
             level=1,
             why=why,
             lang=qlang,
+            tokens_in=d_tin,
+            tokens_out=d_tout,
             model_name=model_for_tier("none"),
             complexity="simple",
             dataset_version=dsv,
@@ -1522,10 +1547,17 @@ class AnswerService:
             "entity": res.entity,
         }
         self._audit(principal, "ask", f"answered:cross_source:{res.verdict}", trace_id)
+        # T125 — cross-source verification is keyless but consumes compute
+        # (it reconciles the issue against the code and composes the verdict).
+        x_cost, x_tin, x_tout = self._oss_meter(rq + "\n" + res.explain, text)
         span.set(
             kind="answer",
             level="cross-source",
             tier="none",
+            cost=x_cost,
+            tokens=x_tin + x_tout,
+            tokens_in=x_tin,
+            tokens_out=x_tout,
             citations_count=len(res.citations),
             sources=[c.document_title for c in res.citations],
             why=why,
@@ -1540,14 +1572,16 @@ class AnswerService:
             res.citations,
             1.0,
             trace_id,
-            0.0,
-            0,
+            x_cost,
+            x_tin + x_tout,
             "none",
             grounding_score=1.0,
             tenant=tenant,
             level=2,
             why=why,
             lang=qlang,
+            tokens_in=x_tin,
+            tokens_out=x_tout,
             model_name=model_for_tier("none"),
             complexity="analytical",
             authoritative_source=self._authority_card(tenant, res.citations),
@@ -1597,7 +1631,10 @@ class AnswerService:
         # tester's code answer leads with the verifying test and a CxO's shows
         # one block.
         prof = personas.profile_for(principal.designation)
-        text, citations, *_ = self._compose_code(
+        # T125 — keep the real token consumption + imputed compute cost the code
+        # composer measured, so this early code answer is counted on the ROI
+        # dashboard like every other open-source-path answer (not $0/0 tokens).
+        text, citations, code_cost, code_tin, code_tout, *_ = self._compose_code(
             rq, sel, self._depth_cap(principal), prof["emphasis"]
         )
         if not citations:
@@ -1623,9 +1660,14 @@ class AnswerService:
             kind="answer",
             level="lookup",
             tier="none",
+            cost=code_cost,
+            tokens=code_tin + code_tout,
+            tokens_in=code_tin,
+            tokens_out=code_tout,
             citations_count=len(citations),
             code_answer=True,
             complexity="simple",
+            model_name=model_for_tier("none"),
             dataset_version=dsv,
         )
         return Answer(
@@ -1634,14 +1676,16 @@ class AnswerService:
             citations,
             0.9,
             trace_id,
-            0.0,
-            0,
+            code_cost,
+            code_tin + code_tout,
             "none",
             grounding_score=0.9,
             tenant=tenant,
             level=1,
             why=why,
             lang=qlang,
+            tokens_in=code_tin,
+            tokens_out=code_tout,
             model_name=model_for_tier("none"),
             complexity="simple",
             authoritative_source=self._authority_card(tenant, citations),
@@ -1821,7 +1865,14 @@ class AnswerService:
             if len(body) > 1800:  # keep the bubble readable; link goes to the full source
                 body = body[:1800].rstrip() + "\n# … (truncated — open on GitHub)"
             parts.append(f"{summary} [{n}]\n\n```{loc.get('language', '')}\n{body}\n```")
-        return "\n\n".join(parts), citations, 0, 0, 0, 0.0, model_for_tier("none")
+        text = "\n\n".join(parts)
+        # T125 — the code path bypasses the paid model but still consumes compute
+        # (it reads the ranked code passages and emits the cited block). Measure
+        # real tokens and impute the self-hosted compute cost, so this answer is
+        # counted on the ROI dashboard like every other open-source-path answer.
+        code_in = question + "\n" + "\n".join(c.passage.text for _h, c, _l in ranked)
+        cost, tin, tout = self._oss_meter(code_in, text)
+        return text, citations, cost, tin, tout, 0.0, model_for_tier("none")
 
     def _compose(self, principal, question, selected, tier):
         # T27 depth: how many sentences this designation's answer may carry —
@@ -1906,6 +1957,7 @@ class AnswerService:
         extractive = " ".join(parts)
 
         cost = tin = tout = 0
+        provider_cost = 0.0
         saved = 0.0
         text = extractive
         model_name = model_for_tier("none")
@@ -1929,7 +1981,8 @@ class AnswerService:
                     "question_hash": hashlib.sha1(question.encode("utf-8")).hexdigest()[:16],
                 },
             )
-            cost = out["cost"]
+            provider_cost = out["cost"]
+            cost = provider_cost
             usage = out.get("usage", {})
             tin = int(usage.get("in") or (len(_SYSTEM_PREAMBLE.split()) + len(extractive.split())))
             tout = int(usage.get("out") or max(1, len(out.get("text", "").split())))
@@ -1942,6 +1995,22 @@ class AnswerService:
             )
             checked = self._postcheck(out["text"], selected)
             text = checked or extractive
+        else:
+            # T125 — the extractive / open-source-NLP core still consumes compute
+            # for every answer (it reads the retrieved evidence and emits an
+            # answer). Count the real tokens so token consumption is measured on
+            # EVERY path, keyless or not — not left at zero for the fallback.
+            evidence = " ".join(c.passage.text for c in selected)
+            _c, tin, tout = self._oss_meter(f"{_SYSTEM_PREAMBLE}\n{question}\n{evidence}", text)
+        # T125 — impute the self-hosted compute cost for any answer a PAID provider
+        # did not bill (the open-source LLM returns $0; the extractive core makes no
+        # call at all), from its real token consumption. This makes MODEL SPEND and
+        # the ROI ratio reflect real-time usage instead of reading $0 when keyless.
+        # A priced provider answer (provider_cost > 0) keeps its real cost.
+        if provider_cost <= 0.0 and (tin + tout) > 0:
+            from ..adapters.model import oss_compute_cost
+
+            cost = oss_compute_cost(tin, tout)
         return text, citations, cost, tin, tout, saved, model_name
 
     def _postcheck(self, text, selected):

@@ -49,14 +49,19 @@ class AnswerFirstBase(unittest.TestCase):
 
 
 class TestAnswerFirst(AnswerFirstBase):
-    def test_result_is_direct_and_costs_no_model_tokens(self):
+    def test_result_is_direct_on_the_extractive_floor(self):
         a = self.svc.ask(self.asker, f"What is {self.title}?")
         self.assertEqual(a.kind, AnswerKind.ANSWER)
-        # the direct answer is rendered immediately, no model call on the floor
+        # the direct answer is rendered immediately, no PAID model call on the floor
         self.assertTrue(a.result)
         self.assertEqual(a.result, a.answer_text)
-        self.assertEqual(a.tokens_out, 0)
-        self.assertEqual(a.cost, 0.0)
+        self.assertIn("extractive", (a.model_name or "").lower())
+        # T125 — the extractive floor still consumes compute: real tokens are
+        # measured and a small self-hosted compute cost is imputed (no longer $0),
+        # so this answer is counted on the ROI dashboard.
+        self.assertGreater(a.tokens_out, 0)
+        self.assertGreater(a.cost, 0.0)
+        self.assertLess(a.cost, 0.01)  # tiny next to a frontier API call
         # and it carries a governance line with a freshness stamp (T85)
         self.assertIsNotNone(a.governance)
         self.assertIn("as of", a.governance["freshness"])

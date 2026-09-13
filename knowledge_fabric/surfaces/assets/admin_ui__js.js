@@ -262,12 +262,13 @@ function renderOverview(o){const v=o.value||{},c=o.cost||{},r=o.roi||{},ad=o.ado
  $('#roi-minutes').value=(o.settings||{}).minutes_saved_per_question;$('#roi-rate').value=(o.settings||{}).loaded_rate_per_hour;
  $('#roi-tiles').innerHTML=[
   kpi('Questions answered',num(v.questions_answered),v.by_persona?Object.keys(v.by_persona).length+' personas':'',''),
-  kpi('Hours saved',num(v.hours_saved),d.hours_saved,''),
+  kpi('Tokens consumed',num(v.total_tokens),num(v.tokens_per_answer)+' / answer &middot; every path',''),
   kpi('Value delivered',usd(r.value_delivered_usd),d.value_delivered_usd,'good'),
   kpi('Model spend',usd(c.total_spend_usd),'cost avoided '+usd(c.cost_avoided_usd),''),
   kpi('ROI ratio',(r.ratio==null?'—':r.ratio+'×'),d.ratio,r.ratio&&r.ratio>=1?'good':(r.ratio!=null?'warn':'')),
   kpi('Cost / answer',usd(c.cost_per_answer_usd),'projected '+usd(c.projected_monthly_usd)+'/mo','')].join('');
- $('#roi-adoption').innerHTML='<b>'+num(ad.active_users)+'</b> active users &middot; <b>'+num(ad.questions_per_user)+'</b> questions/user &middot; WoW '+pctOf(ad.wow_growth);
+ $('#roi-adoption').innerHTML='<b>'+num(ad.active_users)+'</b> active users &middot; <b>'+num(ad.questions_per_user)+'</b> questions/user &middot; WoW '+pctOf(ad.wow_growth)+
+  ' &middot; '+num(v.hours_saved)+'h saved ≈ '+usd(v.labour_value_usd)+' labour value';
  $('#roi-quality').innerHTML='trust '+pctOf(ql.trust_avg)+' &middot; citation coverage '+pctOf(ql.citation_coverage)+' &middot; negative feedback '+pctOf(ql.negative_feedback_rate)+'<br>'+esc(sv.sla_line||'')+' &middot; fast '+pctOf(sv.fast_share)+' / agent '+pctOf(sv.agent_share)}
 async function loadOverview(){try{renderOverview(await api('/admin/overview'))}catch(e){if(e.status!==404&&e.status!==401)toast(e.message,'bad')}}
 async function saveSettings(){try{const out=await api('/admin/settings',{method:'POST',body:{minutes_saved_per_question:+$('#roi-minutes').value,loaded_rate_per_hour:+$('#roi-rate').value}});
