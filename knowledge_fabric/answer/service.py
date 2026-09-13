@@ -101,6 +101,10 @@ _STOP = {
 }
 _RRF_K = 60
 _EPS = 1e-6
+# T126 — count / inventory intent that the facts tier answers ahead of the code
+# tier (so "how many repos" is a count, not a matching test symbol). Deliberately
+# narrow: capability/where/who questions overlap with code and must not preempt it.
+_COUNT_INTENT = re.compile(r"\b(how many|how much|number of|count of|total (?:number )?of)\b", re.I)
 _WEIGHTS = {"retrieval": 1.0, "semantic": 1.2, "coverage": 1.2, "agreement": 0.8, "resolvable": 1.0}
 _ESCALATE_FLOOR = 0.35
 _SYSTEM_PREAMBLE = "Rephrase the cited evidence faithfully; add nothing."
@@ -619,6 +623,19 @@ class AnswerService:
                 if not _nested:
                     self._audit(principal, "ask", "answered:cache", trace_id)
                 return self._from_cache(pay, trace_id, tenant, qlang, saved)
+
+            # C0. facts / inventory tier (T126): count and inventory questions —
+            # "how many repos are in github", "how many issues in Jira", "how many
+            # Confluence pages" — answer from facts.json FIRST. A count is atomic,
+            # so it runs ahead of both the multistep planner (which would wrongly
+            # decompose "how many repos are then in the github?" on the word "then")
+            # and the code-symbol tier (which would return a matching test symbol
+            # instead of the count). analyse() returns None for non-count questions,
+            # so the reasoning / code / prose paths below are unaffected.
+            if not _nested:
+                fa = self._facts_answer(principal, question, rq, trace_id, span, qlang, dsv=0)
+                if fa is not None:
+                    return fa
 
             # C. multistep / conditional / compare → decompose, run each step governed
             # (a known question stays single-shot on the fast path — T82).
@@ -1511,6 +1528,110 @@ class AnswerService:
             tokens_out=d_tout,
             model_name=model_for_tier("none"),
             complexity="simple",
+            dataset_version=dsv,
+        )
+
+    def _facts_answer(self, principal, question, rq, trace_id, span, qlang, dsv):
+        """Facts / inventory tier (T126). Counts and inventories — repositories,
+        Jira issues, Confluence pages, documents, spreadsheet aggregates — answer
+        deterministically from ``facts.json`` via :func:`aggregate.analyse`, ahead
+        of the code-symbol tier so "how many repos are in github" returns the real
+        count, not a matching test function. Returns None when the question is not
+        a facts question (analyse declines), so prose/code paths run unchanged.
+        Keyless — no model — with real token consumption metered (T125)."""
+        # Only preempt the code / prose tiers for genuine COUNT / INVENTORY intent
+        # ("how many repos", "number of Jira issues", "count of pages"). Other
+        # facts patterns (capability, who, architecture) overlap with code-answerable
+        # questions ("where is the login implementation"), so they stay on their
+        # existing paths and are reached via the agent tool, not preempted here.
+        if not _COUNT_INTENT.search(rq.lower()):
+            return None
+        tenant = principal.tenant
+        live = getattr(self.p, "live_jql", None)
+        try:
+            res = aggregate.analyse(self.p, principal, rq, live_jql=live)
+        except Exception:
+            return None
+        if res is None:
+            return None
+        # A clarify from the facts ladder ("which Jira project?") is surfaced as a
+        # first-class clarify answer with chips.
+        if res.clarify:
+            span.set(kind="clarify", level="clarify", tier="none", citations_count=0)
+            return Answer(
+                AnswerKind.CLARIFY,
+                res.clarify,
+                [],
+                0.0,
+                trace_id,
+                0.0,
+                0,
+                "none",
+                grounding_score=0.0,
+                clarify_back=res.clarify,
+                tenant=tenant,
+                lang=qlang,
+                model_name=model_for_tier("none"),
+                suggestions=list(res.chips or []),
+            )
+        if not res.text or not res.citations:
+            return None
+        text = self._localize(res.text, qlang, principal, "none")
+        f_cost, f_tin, f_tout = self._oss_meter(rq + "\n" + res.explain, res.text)
+        why = {
+            "level_name": "facts",
+            "explain": res.explain or "Answered from the fabric's facts index.",
+            "reasons": [
+                {"code": f"facts_{res.pattern or 'lookup'}", "detail": res.explain, "signal": True}
+            ],
+            "signals": {
+                "retrieval": 1.0,
+                "semantic": 0.9,
+                "coverage": 1.0,
+                "agreement": 1.0,
+                "resolvable": 1.0,
+            },
+            "retrieved": len(res.citations),
+            "complexity": "simple",
+            "model_name": model_for_tier("none"),
+            "facts_pattern": res.pattern,
+        }
+        self._audit(principal, "ask", f"answered:facts:{res.pattern or 'lookup'}", trace_id)
+        span.set(
+            kind="answer",
+            level="lookup",
+            tier="none",
+            cost=f_cost,
+            tokens=f_tin + f_tout,
+            tokens_in=f_tin,
+            tokens_out=f_tout,
+            citations_count=len(res.citations),
+            sources=[c.document_title for c in res.citations],
+            why=why,
+            grounding=0.95,
+            model_name=model_for_tier("none"),
+            complexity="simple",
+            dataset_version=dsv,
+        )
+        return Answer(
+            AnswerKind.ANSWER,
+            text,
+            res.citations,
+            0.95,
+            trace_id,
+            f_cost,
+            f_tin + f_tout,
+            "none",
+            grounding_score=0.95,
+            tenant=tenant,
+            level=1,
+            why=why,
+            lang=qlang,
+            tokens_in=f_tin,
+            tokens_out=f_tout,
+            model_name=model_for_tier("none"),
+            complexity="simple",
+            authoritative_source=self._authority_card(tenant, res.citations),
             dataset_version=dsv,
         )
 
