@@ -1,0 +1,105 @@
+# T131 — commit (or delete) an uploaded document into the repository, then let
+# the showcase rebuild pick it up.
+#
+# The static GitHub Pages showcase has no server and must never hold a token, so
+# an uploaded file can't be committed from the page directly. Instead the page
+# POSTs the file to a small token-holding service the operator stands up (its URL
+# is the page's `kf.commit_endpoint` config — never a secret in the page), and
+# that service fires this workflow via `repository_dispatch` (or the owner runs it
+# by hand). This job writes the file under `corpus/uploads/`, commits to `main`,
+# and the push triggers `showcase.yml`, which re-ingests it (PPTX/PDF/XLSX parsed
+# at build time) so the document becomes a permanent, full-text-indexed source.
+# `op: delete` removes the committed file the same way.
+name: upload-commit
+
+on:
+  workflow_dispatch:
+    inputs:
+      op:
+        description: "add or delete"
+        required: true
+        default: "add"
+      filename:
+        description: "Original file name (used only for the commit message)"
+        required: false
+        default: ""
+      path:
+        description: "Repo path under corpus/uploads/ (basename is enforced)"
+        required: true
+      content_b64:
+        description: "Base64 of the file bytes (required for add)"
+        required: false
+        default: ""
+  repository_dispatch:
+    types: [fabric-file-upload]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upload-commit
+  cancel-in-progress: false
+
+jobs:
+  commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Apply the upload (write or delete under corpus/uploads/)
+        env:
+          # repository_dispatch delivers client_payload.*; workflow_dispatch inputs.*
+          KF_OP: ${{ github.event.client_payload.op || inputs.op }}
+          KF_PATH: ${{ github.event.client_payload.path || inputs.path }}
+          KF_FILENAME: ${{ github.event.client_payload.filename || inputs.filename }}
+          KF_B64: ${{ github.event.client_payload.content_b64 || inputs.content_b64 }}
+        run: |
+          python - <<'PY'
+          import base64, os, pathlib, sys
+
+          op = (os.environ.get("KF_OP") or "add").strip().lower()
+          raw = (os.environ.get("KF_PATH") or "").strip()
+          # Enforce a safe destination: a single basename under corpus/uploads/.
+          # No traversal, no absolute paths, no nested dirs from untrusted input.
+          base = os.path.basename(raw.replace("\\", "/"))
+          if not base or base in (".", ".."):
+              print("::error::empty or invalid upload path"); sys.exit(1)
+          dest = pathlib.Path("corpus/uploads") / base
+          dest.parent.mkdir(parents=True, exist_ok=True)
+
+          if op == "delete":
+              if dest.exists():
+                  dest.unlink()
+                  print(f"deleted {dest}")
+              else:
+                  print(f"{dest} already absent")
+          else:
+              b64 = os.environ.get("KF_B64") or ""
+              if not b64:
+                  print("::error::add requires content_b64"); sys.exit(1)
+              try:
+                  data = base64.b64decode(b64, validate=False)
+              except Exception as e:  # noqa: BLE001
+                  print(f"::error::bad base64: {e}"); sys.exit(1)
+              if len(data) > 25 * 1024 * 1024:
+                  print("::error::file exceeds 25 MB"); sys.exit(1)
+              dest.write_bytes(data)
+              print(f"wrote {dest} ({len(data)} bytes)")
+          PY
+
+      - name: Commit and push to main
+        env:
+          KF_OP: ${{ github.event.client_payload.op || inputs.op }}
+          KF_FILENAME: ${{ github.event.client_payload.filename || inputs.filename }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A corpus/uploads
+          if git diff --cached --quiet; then
+            echo "no change to commit"
+            exit 0
+          fi
+          git commit -m "uploads: ${KF_OP:-add} ${KF_FILENAME:-document} (run ${GITHUB_RUN_ID})"
+          git push origin main
