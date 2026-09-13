@@ -43,6 +43,10 @@ from tests.util import seeded
 
 T = "test-fabric"
 PAGES = {"ask": ASK_HTML, "curator": CURATOR_HTML, "admin": ADMIN_HTML}
+# Inline <script> blocks per page: directory, runtime, page — plus, on Admin and
+# Curator, the T138 upload parser (KFUpload) inlined in <head> so DOCX/PPTX/XLSX
+# uploads are parsed in the browser (JSZip is a vendored src, not inline).
+INLINE_SCRIPTS = {"ask": 3, "curator": 4, "admin": 4}
 
 # element ids each page must render into (contract Section G)
 # L2 — the three-column Workspace: threads · conversation · right rail.
@@ -201,7 +205,7 @@ class TestMarkup(unittest.TestCase):
                 self.assertEqual(
                     len(re.findall(r"<script(?:\s[^>]*)?>", html)), html.count("</script>")
                 )
-                self.assertEqual(html.count("<script>"), 3)  # inline: directory, runtime, page
+                self.assertEqual(html.count("<script>"), INLINE_SCRIPTS[name])
                 self.assertEqual(html.count("<style>"), html.count("</style>"))
                 self.assertGreater(len(html), 10_000)
 
@@ -387,7 +391,7 @@ class TestContract(unittest.TestCase):
     def test_inline_scripts_parse(self):
         for name, html in PAGES.items():
             scripts = _SCRIPT.findall(html)
-            self.assertEqual(len(scripts), 3)
+            self.assertEqual(len(scripts), INLINE_SCRIPTS[name])
             with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
                 f.write("\n".join("{\n" + s + "\n}" for s in scripts))
                 path = f.name
