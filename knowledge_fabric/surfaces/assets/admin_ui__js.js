@@ -253,7 +253,7 @@ function showCoverageCell(dt,persona){if(!COVERAGE)return;
  if(!c){$('#coverage-detail').textContent='';return}
  $('#coverage-detail').innerHTML='<b>'+esc(m.label)+' · '+esc(persona)+'</b> — '+esc(c.status)+' ('+(c.passed||0)+'/'+(c.n||0)+')<ul class="queue">'+
    (c.questions||[]).map(q=>'<li><span class="pill '+(q.ok?'good':'bad')+'">'+(q.ok?'ok':q.kind)+'</span> '+esc(q.question)+(q.cited&&q.cited.length?' <span class="muted small">→ '+esc((q.cited||[]).join(', '))+'</span>':'')+'</li>').join('')+'</ul>'}
-async function loadCoverage(){try{renderCoverage(await api('/admin/coverage'))}catch(e){if(e.status!==404)toast(e.message,'bad')}}
+async function loadCoverage(){try{renderCoverage(await api('/admin/coverage'))}catch(e){if(e.status!==401)toast(e.message,'bad')}}
 
 // ---------------------------------------------------------------- T86 service levels
 function pctm(x){return (x==null)?'—':Math.round(x)+' ms'}
@@ -272,7 +272,7 @@ function renderSLA(rep){const h=rep.headline||{};
  $('#sla-persona').querySelector('tbody').innerHTML=pr||'<tr><td colspan="8" class="empty">No answers recorded yet.</td></tr>';
  const dr=(rep.by_data_type||[]).map(r=>'<tr><td>'+esc(r.data_type)+'</td><td>'+num(r.n)+'</td><td>'+pctm(r.p50_ms)+'</td><td>'+pctm(r.p95_ms)+'</td><td>'+shr(r.fast_share)+'</td><td>'+shr(r.agent_share)+'</td><td>$'+Number(r.cost_per_answer||0).toFixed(5)+'</td></tr>').join('');
  $('#sla-datatype').querySelector('tbody').innerHTML=dr||'<tr><td colspan="7" class="empty">No answers recorded yet.</td></tr>'}
-async function loadSLA(){try{renderSLA(await api('/admin/service-levels'))}catch(e){if(e.status!==404)toast(e.message,'bad')}}
+async function loadSLA(){try{renderSLA(await api('/admin/service-levels'))}catch(e){if(e.status!==401)toast(e.message,'bad')}}
 
 // ---------------------------------------------------------------- T96: ROI overview
 function kpi(label,value,sub,cls){return '<div class="kpi'+(cls?' '+cls:'')+'"><div class="l">'+label+'</div><div class="v">'+value+'</div>'+(sub?'<div class="d muted small">'+sub+'</div>':'')+'</div>'}
@@ -289,7 +289,7 @@ function renderOverview(o){const v=o.value||{},c=o.cost||{},r=o.roi||{},ad=o.ado
  $('#roi-adoption').innerHTML='<b>'+num(ad.active_users)+'</b> active users &middot; <b>'+num(ad.questions_per_user)+'</b> questions/user &middot; WoW '+pctOf(ad.wow_growth)+
   ' &middot; '+num(v.hours_saved)+'h saved ≈ '+usd(v.labour_value_usd)+' labour value';
  $('#roi-quality').innerHTML='trust '+pctOf(ql.trust_avg)+' &middot; citation coverage '+pctOf(ql.citation_coverage)+' &middot; negative feedback '+pctOf(ql.negative_feedback_rate)+'<br>'+esc(sv.sla_line||'')+' &middot; fast '+pctOf(sv.fast_share)+' / agent '+pctOf(sv.agent_share)}
-async function loadOverview(){try{renderOverview(await api('/admin/overview'))}catch(e){if(e.status!==404&&e.status!==401)toast(e.message,'bad')}}
+async function loadOverview(){try{renderOverview(await api('/admin/overview'))}catch(e){if(e.status!==401)toast(e.message,'bad')}}
 async function saveSettings(){try{const out=await api('/admin/settings',{method:'POST',body:{minutes_saved_per_question:+$('#roi-minutes').value,loaded_rate_per_hour:+$('#roi-rate').value}});
   $('#roi-status').textContent='saved';toast('ROI settings saved','good');await loadOverview()}catch(e){$('#roi-status').textContent=e.message;toast(e.message,'bad')}}
 
@@ -306,7 +306,7 @@ function renderObservability(o){const rc=o.reconciliation||{};
  const rr=[];if(rc.answers)rr.push('answers: analytics '+rc.answers.analytics+' vs metrics '+rc.answers.metrics+' (Δ'+rc.answers.delta_pct+'%)');
  if(rc.cost)rr.push('cost: analytics '+usd(rc.cost.analytics)+' vs metrics '+usd(rc.cost.metrics)+' (Δ'+rc.cost.delta_pct+'%)');
  $('#obs-recon').innerHTML='<b>Reconciliation</b> (dashboard vs raw counters, tolerance ±1%): '+esc(rr.join(' · '))+' — '+(rc.ok?'<span class="pill good">consistent</span>':'<span class="pill warn">drift</span>')}
-async function loadObservability(){try{renderObservability(await api('/admin/observability?limit=20'))}catch(e){if(e.status!==404&&e.status!==401)toast(e.message,'bad')}}
+async function loadObservability(){try{renderObservability(await api('/admin/observability?limit=20'))}catch(e){if(e.status!==401)toast(e.message,'bad')}}
 async function openWaterfall(tid){const box=$('#obs-waterfall');box.hidden=false;box.innerHTML='<div class="muted small">loading trace '+esc(String(tid).slice(0,16))+'…</div>';
  try{const w=await api('/admin/observability?trace_id='+encodeURIComponent(tid));const tot=w.total_ms||1;
   box.innerHTML='<div class="section-title">Span waterfall <span class="muted small">'+esc(String(tid).slice(0,24))+' · '+ms(w.total_ms)+'</span></div>'+
@@ -330,4 +330,6 @@ $('#upload-files').onchange=e=>{addFilesToBatch(Array.from(e.target.files||[]));
 $('#budget-btn').onclick=setBudget;$('#authority-btn').onclick=setAuthority;$('#audit-refresh').onclick=loadAudit;$('#doctor-btn').onclick=doctor;$('#models-refresh').onclick=loadModels;$('#models-days').onchange=loadModels;
 $('#add-user-btn').onclick=addUser;
 $('#roi-save').onclick=saveSettings;
+// T134 — a change anywhere (this tab or another) recomputes every panel live.
+if(KF.onChange)KF.onChange(()=>{if(KF.session)loadAll()});
 if(KF.session)loadAll();else gate({status:401,message:''},'admin');

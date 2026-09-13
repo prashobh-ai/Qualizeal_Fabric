@@ -564,5 +564,8 @@ async function savePrefs(){const body={persona:$('#pref-persona').value,depth:$(
  catch(e){$('#pref-status').textContent=e.message}
  finally{$('#pref-save').disabled=false}}
 
+// T134 — the Workspace tiles and My-usage recompute live (this tab and cross-tab),
+// so a toggle in Admin or a question in another tab moves the corpus counts here.
+if(KF.onChange)KF.onChange(()=>{if(KF.session){corpusStrip();loadUsage()}});
 KF.initBar({preferRole:'asker'});boot();setupReadAloud();setupMic();
 if($('#pref-save'))$('#pref-save').onclick=savePrefs;
