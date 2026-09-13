@@ -641,9 +641,7 @@ def _write_facts(p):
     board = {
         "id": JIRA_BOARD,
         "name": f"{JIRA_NAME} board",
-        "columns": [
-            {"name": status, "statuses": [status]} for status in by_status
-        ],
+        "columns": [{"name": status, "statuses": [status]} for status in by_status],
     }
     jira = {
         JIRA_KEY: {

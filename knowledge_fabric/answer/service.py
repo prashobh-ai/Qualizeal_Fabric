@@ -104,9 +104,7 @@ _EPS = 1e-6
 # T126 — count / inventory intent that the facts tier answers ahead of the code
 # tier (so "how many repos" is a count, not a matching test symbol). Deliberately
 # narrow: capability/where/who questions overlap with code and must not preempt it.
-_COUNT_INTENT = re.compile(
-    r"\b(how many|how much|number of|count of|total (?:number )?of)\b", re.I
-)
+_COUNT_INTENT = re.compile(r"\b(how many|how much|number of|count of|total (?:number )?of)\b", re.I)
 _WEIGHTS = {"retrieval": 1.0, "semantic": 1.2, "coverage": 1.2, "agreement": 0.8, "resolvable": 1.0}
 _ESCALATE_FLOOR = 0.35
 _SYSTEM_PREAMBLE = "Rephrase the cited evidence faithfully; add nothing."
