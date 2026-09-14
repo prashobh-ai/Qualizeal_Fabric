@@ -80,6 +80,11 @@ def verify(directory: str) -> list[str]:
                 errors.append("snapshot.json has no login directory")
             if not snap.get("answers"):
                 errors.append("snapshot.json has no baked answers")
+            # T147 — the provider status must be IN the snapshot so the UI can name
+            # the active provider (or the honest reason it fell back), never a silent
+            # model-free state.
+            if not snap.get("provider_status"):
+                errors.append("snapshot.json has no provider_status (T147)")
             errors.extend(_authentic_corpus_errors(snap))
         except Exception as e:  # noqa: BLE001
             errors.append(f"snapshot.json is not valid JSON: {e}")

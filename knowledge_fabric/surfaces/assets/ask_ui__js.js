@@ -242,10 +242,15 @@ function bars(sig){const order=['retrieval','semantic','coverage','agreement','r
 function reasonWord(a){const r=((a.why||{}).reasons||[]).map(x=>x.code);
  return r.indexOf('confidence_fail')>=0?'Yes — escalated after a confidence check':'No'}
 function modelLabel(a){const m=a.model_name||'';
- // T35: the id from the provider's response, or "No model needed" when the
- // extractive core answered. Only the explicit test double reads "demo model".
- if(!m||/^none|extractive|off$/i.test(m))return 'No model needed';
- return /mock|echo|demo/i.test(m)?'demo model':esc(m)}
+ // T35: a real generation shows the provider's model id.
+ if(m&&!/^none|extractive|off$/i.test(m))return /mock|echo|demo/i.test(m)?'demo model':esc(m);
+ // T147: a Level 0/1 (facts / verbatim) answer needs no generation — that is correct
+ // and cost-efficient — but the label must never read as "no LLM in the product".
+ // Name the ACTIVE provider in its lookup/extractive form instead.
+ const p=PROVIDER||{},prov=((p.provider||'')+' '+(p.label||'')).toLowerCase();
+ if(/claude|anthropic/.test(prov))return esc(p.model||p.label||'Claude')+' · lookup, no generation';
+ if(/openai|gpt/.test(prov))return esc(p.model||p.label||'OpenAI')+' · lookup, no generation';
+ return 'Open-source LLM · Extractive-NLG'}
 let CARD_GX={};
 function card(a){const box=$('#answer-card');const w=a.why||{};const lw=levelWord(w.level_name);
  const trust=Math.round((Number(a.confidence)||0)*100);
@@ -335,9 +340,23 @@ function selectAnswer(turn){const a=turn.a;LAST_A=a; // read-aloud speaks the an
  const el=$('#messages .msg.ai[data-i="'+turn._i+'"]');if(el)el.classList.add('sel');
  card(a);loadGalaxy(a.trajectory_id,a);loadUsage()}
 let GALAXY=null;  // the mounted KFGalaxy handle for the current answer (T51)
+// T149 — when the baked galaxy has nothing for this answer's trace (a live answer
+// the visitor just asked, not one baked at build), light the graph from the
+// answer's own citations: the question at the centre, each cited document linked
+// and activated. Only a real answer with citations lights up; gap/clarify stay empty.
+function galaxyFromAnswer(a){
+ if(!a||a.kind!=='answer')return null;
+ const cites=a.citations||[];if(!cites.length)return null;
+ const sid='q:'+(a.trajectory_id||'now'),seen={},nodes=[{id:sid,name:(a.subject||a.understood_as||'This answer'),type:'Question'}],edges=[],lit=[sid];
+ cites.slice(0,12).forEach((c,i)=>{const id='d:'+(c.document_id||('c'+i));if(seen[id])return;seen[id]=1;
+  nodes.push({id:id,name:c.document_title||('document '+(i+1)),type:'Document'});edges.push({from:sid,to:id});lit.push(id);});
+ if(nodes.length<2)return null;
+ return {trace_id:a.trajectory_id||'',nodes:nodes,edges:edges,activated_ids:lit,halo_ids:[],
+  stats:{activated:lit.length,halo:0,relationships:edges.length,edges:edges.length,nodes:nodes.length}};}
 async function loadGalaxy(trace_id,a){const box=$('#galaxy'),st=$('#galaxy-stats');
  if(!trace_id){box.innerHTML='<div class="gx-empty">Ask a question to light up the graph.</div>';st.innerHTML='';return}
- try{const g=await api('/api/galaxy?trace_id='+encodeURIComponent(trace_id));
+ try{let g=await api('/api/galaxy?trace_id='+encodeURIComponent(trace_id));
+  if(!g||!(g.nodes&&g.nodes.length)){const syn=galaxyFromAnswer(a);if(syn)g=syn;}
   CARD_GX[trace_id]=g.stats||{};if(a)card(a);
   renderGalaxy(g);
   const s=g.stats||{};st.innerHTML='<span><b>'+(s.activated||0)+'</b> lit</span><span><b>'+(s.halo||0)+
@@ -533,11 +552,12 @@ function setupMic(){const btn=$('#mic-btn');if(!btn)return;
 // ===================== session lifecycle ============================
 // T52 — the honest provider badge: which model answers (the pinned provider,
 // or the open-source fallback when it is unavailable, or the extractive core).
-async function loadProvider(){const el=$('#provider-badge');if(!el)return;
- try{const p=await api('/api/provider');if(!p||!p.label){el.classList.remove('on');return}
+let PROVIDER=null;  // T147 — the active provider, so the Model row can name it even for a no-generation answer
+async function loadProvider(){const el=$('#provider-badge');
+ try{const p=await api('/api/provider');PROVIDER=p||null;if(!el)return;if(!p||!p.label){el.classList.remove('on');return}
   el.innerHTML='<span class="dot" style="background:'+esc(p.dot||'#5A6B7C')+'"></span>'+esc(p.label);
   el.classList.add('on');}
- catch(e){el.classList.remove('on')}}
+ catch(e){if(el)el.classList.remove('on')}}
 function boot(){loadThreads();if(!THREADS.length){CUR=null}else{CUR=THREADS[0].id}
  renderThreads();renderMessages();
  if(KF.session){corpusStrip();loadUsage();loadProvider()}else{gate({status:401,message:''},'asker')}}

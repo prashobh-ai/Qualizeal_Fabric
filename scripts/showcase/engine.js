@@ -1009,7 +1009,13 @@
   // "test_list_all_…"); and a "what all services/products" question is a Level-0
   // list of the service (or product) documents, not a single passage.
   var CODE_INTENT = /\b(function|method|class|symbol|implement|implementation|defined|where is|how does .* work|code|snippet|call(ed|s)?|import|module|file|repo(sitory)?)\b/i;
-  var LIST_INTENT = /\b(what all|which|list|what are (all )?the|what .*\b(services|products|offerings|solutions|capabilities)\b)\b/i;
+  // T146 — a list question is scoped by its NOUN, not just "what all". A list VERB
+  // (what all / which / list / what are the) plus a list NOUN selects exactly one
+  // source; the answer lists that source's items. "how many" is left to the facts
+  // counter for the nouns it already covers (repos / issues / pages / documents),
+  // so the Level-0 counts are unchanged. When the chosen noun's source is off or
+  // empty, the answer says so — never another source's list.
+  var LIST_VERB = /\b(what all|which|list|what are (?:all )?the)\b/i;
   var GENERIC_IDENT = { all: 1, list: 1, get: 1, set: 1, "new": 1, add: 1, run: 1, test: 1, data: 1, name: 1, type: 1, main: 1, index: 1, user: 1, file: 1, item: 1, value: 1 };
   function identSegs(s) { return String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean); }
   function docArea(id) { var d = ridx().docs[id]; return (d && d.area) || ""; }
@@ -1017,39 +1023,107 @@
     var t = docTitle(id) || "";
     return t.replace(/^(Service|Product|Company)\s+/i, "").trim() || t;
   }
-  // The distinct service (or product) documents behind a "what all …" question,
-  // as a bulleted Level-0 list. Returns null when the question is not a list
-  // question or fewer than three of the top passages come from that area — so it
-  // never hijacks an ordinary question. Runs over the ACTIVE index, so a
-  // toggled-off source drops out of the list.
-  function serviceListAnswer(question, prof) {
-    if (!LIST_INTENT.test(question)) return null;
-    var qt = tokenize(question).filter(function (t) { return !STOP[t]; });
-    if (!qt.length) return null;
-    var scored = bm25(qt);
-    if (!scored.length) return null;
-    var wantArea = /\bproducts?\b/i.test(question) ? "Product"
-      : (/\bservices?\b/i.test(question) ? "Service" : "");
-    var inArea = function (id) {
-      var a = docArea(id);
-      return wantArea ? a === wantArea : (a === "Service" || a === "Product");
-    };
-    var topHits = scored.slice(0, 8).filter(function (x) { return inArea(x.p.doc); }).length;
-    if (topHits < 3) return null;  // not really a services/products retrieval
-    var byDoc = {}, order = [];
-    scored.forEach(function (x) {
-      if (!inArea(x.p.doc)) return;
-      if (!byDoc[x.p.doc]) { byDoc[x.p.doc] = x.p; order.push(x.p.doc); }
+  // The distinct active documents of one source, as representative passages (one
+  // per document, in retrieval order) so each can be cited with its real coordinate.
+  function docsOfSource(src) {
+    var seen = {}, order = [];
+    activePassages().forEach(function (p) {
+      if ((p.source || "").toLowerCase() !== src) return;
+      if (p.doc && !seen[p.doc]) { seen[p.doc] = p; order.push(seen[p.doc]); }
     });
-    if (order.length < 3) return null;
-    var names = [], cites = [];
-    order.slice(0, 20).forEach(function (d, i) {
-      names.push(serviceName(d) + " [" + (i + 1) + "]");
-      cites.push(citeFor(byDoc[d]));
-    });
-    var noun = wantArea === "Product" ? "products" : "services";
-    return mkAnswer("lookup", 1, "QualiZeal offers these " + noun + ": " + names.join(", ") + ".", cites, 0.9);
+    return order;
   }
+  // Which list noun the question is about → the source it selects. Order matters:
+  // an explicit "confluence"/"jira"/"github" mention wins, then the bare noun.
+  function listNoun(question) {
+    var q = String(question || "").toLowerCase();
+    if (/\bconfluence\b/.test(q) || /\b(pages?|wiki)\b/.test(q)) return "pages";
+    if (/\brepos?\b|\brepositor(?:y|ies)\b/.test(q) || (/\bprojects?\b/.test(q) && /\bgithub\b/.test(q))) return "repos";
+    if (/\b(boards?|sprints?|issues?|tickets?|epics?|stor(?:y|ies)|tasks?)\b/.test(q) || (/\bprojects?\b/.test(q) && /\bjira\b/.test(q))) return "jira";
+    if (/\b(services?|offerings?|solutions?|capabilit(?:y|ies))\b/.test(q)) return "services";
+    if (/\bproducts?\b/.test(q)) return "products";
+    if (/\bsources?\b|\bconnectors?\b/.test(q)) return "sources";
+    if (/\b(documents?|docs|files?|uploads?)\b/.test(q)) return "documents";
+    return "";
+  }
+  // T146 — the noun-scoped list. Returns a Level-0 list for a list question, an
+  // honest "No <noun> …" when that source is off/empty, or null when the question
+  // is not a list question (so it never hijacks an ordinary question). Runs over
+  // the ACTIVE index, so a toggled-off source drops out.
+  function listIntentAnswer(question, prof) {
+    if (!LIST_VERB.test(question)) return null;
+    var noun = listNoun(question);
+    if (!noun) return null;  // a list verb with no list noun is not a list question
+    var off = disabledSources();
+    var f = SNAP.facts || {};
+    // ---- documents grouped by area (services / products) ----
+    if (noun === "services" || noun === "products") {
+      var wantArea = noun === "products" ? "Product" : "Service";
+      var qt = tokenize(question).filter(function (t) { return !STOP[t]; });
+      var scored = qt.length ? bm25(qt) : [];
+      var byDoc = {}, order = [];
+      scored.forEach(function (x) {
+        if (docArea(x.p.doc) !== wantArea) return;
+        if (!byDoc[x.p.doc]) { byDoc[x.p.doc] = x.p; order.push(x.p.doc); }
+      });
+      // Fall through (not a false "none") when the query doesn't broadly match the
+      // area — services/products always exist, so this guards a pointed question.
+      if (order.length < 3) return null;
+      var names = [], cites = [];
+      order.slice(0, 20).forEach(function (d, i) { names.push(serviceName(d) + " [" + (i + 1) + "]"); cites.push(citeFor(byDoc[d])); });
+      return mkAnswer("lookup", 1, "QualiZeal offers these " + noun + ": " + names.join(", ") + ".", cites, 0.9);
+    }
+    // ---- Confluence pages ----
+    if (noun === "pages") {
+      if (off.confluence) return listEmpty("Confluence pages");
+      var pages = docsOfSource("confluence");
+      if (!pages.length) return listEmpty("Confluence pages");
+      var pn = [], pc = [];
+      pages.slice(0, 20).forEach(function (p, i) { pn.push((docTitle(p.doc) || "page") + " [" + (i + 1) + "]"); pc.push(citeFor(p)); });
+      return mkAnswer("lookup", 1, "Your Confluence has " + pages.length + " page" + (pages.length === 1 ? "" : "s") + ": " + pn.join(", ") + ".", pc, 0.9);
+    }
+    // ---- GitHub repositories (from facts) ----
+    if (noun === "repos") {
+      if (off.github) return listEmpty("repositories");
+      var repos = f.repositories || [];
+      if (!repos.length) return listEmpty("repositories");
+      var rn = [], rc = [];
+      repos.slice(0, 30).forEach(function (r, i) { rn.push(r + " [" + (i + 1) + "]"); rc.push(factCite(r, "")); });
+      return mkAnswer("facts", 1, "QualiZeal has " + repos.length + " repositories: " + rn.join(", ") + ".", rc, 0.95);
+    }
+    // ---- Jira project / boards / issues (from facts) ----
+    if (noun === "jira") {
+      if (off.jira) return listEmpty("Jira projects");
+      var j = f.jira;
+      if (!j) return listEmpty("Jira projects");
+      var bs = j.by_status || {}, parts = Object.keys(bs).map(function (k) { return bs[k] + " " + k; });
+      var txt = "Jira project " + j.name + " (" + j.project + ") has " + j.total + " issues" + (parts.length ? " — " + parts.join(", ") : "") + " [1].";
+      return mkAnswer("facts", 1, txt, [factCite("Jira " + j.project, j.url)], 0.95);
+    }
+    // ---- the active source registry ----
+    if (noun === "sources") {
+      var active = connList().filter(function (c) { return !c._deleted && c.enabled !== false; });
+      if (!active.length) return listEmpty("sources");
+      var sn = [], sc = [];
+      active.slice(0, 20).forEach(function (c, i) { sn.push(c.source + " [" + (i + 1) + "]"); sc.push(factCite(c.source, "")); });
+      return mkAnswer("lookup", 1, "The fabric has " + active.length + " connected source" + (active.length === 1 ? "" : "s") + ": " + sn.join(", ") + ".", sc, 0.9);
+    }
+    // ---- uploaded documents (the Files source) ----
+    if (noun === "documents") {
+      if (off.files) return listEmpty("uploaded documents");
+      var ups = docsOfSource("files");
+      if (!ups.length) return listEmpty("uploaded documents");
+      var un = [], uc = [];
+      ups.slice(0, 20).forEach(function (p, i) { un.push((docTitle(p.doc) || "document") + " [" + (i + 1) + "]"); uc.push(citeFor(p)); });
+      return mkAnswer("lookup", 1, "The fabric holds " + ups.length + " uploaded document" + (ups.length === 1 ? "" : "s") + ": " + un.join(", ") + ".", uc, 0.9);
+    }
+    return null;
+  }
+  function listEmpty(noun) {
+    return mkAnswer("lookup", 0, "No " + noun + " are connected yet.", [], 0.6);
+  }
+  // Kept name for the two call sites; now noun-scoped.
+  function serviceListAnswer(question, prof) { return listIntentAnswer(question, prof); }
   function composeAnswer(question, scored, prof) {
     prof = prof || PERSONA_PROFILE.general;
     var cap = PERSONA_DEPTH[prof.depth] || 3, emphasis = prof.emphasis;
@@ -1376,6 +1450,35 @@
   function emptyUsage(subject) {
     var w = { questions: 0, answered: 0, declined: 0, tokens_in: 0, tokens_out: 0, cost: 0, cost_saved: 0, cache_hit_rate: 0, by_level: {} };
     return { subject: subject, windows: { today: clone(w), "7d": clone(w), "30d": clone(w) }, budget: null, speech_seconds: null };
+  }
+  // T149 — "My usage" is computed LIVE from the event ledger (T132), so a signed-in
+  // reader's Today / 7 d / 30 d counters, tokens, cost and level split move on the
+  // very next question — never stuck at the baked zero. Rolling windows (24 h / 7 d
+  // / 30 d) so a question asked now counts in all three. The baked budget is kept.
+  function usageFromEvents(subject) {
+    var out = emptyUsage(subject);
+    var now = Date.now();
+    var spans = { today: 86400000, "7d": 7 * 86400000, "30d": 30 * 86400000 };
+    events().forEach(function (e) {
+      if (e.kind !== "answer" || (e.subject || "") !== subject) return;
+      var age = now - (e.ts || now);
+      ["today", "7d", "30d"].forEach(function (wk) {
+        if (age > spans[wk]) return;
+        var win = out.windows[wk];
+        win.questions += 1;
+        if (e.answer_kind === "answer") win.answered += 1; else win.declined += 1;
+        win.tokens_in += e.tokens_in || 0; win.tokens_out += e.tokens_out || 0;
+        win.cost += e.cost || 0; win.cost_saved += e.cost_saved || 0;
+        if (e.answer_kind === "answer") {
+          var lv = e.level_name || "";
+          if (lv && lv !== "gap" && lv !== "clarify") win.by_level[lv] = (win.by_level[lv] || 0) + 1;
+        }
+      });
+    });
+    var baked = STATE.usage[subject];
+    if (baked && baked.budget) out.budget = baked.budget;
+    else if (STATE.budget) out.budget = STATE.budget;
+    return out;
   }
 
   // ---- T130: live in-browser consumption meter --------------------------
@@ -1921,11 +2024,12 @@
     // T82 — suggestions are baked per subject (so the reader's persona known
     // questions show) with a scope-key fallback for older snapshots.
     if (path === "/api/suggestions") return respond((SNAP.suggestions || {})[subject] || (SNAP.suggestions || {})[scopeKey(subject)] || { suggestions: [] });
-    if (path === "/api/usage") return respond(STATE.usage[subject] || emptyUsage(subject));
+    if (path === "/api/usage") return respond(usageFromEvents(subject));  // T149 — live from the ledger
     if (path === "/api/galaxy") { var t = q.get("trace_id"); return respond((SNAP.galaxy || {})[t] || { trace_id: t, nodes: [], edges: [], activated_ids: [], halo_ids: [], stats: {} }); }
     if (path === "/api/galaxy/node") { var nid = q.get("id"); var nd = (SNAP.galaxy_nodes || {})[nid]; return nd ? respond(nd) : respond({ error: "unknown node" }, 404); }
     if (path === "/api/galaxy/full") return respond(SNAP.galaxy_full || { nodes: [], edges: [], activated_ids: [], halo_ids: [], stats: {} });
     if (path === "/api/provider") return respond(SNAP.provider || { provider: "Extractive", model: "core", dot: "#5A6B7C", label: "Extractive core" });
+    if (path === "/api/provider/status") return respond(SNAP.provider_status || { state: "extractive", provider: "open-source", mode: "extractive", reason: "no provider status baked" });  // T147
     if (path === "/api/analytics") { var w = q.get("window") || "7d"; return respond((SNAP.analytics || {})[w] || (SNAP.analytics || {})["7d"] || {}); }
     if (path === "/api/events") return respond({ events: SNAP.events || [] });
     if (path === "/api/trace") return respond({ spans: [] });
