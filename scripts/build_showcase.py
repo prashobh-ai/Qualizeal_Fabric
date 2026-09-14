@@ -93,43 +93,12 @@ _UPLOAD_MIME = {
     ".txt": "text/plain",
 }
 
-# T25 — code into the fabric. The showcase ingests this repository's OWN source
-# (the checkout is already present in the Pages build), so code questions answer
-# with the real function and a line-anchored GitHub link, no external token
-# needed. A curated, representative set keeps the build fast; the repository card
-# answers "what does this repo do".
-CODE_REPO = "prashobh-ai/Qualizeal_Fabric"
-CODE_MIME = "text/x-python;code"
-CODE_FILES = [
-    # platform core
-    "knowledge_fabric/answer/service.py",
-    "knowledge_fabric/answer/selector.py",
-    "knowledge_fabric/answer/search.py",
-    "knowledge_fabric/adapters/converter.py",
-    "knowledge_fabric/adapters/model.py",
-    "knowledge_fabric/adapters/lexicalindex.py",
-    "knowledge_fabric/ingestion/pipeline.py",
-    "knowledge_fabric/ingestion/intake.py",
-    "knowledge_fabric/connectors/github.py",
-    # authentication / SSO / policy — the reusable building blocks discovery finds
-    "knowledge_fabric/governance/policy.py",
-    "knowledge_fabric/surfaces/signin_ui.py",
-    "knowledge_fabric/surfaces/ui_common.py",
-    "knowledge_fabric/surfaces/http_api.py",
-    "scripts/build_showcase.py",
-]
-# Automation scripts — a tester asks "is there a script for <feature>?"; these
-# real test suites are the answer, cited to the exact function and lines.
-TEST_FILES = [
-    "tests/test_governance.py",
-    "tests/test_ingestion.py",
-    "tests/test_connectors.py",
-    "tests/test_stage2_refresh.py",
-    "tests/test_t25_code.py",
-]
-# HR / learning / standards — any employee, any role, asks about policy or
-# learning material and must not hit a blind gap.
-ORG_DIR = os.path.join(ROOT, "corpus", "org")
+# T141 — the fabric holds the ORGANISATION's knowledge only, never its own source.
+# The showcase no longer ingests this repository's Python, tests, README or any
+# synthetic org filler: a QualiZeal reader must never be answered with a test
+# function or an invented HR policy. The corpus is exactly the vendored QualiZeal
+# product / company / service briefs (corpus/*.docx), the documents committed under
+# corpus/uploads/, and the baked website / GitHub / Jira / Confluence demo sources.
 
 # --------------------------------------------------------------------------
 # T126/T127 — Jira + Confluence in the demo. The GitHub Pages showcase is static,
@@ -201,7 +170,7 @@ CONFLUENCE_PAGES = [
     ),
     (
         "1703942",
-        "Onboarding a New Source",
+        "Connecting Data Sources",
         "Paste a source URL into its Admin card, set the allow-list, then Sync. "
         "GitHub, Jira dashboards and boards, Confluence pages and websites are supported.",
     ),
@@ -213,7 +182,7 @@ CONFLUENCE_PAGES = [
     ),
     (
         "1703944",
-        "Model Cost Playbook",
+        "Cost-Aware Model Routing",
         "The selector escalates only when confidence fails. Open-source and extractive "
         "answers are metered too, so spend and ROI reflect real consumption.",
     ),
@@ -250,8 +219,8 @@ SCRIPT = [
     ("qa-agent", "what does QualiZeal offer for AI and ML model testing?"),
     ("asker.public", "what is the capital of France?"),  # gap (out of corpus)
     ("curator", "what is QualiCentral?"),
-    ("qa-agent", "how does subject boost work"),  # code answer (identifier tier)
-    ("asker.restricted", "where is the docx converter"),  # code answer
+    ("asker.public", "what all services are given by QualiZeal?"),  # T142 — service list
+    ("qa-agent", "which services does QualiZeal offer?"),
 ]
 
 # Extra questions to bake answers for (so the chatbot / Workspace answer freely).
@@ -265,24 +234,10 @@ EXTRA_Q = [
     "what does QualiZeal offer for test automation?",
     "what does QualiZeal offer for AI and ML model testing?",
     "what is QMentisAI and how does it use generative AI for quality engineering?",
-    # T25 — code questions, answered from this repository's own source with
-    # line-anchored GitHub citations (the identifier tier).
-    "how does subject boost work",
-    "where is the docx converter",
-    "what does the ingestion pipeline do",
-    "how does the answer cache work",
-    "where is the github connector",
-    "how does the model client pick a tier",
-    "what does this repository do",
-    # T24 — asset/capability discovery (search across the fabric + live sources)
-    # and cross-domain org questions any employee, any role, may ask.
-    "has anyone made sso and auth code which I can reuse",
-    "can I find an automation script for ingestion",
-    "is there a reusable github connector",
-    "where is the leave policy",
-    "what is our single sign-on and authentication standard",
-    "find learning material for onboarding",
-    "what does the test automation playbook say",
+    # T142 — "what all services" is the service list, not a code function.
+    "what all services are given by QualiZeal?",
+    "which services does QualiZeal offer?",
+    "list QualiZeal services",
     # T126/T127 — count / inventory questions across every source, answered from
     # facts.json (repositories, Jira issues, Confluence pages, documents), so the
     # chat returns the real number instead of a matching test function.
@@ -484,143 +439,6 @@ def _load_uploads(p):
             (TENANT, FILES_SOURCE, str(len(paths)), int(_time.time() * 1000), n),
         )
     return n
-
-
-def _repo_card() -> str:
-    """A deterministic repository-overview document (no model): README opening,
-    the package map, entry points and CI — what answers 'what does this repo
-    do'."""
-    parts = ["QualiZeal_Fabric — repository overview."]
-    try:
-        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as fh:
-            head = fh.read()
-        intro = " ".join(
-            ln.strip() for ln in head.splitlines()[:12] if ln.strip() and not ln.startswith("#")
-        )
-        if intro:
-            parts.append(intro)
-    except OSError:
-        pass
-    pkgs = sorted(
-        d
-        for d in os.listdir(os.path.join(ROOT, "knowledge_fabric"))
-        if os.path.isdir(os.path.join(ROOT, "knowledge_fabric", d)) and not d.startswith("__")
-    )
-    parts.append("The knowledge_fabric package is organised into: " + ", ".join(pkgs) + ".")
-    parts.append(
-        "The answer service is the single governed path: it retrieves hybrid "
-        "evidence, grounds it, routes across model levels, and composes a cited "
-        "answer. The ingestion pipeline chunks documents and code with "
-        "provenance. Connectors pull from GitHub and other sources. The scripts "
-        "package builds the static showcase deployed to GitHub Pages."
-    )
-    wf = os.path.join(ROOT, ".github", "workflows")
-    if os.path.isdir(wf):
-        parts.append(
-            "Continuous integration workflows: "
-            + ", ".join(
-                sorted(os.path.splitext(f)[0] for f in os.listdir(wf) if f.endswith(".yml"))
-            )
-            + "."
-        )
-    parts.append(
-        "It runs on the Python standard library only, with a full test suite "
-        "under tests and a Makefile for lint and test."
-    )
-    return "\n\n".join(parts)
-
-
-def _load_code(p):
-    """Ingest this repository's own source through the real pipeline so code
-    questions answer with the actual function and a line-anchored GitHub link.
-    Adds one synthetic repository-overview document for 'what does this repo do'.
-    """
-    import time as _time
-
-    from knowledge_fabric.ingestion.intake import IngestWorker, Intake
-
-    intake, worker = Intake(p), IngestWorker(p, None)
-    worker.intake = intake
-    n = 0
-    limit = os.environ.get("KF_SHOWCASE_CODE_LIMIT")
-    files = CODE_FILES[: int(limit)] if limit else (CODE_FILES + TEST_FILES)
-    for rel in files:
-        path = os.path.join(ROOT, rel)
-        if not os.path.exists(path):
-            continue
-        with open(path, "rb") as fh:
-            data = fh.read()
-        raw = intake.canonical(
-            TENANT,
-            CORPUS_SOURCE,
-            f"github://{CODE_REPO}/{rel}",
-            os.path.basename(rel),
-            data,
-            mime=CODE_MIME,
-            acl=["public"],
-        )
-        intake.submit(raw)
-        n += 1
-    card = _repo_card().encode()
-    intake.submit(
-        intake.canonical(
-            TENANT,
-            CORPUS_SOURCE,
-            f"github://{CODE_REPO}/README.md",
-            "QualiZeal_Fabric — repository overview",
-            card,
-            mime="text/markdown",
-            acl=["public"],
-        )
-    )
-    worker.drain()
-    # T129 — the code is the GitHub source, so its cursor populates the GitHub
-    # connector card (items / synced), now that the org briefs group under Website.
-    p.db.execute(
-        "INSERT INTO connector_cursors(tenant,source,cursor,last_sync,items) "
-        "VALUES(?,?,?,?,?) ON CONFLICT(tenant,source) DO UPDATE SET "
-        "cursor=excluded.cursor, last_sync=excluded.last_sync, items=items+excluded.items",
-        (TENANT, CORPUS_SOURCE, str(n + 1), int(_time.time() * 1000), n + 1),
-    )
-    return n + 1
-
-
-def _load_org(p):
-    """Ingest the HR / learning / standards corpus (Markdown) so any employee,
-    any role, can ask about policy or learning material without hitting a gap."""
-    import glob
-    import time as _time
-
-    from knowledge_fabric.ingestion.intake import IngestWorker, Intake
-
-    intake, worker = Intake(p), IngestWorker(p, None)
-    worker.intake = intake
-    paths = sorted(glob.glob(os.path.join(ORG_DIR, "*.md")))
-    for path in paths:
-        name = os.path.basename(path)
-        title = os.path.splitext(name)[0].replace("_", " ").title()
-        with open(path, "rb") as fh:
-            data = fh.read()
-        intake.submit(
-            intake.canonical(
-                TENANT,
-                "internal",
-                f"internal://qualizeal/handbook/{name}",
-                title,
-                data,
-                mime="text/markdown",
-                acl=["public"],
-            )
-        )
-    worker.drain()
-    if paths:
-        p.db.execute(
-            "INSERT INTO connector_cursors(tenant,source,cursor,last_sync,items) "
-            "VALUES(?,?,?,?,?) ON CONFLICT(tenant,source) DO UPDATE SET "
-            "cursor=excluded.cursor, last_sync=excluded.last_sync, items=excluded.items",
-            (TENANT, "internal", str(len(paths)), int(_time.time() * 1000), len(paths)),
-        )
-    return len(paths)
 
 
 def _load_jira(p):
@@ -853,8 +671,6 @@ def _seed():
     demo.seed(p, [TENANT])
     p.policy.set_budget(TENANT, 20.0)
     _load_corpus(p)  # real QualiZeal knowledge, ingested through the live pipeline
-    _load_code(p)  # this repository's own source, so code questions cite real functions
-    _load_org(p)  # HR / learning / standards, so any-role questions never blind-gap
     _load_uploads(p)  # T131 — documents committed via the UI upload → repo path
     # T127 — the self-contained showcase OWNS its facts, so it reseeds fresh each
     # build (a leftover facts.json must never make it skip its own connectors). A
@@ -949,8 +765,22 @@ def _export_index(p) -> dict:
             df[t] = df.get(t, 0) + 1
         total_len += len(tk)
         did = pas.document_id
+        # T142 — the document's area (Product / Service / Company), taken from the
+        # corpus filename prefix that leads its title (e.g. "Service Functional
+        # Testing"), so the browser engine can answer "what all services" with the
+        # service documents grouped by area. Non-corpus docs carry an empty area.
+        _title = d.get("title", "")
+        _lead = _title.split(" ", 1)[0] if _title else ""
+        _area = _lead if _lead in ("Product", "Service", "Company") else ""
         docs.setdefault(
-            did, {"id": did, "title": d.get("title", ""), "kind": kind, "url": loc.get("url", "")}
+            did,
+            {
+                "id": did,
+                "title": _title,
+                "kind": kind,
+                "url": loc.get("url", ""),
+                "area": _area,
+            },
         )
         passages.append(
             {

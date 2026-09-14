@@ -983,22 +983,77 @@
     });
     return mkAnswer("discovery", 1, parts.join("\n"), cites, 0.85);
   }
+  // T142 — routing so the organisation's documents win. A code passage may only
+  // lead an answer when the question actually asks about code, or a query token
+  // matches a whole symbol/path identifier (never a substring like "all" inside
+  // "test_list_all_…"); and a "what all services/products" question is a Level-0
+  // list of the service (or product) documents, not a single passage.
+  var CODE_INTENT = /\b(function|method|class|symbol|implement|implementation|defined|where is|how does .* work|code|snippet|call(ed|s)?|import|module|file|repo(sitory)?)\b/i;
+  var LIST_INTENT = /\b(what all|which|list|what are (all )?the|what .*\b(services|products|offerings|solutions|capabilities)\b)\b/i;
+  var GENERIC_IDENT = { all: 1, list: 1, get: 1, set: 1, "new": 1, add: 1, run: 1, test: 1, data: 1, name: 1, type: 1, main: 1, index: 1, user: 1, file: 1, item: 1, value: 1 };
+  function identSegs(s) { return String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean); }
+  function docArea(id) { var d = ridx().docs[id]; return (d && d.area) || ""; }
+  function serviceName(id) {
+    var t = docTitle(id) || "";
+    return t.replace(/^(Service|Product|Company)\s+/i, "").trim() || t;
+  }
+  // The distinct service (or product) documents behind a "what all …" question,
+  // as a bulleted Level-0 list. Returns null when the question is not a list
+  // question or fewer than three of the top passages come from that area — so it
+  // never hijacks an ordinary question. Runs over the ACTIVE index, so a
+  // toggled-off source drops out of the list.
+  function serviceListAnswer(question, prof) {
+    if (!LIST_INTENT.test(question)) return null;
+    var qt = tokenize(question).filter(function (t) { return !STOP[t]; });
+    if (!qt.length) return null;
+    var scored = bm25(qt);
+    if (!scored.length) return null;
+    var wantArea = /\bproducts?\b/i.test(question) ? "Product"
+      : (/\bservices?\b/i.test(question) ? "Service" : "");
+    var inArea = function (id) {
+      var a = docArea(id);
+      return wantArea ? a === wantArea : (a === "Service" || a === "Product");
+    };
+    var topHits = scored.slice(0, 8).filter(function (x) { return inArea(x.p.doc); }).length;
+    if (topHits < 3) return null;  // not really a services/products retrieval
+    var byDoc = {}, order = [];
+    scored.forEach(function (x) {
+      if (!inArea(x.p.doc)) return;
+      if (!byDoc[x.p.doc]) { byDoc[x.p.doc] = x.p; order.push(x.p.doc); }
+    });
+    if (order.length < 3) return null;
+    var names = [], cites = [];
+    order.slice(0, 20).forEach(function (d, i) {
+      names.push(serviceName(d) + " [" + (i + 1) + "]");
+      cites.push(citeFor(byDoc[d]));
+    });
+    var noun = wantArea === "Product" ? "products" : "services";
+    return mkAnswer("lookup", 1, "QualiZeal offers these " + noun + ": " + names.join(", ") + ".", cites, 0.9);
+  }
   function composeAnswer(question, scored, prof) {
     prof = prof || PERSONA_PROFILE.general;
     var cap = PERSONA_DEPTH[prof.depth] || 3, emphasis = prof.emphasis;
     var qt = tokenize(question).filter(function (t) { return !STOP[t]; });
     var top = scored.slice(0, 8);
+    var list = serviceListAnswer(question, prof);
+    if (list) return list;
     var code = top.filter(function (x) {
       if (x.p.kind !== "code" && x.p.kind !== "test") return false;
-      var hay = (x.p.symbol + " " + x.p.path).toLowerCase();
-      return qt.some(function (t) { return t.length >= 3 && hay.indexOf(t) >= 0; });
+      if (CODE_INTENT.test(question)) return true;
+      // else require a WHOLE-identifier match, not a substring, and not a generic word
+      var hay = identSegs(x.p.symbol).concat(identSegs(x.p.path));
+      return qt.some(function (t) { return t.length >= 3 && !GENERIC_IDENT[t] && hay.indexOf(t) >= 0; });
     });
     if (code.length) {
       // T27 emphasis — a quality persona leads with the verifying test, a builder
       // with the implementation; a tiebreaker only over passages already matched.
       code.sort(function (x, y) { return pbiasCode(y.p, emphasis) - pbiasCode(x.p, emphasis); });
-      var p = code[0].p;
-      return mkAnswer("lookup", 1, (p.text || p.symbol) + " [1]", [citeFor(p)], 0.85);
+      var p = code[0].p, body = p.text || p.symbol || "";
+      // T142 — never return an empty (or near-empty) code answer; fall through to
+      // the documents instead of citing a bare symbol.
+      if (body.replace(/\s+/g, " ").trim().length >= 20) {
+        return mkAnswer("lookup", 1, body + " [1]", [citeFor(p)], 0.85);
+      }
     }
     var docs = top.filter(function (x) { return x.p.kind !== "code" && x.p.kind !== "test"; });
     if (!docs.length || docs[0].score < 1.0) return null;  // too weak — honest gap
@@ -1193,6 +1248,18 @@
         return { question: q, subject: "", answer_docs: [], kind: "answer", options: [] };
       });
     var prof = PERSONA_PROFILE[personaFor(designation)];  // T27 depth + emphasis
+    // T142 — a "what all services/products" question is a Level-0 document list. It
+    // is resolved before coreference/clarify and before the baked cache, so it can
+    // never be turned into a clarify-back or a single-document baked answer.
+    var listAns = serviceListAnswer(question, prof);
+    if (listAns) {
+      listAns.role_view = roleView(listAns, designation);
+      answerFirst(listAns, designation);
+      bumpUsage(subject, listAns);
+      bumpMeter(listAns);
+      evAnswer(subject, designation, question, listAns);
+      return Promise.resolve(listAns);
+    }
     var res = resolveCtx(question, turns);
     if (res.clarify) {
       var c = clarifyChips(res.clarify.chips, res.clarify.reason);

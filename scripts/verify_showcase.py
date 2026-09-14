@@ -23,6 +23,41 @@ REQUIRED = [".nojekyll", "index.html", "engine.js", "snapshot.json"]
 SURFACES = ["workspace", "admin", "curator", "signin", "dashboard"]
 
 
+# T141 — the baked fabric must hold the organisation's knowledge only: never this
+# repository's own source/tests, never the retired synthetic org filler. The build
+# fails if any leaks in, so a bad corpus can never reach Pages.
+_FORBIDDEN_TITLES = frozenset(
+    {
+        "Hr Leave Policy",
+        "Onboarding Guide",
+        "Security Sso Standard",
+        "Test Automation Playbook",
+        "Onboarding a New Source",
+        "Model Cost Playbook",
+    }
+)
+
+
+def _authentic_corpus_errors(snap: dict) -> list[str]:
+    index = snap.get("index") or {}
+    docs = index.get("docs") or []
+    passages = index.get("passages") or []
+    errs: list[str] = []
+    own_docs = [d for d in docs if "Qualizeal_Fabric" in (d.get("url") or "")]
+    if own_docs:
+        errs.append(f"snapshot holds {len(own_docs)} own-repository document(s) (T141)")
+    own_ps = [p for p in passages if "Qualizeal_Fabric" in (p.get("url") or "")]
+    if own_ps:
+        errs.append(f"snapshot holds {len(own_ps)} own-repository passage(s) (T141)")
+    test_ps = [p for p in passages if (p.get("symbol") or "").startswith(("tests.", "test_"))]
+    if test_ps:
+        errs.append(f"snapshot holds {len(test_ps)} test/code passage(s) (T141)")
+    leaked = sorted({d.get("title", "") for d in docs} & _FORBIDDEN_TITLES)
+    if leaked:
+        errs.append(f"snapshot holds synthetic/meta document(s): {leaked} (T141)")
+    return errs
+
+
 def verify(directory: str) -> list[str]:
     errors: list[str] = []
     d = os.path.abspath(directory)
@@ -45,6 +80,7 @@ def verify(directory: str) -> list[str]:
                 errors.append("snapshot.json has no login directory")
             if not snap.get("answers"):
                 errors.append("snapshot.json has no baked answers")
+            errors.extend(_authentic_corpus_errors(snap))
         except Exception as e:  # noqa: BLE001
             errors.append(f"snapshot.json is not valid JSON: {e}")
     for root, _dirs, names in os.walk(d):

@@ -9,8 +9,35 @@ Provenance maps to repo/path/commit/line.
 
 from __future__ import annotations
 
+import re
+
 from ..contracts.types import RawItem
 from .base import BaseConnector
+
+# T141 — directories and file patterns never ingested from any repo: a repo's own
+# tests, CI config and generated docs are engineering artefacts, not the knowledge
+# a reader asks about. Excluding them keeps a test function from ever winning an
+# answer over the organisation's real documents.
+_EXCLUDED_DIRS = ("tests", "test", "__tests__", "spec", ".github", "docs/progress")
+_EXCLUDED_FILE = re.compile(
+    r"(^|/)(test_[^/]+\.py|[^/]+_test\.py|[^/]+\.spec\.[^/]+|conftest\.py)$"
+)
+
+
+def _is_excluded_path(path: str) -> bool:
+    p = (path or "").replace("\\", "/").strip("/")
+    if not p:
+        return False
+    if _EXCLUDED_FILE.search(p):
+        return True
+    segments = p.split("/")
+    for d in _EXCLUDED_DIRS:
+        parts = d.split("/")
+        # match the excluded directory as a path prefix or any nested segment run
+        for i in range(len(segments) - len(parts) + 1):
+            if segments[i : i + len(parts)] == parts:
+                return True
+    return False
 
 
 class GitHubConnector(BaseConnector):
@@ -32,6 +59,8 @@ class GitHubConnector(BaseConnector):
         for rec in sorted(self._records, key=lambda r: r["updated_at"]):
             if self.allow_repos and rec.get("repo") not in self.allow_repos:
                 continue  # allow-list enforcement
+            if _is_excluded_path(rec.get("path", "")):
+                continue  # T141 — never ingest a repo's tests / CI / docs into the fabric
             if rec["updated_at"] <= since:
                 continue
             newest = max(newest, rec["updated_at"])
