@@ -244,7 +244,10 @@
   }
   function connectorsPayload() {
     var g = (STATE.get.admin && STATE.get.admin["/admin/connectors"]) || {};
-    return { connectors: connList().filter(function (c) { return !c._deleted; }), schedules: g.schedules || [] };
+    // T143 — a deleted source is NOT hidden; it stays in the list carrying
+    // _deleted:true so the card renders in a removed state with a "Re-add" button.
+    // It remains out of retrieval (disabledSources) until it is restored.
+    return { connectors: connList(), schedules: g.schedules || [] };
   }
   function saveConn(source, patch) {
     var c = connBySource(source);
@@ -280,6 +283,23 @@
     saveConnState(st);
     ridxDirty();  // T132 — a deleted source leaves the active passage set
     return { status: "ok", source: source, deleted: true };
+  }
+  // T143 — restore a deleted source. The card is never removed from the list (see
+  // connectorsPayload), so connBySource still finds it; clearing _deleted and
+  // re-enabling it puts its passages back into the active set. Persisted per
+  // visitor, so a reload keeps the source restored.
+  function addConn(source) {
+    var c = connBySource(source);
+    if (!c) return { status: "error", message: "unknown source " + source };
+    c._deleted = false; c.enabled = true;
+    c.health = c.health || {};
+    c.health.last_run = Date.now() / 1000; c.health.last_status = "ok"; c.health.freshness_minutes = 0;
+    var st = loadConnState();
+    st[source] = Object.assign(st[source] || {}, { deleted: false, enabled: true });
+    saveConnState(st);
+    ridxDirty();  // T143 — a restored source re-enters the active passage set
+    return { status: "ok", source: source, deleted: false, enabled: true,
+      connector: { source: source, enabled: true, allow: c.allow, interval_s: c.interval_s } };
   }
   function runDueConn() {
     var ran = [], now = Date.now() / 1000, st = loadConnState();
@@ -1859,6 +1879,11 @@
         var dc = deleteConn((body || {}).source);
         evAppend("source_toggle", { source: (body || {}).source || "", active: false, actor: subject });
         return respond(dc);
+      }
+      if (path === "/admin/connectors/add") {  // T143 — re-add a removed source
+        var acn = addConn((body || {}).source);
+        evAppend("source_toggle", { source: (body || {}).source || "", active: true, actor: subject });
+        return respond(acn);
       }
       // T131 — uploads are REAL in-browser: the file is added to the Files source
       // at once (answerable immediately) and, when a commit endpoint is configured,

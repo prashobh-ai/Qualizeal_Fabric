@@ -95,6 +95,19 @@ _CSS = r"""
 .tl-stack i{display:block;width:100%}
 .tl-m{font-size:11px;color:var(--mut);margin-top:4px}
 .tl-n{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
+/* T144 — the upload drop zone + per-file ingestion stage strip (mirrors Admin) */
+.dropzone{border:2px dashed var(--line);border-radius:14px;padding:18px;text-align:center;
+ cursor:pointer;transition:border-color .15s,background .15s}
+.dropzone:hover{border-color:var(--qz-blue)}
+.dropzone.drag{border-color:var(--qz-blue);background:rgba(37,99,235,.06)}
+.dropzone .dz-msg{font-size:14px}
+.dropzone select,.dropzone button{cursor:pointer}
+.paste-add{margin-top:10px}.paste-add summary{cursor:pointer;font-size:13px;color:var(--mut)}
+.stages{display:flex;gap:4px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+.stage{padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;background:var(--panel2);
+ color:var(--mut);border:1px solid var(--line);white-space:nowrap}
+.stage.ok{color:var(--good);border-color:rgba(62,207,142,.5)}
+.stage.running{color:var(--qz-blue);border-color:var(--qz-blue)}.stage.pending{opacity:.55}
 """
 
 _QUALITY = card(
@@ -141,9 +154,30 @@ _GRAPH = card(
 
 _DOCS = _read_asset("curator_ui__docs.html")
 
+# T144 — Curator gets the same obvious upload as Admin: a dashed drop zone for real
+# files (DOCX / PPTX / XLSX / CSV / MD, parsed in the browser and answerable at once;
+# a PDF is stored until the next build), with the paste-text form kept below as the
+# secondary path. Both go through the same /curator/upload intake.
 _ADD = card(
     "Add a document",
-    '<form id="add-doc-form" class="col">'
+    '<div class="dropzone" id="cur-dz" title="drag files here, or click to choose">'
+    '<input id="cur-dz-files" type="file" multiple '
+    'accept=".docx,.pptx,.xlsx,.csv,.md,.txt,.pdf" style="display:none">'
+    '<div class="dz-msg"><b>Drop DOCX, PPTX, XLSX, CSV, MD here</b>'
+    '<span class="muted small"> — or choose files</span></div>'
+    '<div class="row" style="justify-content:center;margin-top:8px;gap:8px">'
+    '<button class="btn primary sm" id="cur-dz-btn" type="button">Upload documents</button>'
+    '<select id="cur-dz-acl" title="access control for the uploaded documents">'
+    '<option value="public">public</option>'
+    '<option value="restricted">restricted</option></select></div>'
+    '<div class="muted small" style="margin-top:6px">DOCX / PPTX / XLSX / CSV / MD are '
+    "parsed in your browser — real passages, tables and slides are indexed and "
+    "answerable on the next question; a PDF is stored until the build extracts it.</div>"
+    '<div class="stages" id="cur-dz-stages" hidden></div>'
+    '<div class="muted small" id="cur-dz-status"></div>'
+    "</div>"
+    '<details class="paste-add"><summary>…or paste text</summary>'
+    '<form id="add-doc-form" class="col" style="margin-top:8px">'
     '<div class="row"><input id="add-filename" placeholder="filename, e.g. qa/onboarding.md" '
     'style="flex:1" required>'
     '<select id="add-acl"><option value="public">public</option><option '
@@ -154,7 +188,7 @@ _ADD = card(
     "document</button>"
     '<span class="muted small" id="add-status">Runs the full 7-step pipeline and bumps the dataset '
     "version.</span></div>"
-    "</form>",
+    "</form></details>",
     "add-card",
 )
 
