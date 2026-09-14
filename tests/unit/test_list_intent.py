@@ -55,6 +55,11 @@ class TestListIntent(unittest.TestCase):
 
         cls.tmp = tempfile.mkdtemp(prefix="kf-listintent-")
         cls.out = os.path.join(cls.tmp, "showcase")
+        # Hermetic build: another test may set KF_DATA_ROOT / KF_FABRIC_ROOT at import
+        # time (e.g. test_token_classes), which makes _seed skip the self-contained
+        # Confluence reseed. Clear them so this build always seeds Confluence, then
+        # restore. Also cap the corpus so the one build stays fast.
+        saved = {k: os.environ.pop(k, None) for k in ("KF_DATA_ROOT", "KF_FABRIC_ROOT")}
         os.environ["KF_SHOWCASE_CORPUS_LIMIT"] = "12"
         try:
             build_showcase.build(cls.out)
@@ -72,6 +77,9 @@ class TestListIntent(unittest.TestCase):
             )
         finally:
             os.environ.pop("KF_SHOWCASE_CORPUS_LIMIT", None)
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
         assert res.stdout.strip(), f"no runner output; stderr={res.stderr[-2000:]}"
         cls.by_q = {r["question"]: r for r in json.loads(res.stdout).get("results", [])}
 
@@ -85,7 +93,8 @@ class TestListIntent(unittest.TestCase):
     def test_pages_lists_confluence(self):
         r = self.by_q[Q_PAGES]
         self.assertEqual(r["kind"], "answer")
-        self.assertIn("Confluence", r["answer_text"])
+        # A real list, not the "No Confluence pages …" empty (which also says Confluence).
+        self.assertIn("Your Confluence has", r["answer_text"], r["answer_text"])
         titles = self._titles(Q_PAGES)
         self.assertGreaterEqual(len(titles), 3)
         for t in titles:
