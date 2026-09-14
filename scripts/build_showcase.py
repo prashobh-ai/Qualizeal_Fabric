@@ -872,6 +872,12 @@ def _bake(client, p=None) -> dict:
     # (activated + halo), so a click in the static demo opens the same panel.
     if asker:
         _, snap["provider"] = client.call("GET", "/api/provider", token=asker)
+        # T147 — the provider status must be IN the snapshot (it was absent), so the
+        # Admin card and the answer cards can show the active provider — or the honest
+        # reason it fell back (e.g. the key was rejected at build). The doctor writes
+        # data/provider_status.json only on success; when it did not, reflect the real
+        # build mode so the card never reads as model-free by accident.
+        snap["provider_status"] = _provider_status_for_snapshot()
         # The whole-fabric galaxy (Curator graph) needs curate scope.
         curator_tok = tokens.get("curator")
         if curator_tok:
@@ -1064,6 +1070,33 @@ def build(out_dir: str) -> None:
         f"  answers={len(snap['answers'])} galaxies={len(snap['galaxy'])} bank={len(snap['bank'])} "
         f"baked_files={baked}"
     )
+
+
+def _provider_status_for_snapshot() -> dict:
+    """T147 — the provider status baked into the snapshot. When the doctor verified
+    the key it wrote data/provider_status.json (the pinned models); reuse it and mark
+    it verified. When it did not (key absent, rejected, or extractive fallback), record
+    the real build mode and an honest reason so the UI shows the active provider or why
+    it fell back — never a silent model-free state."""
+    from knowledge_fabric.adapters import model as _m
+
+    st = dict(_m.provider_status() or {})
+    mode = (os.environ.get("KF_MODEL_MODE") or "").lower() or "extractive"
+    if st:
+        st.setdefault("state", "verified")
+        st.setdefault("provider", "anthropic")
+    else:
+        st = {
+            "state": "verified" if mode == "anthropic" else "extractive",
+            "provider": "anthropic" if mode == "anthropic" else "open-source",
+            "reason": (
+                "provider key not verified at build — served by the extractive core"
+                if mode != "anthropic"
+                else "anthropic mode without a written provider_status"
+            ),
+        }
+    st["mode"] = mode
+    return st
 
 
 def _copy_answers(out: str) -> int:
