@@ -3,6 +3,14 @@
 .conn-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
 .conn-card.breach{border-color:var(--bad);box-shadow:0 0 0 1px rgba(240,106,106,.35) inset}
 .conn-card.off{opacity:.75}
+.conn-card.removed{border-style:dashed;background:transparent;opacity:.85}
+/* T144 — the Sources upload drop zone */
+.dropzone{border:2px dashed var(--line);border-radius:14px;padding:18px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;margin-bottom:12px}
+.dropzone:hover{border-color:var(--qz-blue)}
+.dropzone.drag{border-color:var(--qz-blue);background:rgba(37,99,235,.06)}
+.dropzone .dz-msg{font-size:14px}
+.dropzone select,.dropzone button{cursor:pointer}
+.dropzone .stages{justify-content:center;margin-top:10px}
 .conn-card h4{margin:0;font-size:15px;display:flex;align-items:center;gap:8px}
 .conn-card .hl{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:12px;margin:10px 0}
 .conn-card .hl span:nth-child(odd){color:var(--mut)}

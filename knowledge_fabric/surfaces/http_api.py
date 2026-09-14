@@ -1473,6 +1473,49 @@ class Handler(BaseHTTPRequestHandler):
                         "message": f"{type(e).__name__}: {e}",
                     },
                 )
+        if u.path == "/admin/connectors/add":
+            # T143 — restore a removed source: re-enable it so its documents
+            # re-enter answers. Mirrors the static showcase's re-add route; a
+            # known-shape request never raises to the client.
+            prin = self._require("admin")
+            if not prin:
+                return
+            b = self._body()
+            source = b.get("source", "")
+            if not conn_admin.is_known(source):
+                return self._send(
+                    200,
+                    {
+                        "connector": conn_admin.get(p, prin.tenant, source)
+                        or {"source": source, "enabled": False, "allow": [], "interval_s": None},
+                        "status": "error",
+                        "message": f"unknown source {source!r}; expected one of "
+                        + ", ".join(conn_admin.KNOWN_SOURCES),
+                    },
+                )
+            try:
+                row = dict(conn_admin.upsert(p, prin.tenant, source, enabled=True))
+                self._audit(prin, "connector_readd", source, "enabled=True")
+                sched = scheduler.get_schedule(p, prin.tenant, source) or {}
+                row.setdefault("interval_s", sched.get("interval_s"))
+                return self._send(
+                    200,
+                    {
+                        "connector": row,
+                        "health": scheduler.health_for(p, prin.tenant, source),
+                        "status": "ok",
+                    },
+                )
+            except Exception as e:  # noqa: BLE001 — reported to the client, never a bare 500
+                return self._send(
+                    200,
+                    {
+                        "connector": conn_admin.get(p, prin.tenant, source)
+                        or {"source": source, "enabled": False, "allow": [], "interval_s": None},
+                        "status": "error",
+                        "message": f"{type(e).__name__}: {e}",
+                    },
+                )
         if u.path == "/admin/sync":
             prin = self._require("admin")
             if not prin:

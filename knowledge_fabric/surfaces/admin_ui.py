@@ -193,12 +193,37 @@ _MODELS = card(
 # T47 — one card per analysed source (GitHub / Jira / Confluence): last run and
 # next run from the refresh scheduler, counts from facts.json, the live GitHub
 # rate limit when the live connector exposes it. Served by GET /admin/sources.
+# T144 — add documents right here, at the top of Sources: a big dashed drop zone
+# (drag files onto it, or click to choose) that parses DOCX / PPTX / XLSX / CSV / MD
+# in the browser and indexes them at once, with a live per-file stage strip. A PDF
+# is accepted and stored (extracted at the next build). This is the obvious upload
+# affordance the buried "Bulk upload" card was not.
+_SOURCES_DROPZONE = (
+    '<div class="dropzone" id="admin-dz" title="drag files here, or click to choose">'
+    '<input id="admin-dz-files" type="file" multiple '
+    'accept=".docx,.pptx,.xlsx,.csv,.md,.txt,.pdf" style="display:none">'
+    '<div class="dz-msg"><b>Drop DOCX, PPTX, XLSX, CSV, MD here</b>'
+    '<span class="muted small"> — or choose files</span></div>'
+    '<div class="row" style="justify-content:center;margin-top:8px;gap:8px">'
+    '<button class="btn primary sm" id="admin-dz-btn" type="button">Upload documents</button>'
+    '<select id="admin-dz-acl" title="access control for the uploaded documents">'
+    '<option value="public">public</option>'
+    '<option value="restricted">restricted</option></select></div>'
+    '<div class="muted small" style="margin-top:6px">DOCX / PPTX / XLSX / CSV / MD are '
+    "parsed in your browser — real passages, tables and slides are indexed and "
+    "answerable on the next question; a PDF is stored until the build extracts it.</div>"
+    '<div class="stages" id="dz-stages" hidden></div>'
+    '<div class="muted small" id="dz-status"></div>'
+    "</div>"
+)
+
 _SOURCES = card(
     "Sources — GitHub, Jira, Confluence",
-    '<div class="conn" id="sources-cards"><div class="empty">Sign in as an admin to load the '
+    _SOURCES_DROPZONE
+    + '<div class="conn" id="sources-cards"><div class="empty">Sign in as an admin to load the '
     "source cards.</div></div>",
     "sources-panel",
-    right='<span class="muted small">last run · next run · counts · rate limit</span>',
+    right='<span class="muted small">upload · last run · next run · counts · rate limit</span>',
 )
 
 # T83 — the audience coverage matrix as a heatmap: every data type (rows) ×

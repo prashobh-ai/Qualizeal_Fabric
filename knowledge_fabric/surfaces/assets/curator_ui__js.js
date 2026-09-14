@@ -110,6 +110,42 @@ async function addDoc(ev){ev.preventDefault();const filename=$('#add-filename').
  catch(e){$('#add-status').textContent=e.message;toast(e.message,'bad')}
  finally{$('#add-btn').disabled=false}}
 
+// T144 — the drop zone: real files (DOCX/PPTX/XLSX/CSV/MD parsed in the browser,
+// PDF stored) ingested through the SAME /curator/upload intake as the paste form,
+// with a live per-file ingestion stage strip. Mirrors the Admin Sources drop zone.
+const CUR_PIPELINE=['detect','convert','chunk','extract','graph','embed','health'];
+function curReadB64(file){return new Promise((resolve,reject)=>{const r=new FileReader();
+ r.onload=()=>resolve(String(r.result).split(',',2)[1]||'');r.onerror=()=>reject(r.error||new Error('read failed'));r.readAsDataURL(file)})}
+function paintCurStages(active,counts){const box=$('#cur-dz-stages');if(!box)return;box.hidden=false;
+ const cnt=counts?{convert:counts.documents,chunk:counts.passages,extract:counts.tables,graph:counts.images,embed:counts.passages,health:counts.documents}:{};
+ box.innerHTML=CUR_PIPELINE.map((n,i)=>{const st=i<active?'ok':(i===active?'running':'pending');
+  const c=(st==='ok'&&cnt[n]!=null&&cnt[n]!=='')?(' · '+num(cnt[n])):'';
+  return '<span class="stage '+st+'">'+esc(n)+c+'</span>'}).join('')}
+async function curDropUpload(fileList){const acl=[($('#cur-dz-acl')||{}).value||'public'];const files=[];
+ for(const f of (fileList||[])){try{files.push({filename:f.name,content_b64:await curReadB64(f),acl})}catch(e){toast('Could not read '+f.name+': '+e.message,'bad')}}
+ if(!files.length)return;
+ const setStatus=t=>{const el=$('#cur-dz-status');if(el)el.textContent=t};
+ setStatus('parsing '+files.length+' file(s) in your browser…');
+ paintCurStages(0,null);let step=0;const tick=setInterval(()=>{step=Math.min(CUR_PIPELINE.length-1,step+1);paintCurStages(step,null)},110);
+ try{const out=await api('/curator/upload',{method:'POST',body:{files}});clearInterval(tick);
+  const counts={documents:(out.documents||[]).length||out.ingested||0,passages:out.passages_added||0,tables:out.tables_added||0,images:out.images_added||0};
+  paintCurStages(CUR_PIPELINE.length,counts);
+  const dup=(out.duplicates||[]).length;
+  const parts=['added '+(out.uploaded!=null?out.uploaded:out.ingested)+' doc'+(out.uploaded===1?'':'s')];
+  if(counts.passages)parts.push('+'+num(counts.passages)+' passages');
+  if(counts.tables)parts.push('+'+num(counts.tables)+' tables');
+  if(dup)parts.push(dup+' already in the fabric');
+  setStatus(parts.join(' · ')+' · dataset v'+out.dataset_version);
+  toast(out.uploaded||out.ingested?('Indexed — ask about it now'):'Nothing added','good');
+  await loadAll()}
+ catch(e){clearInterval(tick);const box=$('#cur-dz-stages');if(box)box.hidden=true;setStatus(e.message);toast(e.message,'bad')}}
+function wireCurDropzone(){const zone=$('#cur-dz'),input=$('#cur-dz-files');if(!zone||!input)return;
+ zone.addEventListener('click',e=>{const t=e.target.tagName;if(t!=='SELECT'&&t!=='OPTION')input.click()});
+ input.addEventListener('change',e=>{curDropUpload(e.target.files);e.target.value=''});
+ ['dragenter','dragover'].forEach(ev=>zone.addEventListener(ev,e=>{e.preventDefault();zone.classList.add('drag')}));
+ ['dragleave','dragend'].forEach(ev=>zone.addEventListener(ev,e=>{e.preventDefault();zone.classList.remove('drag')}));
+ zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('drag');curDropUpload(e.dataTransfer&&e.dataTransfer.files)})}
+
 // ---------------------------------------------------------------- T47: repositories / insights / tables
 // Everything below reads the fabric-data files through the curator routes
 // (facts.json, capabilities.json, dependencies.json, analysis/<repo>/,
@@ -290,6 +326,7 @@ KF.initBar({preferRole:'curator'});
 $('#doc-filter').addEventListener('change',renderDocs);$('#doc-search').addEventListener('input',renderDocs);
 $('#doc-refresh').onclick=loadAll;$('#history-close').onclick=()=>$('#history-panel').classList.add('hidden');
 $('#add-doc-form').addEventListener('submit',addDoc);
+wireCurDropzone();  // T144 — Curator upload drop zone
 $('#repo-refresh').onclick=loadFabricViews;$('#repo-close').onclick=()=>$('#repo-panel').classList.add('hidden');$('#tq-run').onclick=runTableQuery;
 $('#registry-form').addEventListener('submit',addKnown);
 // T134 — recompute the readiness rings, gaps and timeline live on any change.

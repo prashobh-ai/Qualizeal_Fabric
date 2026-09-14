@@ -18,6 +18,15 @@ function credBadge(cr){if(!cr)return '';
  return '<span class="pill good" title="credentials present">configured</span>'}
 
 function connCard(c){const h=c.health||{};const sched=h.interval_s||'';
+ // T143 — a removed source is not hidden: it renders as a compact card in a
+ // "removed" state with a single "Re-add" button, so a reviewer who deleted a
+ // source can always restore it from this panel.
+ if(c._deleted||c.removed){
+  return '<div class="conn-card removed" data-source="'+esc(c.source)+'">'+
+   '<h4>'+esc(c.source)+' <span class="pill warn" title="removed from the fabric">removed</span></h4>'+
+   '<div class="muted small">This source and its answers are out of the fabric. Re-add it to bring its documents back.</div>'+
+   '<div class="row" style="margin-top:8px"><button class="btn sm primary" data-act="readd">Re-add</button></div>'+
+   '</div>';}
  // T118 — URL-aware allow-list: paste a GitHub/Jira/Confluence/website URL.
  const ph=c.placeholder||'comma separated projects / repos / paths';
  return '<div class="conn-card'+(h.sla_breach?' breach':'')+(c.enabled?'':' off')+'" data-source="'+esc(c.source)+'">'+
@@ -48,9 +57,14 @@ function focusCard(source){const card=$('#connectors .conn-card[data-source="'+s
  if(inp){inp.focus();inp.classList.add('flash');setTimeout(()=>inp.classList.remove('flash'),1200)}}
 
 function renderConnectors(list){SOURCES=list.map(c=>c.source);
+ // T143 — sources the visitor removed, so an "Add a source" click on one of them
+ // restores it (POST /admin/connectors/add) instead of only focusing a card.
+ const DELETED={};list.forEach(c=>{if(c._deleted||c.removed)DELETED[c.source]=1});
  $('#connectors').innerHTML=addSourceBar()+(list.map(connCard).join('')||'<div class="empty">no connectors registered</div>');
- KF.$$('#connectors .add-source [data-add]').forEach(b=>b.onclick=()=>focusCard(b.dataset.add));
+ KF.$$('#connectors .add-source [data-add]').forEach(b=>b.onclick=()=>{const s=b.dataset.add;if(DELETED[s])readdConnector(s);else focusCard(s)});
  KF.$$('#connectors .conn-card').forEach(card=>{const source=card.dataset.source;
+  // T143 — a removed card carries only a Re-add button; guard every other control.
+  const re=card.querySelector('[data-act=readd]');if(re){re.onclick=()=>readdConnector(source);return}
   card.querySelector('[data-role=enabled]').onchange=e=>saveConnector(source,{enabled:e.target.checked});
   card.querySelector('[data-act=save]').onclick=()=>{const allow=card.querySelector('[data-role=allow]').value.split(',').map(s=>s.trim()).filter(Boolean);
    const iv=card.querySelector('[data-role=interval]').value;const body={allow,enabled:card.querySelector('[data-role=enabled]').checked};if(iv)body.interval_s=+iv;saveConnector(source,body)};
@@ -78,9 +92,16 @@ async function syncNow(source){try{$('#runs-status').textContent='syncing '+sour
  catch(e){toast(e.message,'bad');$('#runs-status').textContent=e.message}
  finally{try{await Promise.all([loadConnectors(),loadRuns(),loadAudit()])}catch(e){}}}
 
-async function deleteConnector(source){if(!confirm('Remove the '+source+' source from the fabric? Its answers will stop until you re-add it.'))return;
+async function deleteConnector(source){if(!confirm('Remove the '+source+' source from the fabric? Its answers will stop until you re-add it. You can re-add it any time from this panel.'))return;
  try{const out=await api('/admin/connectors/delete',{method:'POST',body:{source}});
-  if(out&&out.status==='error')toast(source+': '+(out.message||'delete failed'),'bad');else toast(source+' removed','good')}
+  if(out&&out.status==='error')toast(source+': '+(out.message||'delete failed'),'bad');else toast(source+' removed · Re-add it any time from its card','good')}
+ catch(e){toast(e.message,'bad')}
+ finally{try{await loadConnectors()}catch(e){}}}
+
+// T143 — restore a removed source: POST /admin/connectors/add re-enables it and
+// its documents re-enter answers. One reload recomputes tiles / galaxy / counts.
+async function readdConnector(source){try{const out=await api('/admin/connectors/add',{method:'POST',body:{source}});
+  if(out&&out.status==='error')toast(source+': '+(out.message||'re-add failed'),'bad');else toast(source+' re-added · its answers are back','good')}
  catch(e){toast(e.message,'bad')}
  finally{try{await loadConnectors()}catch(e){}}}
 
@@ -115,7 +136,9 @@ function addToBatch(){const filename=$('#upload-filename').value.trim(),text=$('
 // multi-format intake the connectors use (PDF/DOCX/XLSX/images/MD/CSV/…).
 function readFileB64(file){return new Promise((resolve,reject)=>{const r=new FileReader();
  r.onload=()=>resolve(String(r.result).split(',',2)[1]||'');r.onerror=()=>reject(r.error||new Error('read failed'));r.readAsDataURL(file)})}
-async function addFilesToBatch(files){const acl=[$('#upload-file-acl').value];let added=0;
+// addFilesToBatch stages files for the "Upload batch" flow. An optional acl array
+// overrides the Bulk-upload ACL select, so the T144 drop zone can pass its own.
+async function addFilesToBatch(files,aclOverride){const acl=aclOverride||[$('#upload-file-acl').value];let added=0;
  for(const file of files){try{const content_b64=await readFileB64(file);BATCH.push({filename:file.name,content_b64,acl});added++}
   catch(e){toast('Could not read '+file.name+': '+e.message,'bad')}}
  if(added){renderBatch();toast(added+' file(s) staged — press "Upload batch" to ingest','good')}}
@@ -123,31 +146,57 @@ async function addFilesToBatch(files){const acl=[$('#upload-file-acl').value];le
 // parses each file (JSZip + KFUpload, no network), then stamps the REAL counts the
 // upload produced onto the stages that yield them (convert→documents, chunk/embed→
 // passages, extract→tables), so the visitor watches a genuine measurement, not a mock.
+// T144 — boxId lets a second surface (the Sources drop zone) show its own strip.
 const STAGE_LABEL={detect:'detect',convert:'convert',chunk:'chunk',extract:'extract',graph:'graph',embed:'embed',health:'health'};
-function paintUploadStages(active,counts){const box=$('#upload-stages');if(!box)return;box.hidden=false;
+function paintUploadStages(active,counts,boxId){const box=$('#'+(boxId||'upload-stages'));if(!box)return;box.hidden=false;
  const cnt=counts?{convert:counts.documents,chunk:counts.passages,extract:counts.tables,graph:counts.images,embed:counts.passages,health:counts.documents}:{};
  box.innerHTML=PIPELINE.map((n,i)=>{const st=i<active?'ok':(i===active?'running':'pending');
   const c=(st==='ok'&&cnt[n]!=null&&cnt[n]!=='')?(' · '+num(cnt[n])):'';
   return '<span class="stage '+st+'">'+esc(STAGE_LABEL[n])+c+'</span>'}).join('')}
-async function upload(){let files=BATCH.slice();const raw=$('#upload-json').value.trim();
- if(raw){try{const arr=JSON.parse(raw);if(!Array.isArray(arr))throw new Error('JSON must be an array');files=files.concat(arr)}catch(e){toast('Invalid JSON: '+e.message,'bad');return}}
- if(!files.length){toast('Nothing to upload — add files to the batch first','warn');return}
- $('#upload-btn').disabled=true;$('#upload-status').textContent='parsing '+files.length+' file(s) in your browser…';
- paintUploadStages(0,null);let step=0;const tick=setInterval(()=>{step=Math.min(PIPELINE.length-1,step+1);paintUploadStages(step,null)},110);
+// T144 — the shared upload core: parse+POST a list of {filename,content_b64|text,acl}
+// files, animate a stage strip, update a status line, refresh the dependent panels.
+// Both the Bulk-upload batch and the Sources drop zone call it (different box ids).
+async function doUpload(files,opts){opts=opts||{};const stagesId=opts.stagesId||'upload-stages',statusId=opts.statusId||'upload-status';
+ const setStatus=t=>{const el=$('#'+statusId);if(el)el.textContent=t};
+ setStatus('parsing '+files.length+' file(s) in your browser…');
+ paintUploadStages(0,null,stagesId);let step=0;const tick=setInterval(()=>{step=Math.min(PIPELINE.length-1,step+1);paintUploadStages(step,null,stagesId)},110);
  FORCE=4;schedulePoll();
  try{const out=await api('/admin/upload',{method:'POST',body:{files}});clearInterval(tick);
   const counts={documents:(out.documents||[]).length,passages:out.passages_added||0,tables:out.tables_added||0,images:out.images_added||0};
-  paintUploadStages(PIPELINE.length,counts);
+  paintUploadStages(PIPELINE.length,counts,stagesId);
   const dup=(out.duplicates||[]).length;
   const parts=['added '+out.uploaded+' doc'+(out.uploaded===1?'':'s'),'+'+num(counts.passages)+' passages'];
   if(counts.tables)parts.push('+'+num(counts.tables)+' tables');
   if(counts.images)parts.push('+'+num(counts.images)+' images');
   if(dup)parts.push(dup+' already in the fabric');
-  $('#upload-status').textContent=parts.join(' · ')+' · run '+out.run_id;
+  setStatus(parts.join(' · ')+' · run '+out.run_id);
   toast(out.uploaded?('Indexed '+out.uploaded+' document'+(out.uploaded===1?'':'s')+' — ask about '+(out.uploaded===1?'it':'them')+' now'):(dup?'Already in the fabric — nothing added':'Upload done'),out.uploaded?'good':'warn');
-  BATCH=[];renderBatch();$('#upload-json').value='';await Promise.all([loadRuns(),loadAudit(),refreshUploads()])}
- catch(e){clearInterval(tick);$('#upload-stages').hidden=true;$('#upload-status').textContent=e.message;toast(e.message,'bad')}
+  await Promise.all([loadRuns(),loadAudit(),refreshUploads()]);return out}
+ catch(e){clearInterval(tick);const box=$('#'+stagesId);if(box)box.hidden=true;setStatus(e.message);toast(e.message,'bad');throw e}}
+async function upload(){let files=BATCH.slice();const raw=$('#upload-json').value.trim();
+ if(raw){try{const arr=JSON.parse(raw);if(!Array.isArray(arr))throw new Error('JSON must be an array');files=files.concat(arr)}catch(e){toast('Invalid JSON: '+e.message,'bad');return}}
+ if(!files.length){toast('Nothing to upload — add files to the batch first','warn');return}
+ $('#upload-btn').disabled=true;
+ try{await doUpload(files,{stagesId:'upload-stages',statusId:'upload-status'});BATCH=[];renderBatch();$('#upload-json').value=''}
+ catch(e){}
  finally{$('#upload-btn').disabled=false}}
+// T144 — the Sources drop zone: read dropped/chosen files to base64 with the drop
+// zone's own ACL and ingest them at once through the same intake, showing the
+// per-file stage strip beside the zone. Empty (e.g. a folder drag) is a no-op.
+async function dropZoneUpload(fileList,aclSel){const acl=[(($('#'+aclSel)||{}).value)||'public'];const files=[];
+ for(const f of (fileList||[])){try{files.push({filename:f.name,content_b64:await readFileB64(f),acl})}catch(e){toast('Could not read '+f.name+': '+e.message,'bad')}}
+ if(!files.length)return;
+ await doUpload(files,{stagesId:'dz-stages',statusId:'dz-status'}).catch(()=>{})}
+// T144 — wire one drop zone: click opens the picker; drag-drop and pick both parse
+// and upload immediately. `accept` on the input keeps the picker to the supported
+// formats; a PDF is accepted and stored (extracted at the next build).
+function wireDropzone(zoneId,inputId,aclSel){const zone=$('#'+zoneId),input=$('#'+inputId);if(!zone||!input)return;
+ const go=fl=>dropZoneUpload(fl,aclSel);
+ zone.addEventListener('click',e=>{const t=e.target.tagName;if(t!=='SELECT'&&t!=='OPTION')input.click()});
+ input.addEventListener('change',e=>{go(e.target.files);e.target.value=''});
+ ['dragenter','dragover'].forEach(ev=>zone.addEventListener(ev,e=>{e.preventDefault();zone.classList.add('drag')}));
+ ['dragleave','dragend'].forEach(ev=>zone.addEventListener(ev,e=>{e.preventDefault();zone.classList.remove('drag')}));
+ zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('drag');go(e.dataTransfer&&e.dataTransfer.files)})}
 // T131 — the documents already in the Files source, each with a Delete that
 // removes it (on the static demo the delete also fires the repo-commit workflow,
 // so the file leaves the repository too). Absent endpoint → the list stays empty.
@@ -348,6 +397,7 @@ KF.initBar({preferRole:'admin'});
 $('#connectors-refresh').onclick=loadAll;$('#run-due-btn').onclick=runDue;
 $('#upload-add').onclick=addToBatch;$('#upload-btn').onclick=upload;$('#delete-btn').onclick=bulkDelete;
 $('#upload-files').onchange=e=>{addFilesToBatch(Array.from(e.target.files||[]));e.target.value=''};
+wireDropzone('admin-dz','admin-dz-files','admin-dz-acl');  // T144 — Sources drop zone
 $('#budget-btn').onclick=setBudget;$('#authority-btn').onclick=setAuthority;$('#audit-refresh').onclick=loadAudit;$('#doctor-btn').onclick=doctor;$('#models-refresh').onclick=loadModels;$('#models-days').onchange=loadModels;
 $('#add-user-btn').onclick=addUser;
 $('#roi-save').onclick=saveSettings;
