@@ -242,7 +242,9 @@ function render(){
  }
  if(TAB==="Models"){
   h+=`<div class="grid cards">
+   <div class="card"><h3>Model distribution (which model answered)</h3>${donut(d.models_used)}</div>
    <div class="card"><h3>Routing by level (look-up → reason)</h3>${bars(d.routing_by_level)}</div>
+   <div class="card"><h3>Complexity mix (simple → complex)</h3>${bars(d.routing_by_complexity)}</div>
    <div class="card"><h3>Routing by tier</h3>${bars(d.routing_by_tier)}</div>
    <div class="card"><h3>Why routed — reason codes (complexity classification)</h3>${bars(d.routing_reasons)}</div>
    <div class="card"><h3>By language</h3>${donut(d.by_language)}</div>
@@ -251,10 +253,16 @@ function render(){
  if(TAB==="Usage"){
   const ur=Object.entries(d.per_user||{}).map(([k,v])=>`<tr><td>${k}</td><td>${fmt(v.answers)}</td><td>${fmt(v.tokens)}</td><td class="mono">${money(v.cost)}</td></tr>`).join('');
   const rr=Object.entries(d.per_role||{}).map(([k,v])=>`<tr><td><span class="pill" style="background:var(--panel)">${k}</span></td><td>${fmt(v.answers)}</td><td class="mono">${money(v.cost)}</td></tr>`).join('');
-  h+=`<div class="grid cards">
+  const spendByUser={},qByUser={};
+  Object.entries(d.per_user||{}).forEach(([k,v])=>{spendByUser[k]=v.cost||0;qByUser[k]=v.answers||0;});
+  h+=`<div class="grid kpis">${tileD('Total questions answered',fmt(d.answers),'answers')}</div>
+  <div class="grid cards" style="margin-top:14px">
    <div class="card"><h3>Per user</h3><table><tr><th>User</th><th>Answers</th><th>Tokens</th><th>Cost</th></tr>${ur||'<tr><td colspan=4 style=color:var(--mut)>no data</td></tr>'}</table></div>
    <div class="card"><h3>Per role</h3><table><tr><th>Role</th><th>Answers</th><th>Cost</th></tr>${rr||'<tr><td colspan=3 style=color:var(--mut)>no data</td></tr>'}</table></div>
+   <div class="card"><h3>Questions by user</h3>${bars(qByUser)}</div>
+   <div class="card"><h3>Spend by user</h3>${bars(spendByUser,money)}</div>
    <div class="card"><h3>Answers over ${d.window}</h3>${line(d.timeseries,'answers','#3ecf8e')}</div>
+   <div class="card"><h3>Latency (avg ms) over ${d.window}</h3>${line(d.timeseries,'latency_ms','#e8a23a')}</div>
    <div class="card"><h3>Tokens out over ${d.window}</h3>${line(d.timeseries,'tokens_out','#c77dff')}</div>
   </div>`;
  }
