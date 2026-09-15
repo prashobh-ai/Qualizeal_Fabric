@@ -221,18 +221,71 @@ async function bulkDelete(){const ids=$('#delete-ids').value.split(/[\s,]+/).map
 // ---------------------------------------------------------------- budget / users / authority / audit / doctor
 async function setBudget(){try{const out=await api('/admin/budget',{method:'POST',body:{cap:+$('#budget-cap').value}});
  $('#budget-spent').textContent=KF.money(out.spent);$('#budget-note').textContent='cap $'+Number(out.cap).toFixed(2)+' for '+out.tenant;toast('Budget cap set to $'+out.cap,'good')}catch(e){toast(e.message,'bad')}}
-function renderUsers(users){
- $('#users-rows').innerHTML=(users||[]).map(u=>'<tr><td><b>'+esc(u.subject)+'</b></td><td class="small">'+(u.designation?esc(u.designation):'<span class="muted">—</span>')+'</td><td>'+(u.roles||[]).map(r=>'<span class="pill '+({admin:'violet',curator:'info',asker:'good',agent:'warn'}[r]||'')+'">'+esc(r)+'</span>').join(' ')+'</td><td class="mono">'+esc((u.scopes||[]).join(', '))+'</td><td>'+(u.subject==='admin'?'':'<button class="btn sm danger del-user" data-s="'+esc(u.subject)+'">Remove</button>')+'</td></tr>').join('')||'<tr><td colspan="5" class="empty">no users</td></tr>';
- KF.$$('#users-rows .del-user').forEach(b=>b.onclick=()=>delUser(b.dataset.s))}
+let USERS=[];
+const ROLE_CLS={admin:'violet',curator:'info',asker:'good',agent:'warn'};
+function renderUsers(users){USERS=users||[];
+ $('#users-rows').innerHTML=USERS.map(u=>{const off=u.status==='disabled';
+  return '<tr'+(off?' class="muted"':'')+'><td><b>'+esc(u.subject)+'</b>'+(u.department||u.team?'<div class="muted small">'+esc([u.department,u.team].filter(Boolean).join(' · '))+'</div>':'')+'</td>'+
+   '<td class="small">'+(u.designation?esc(u.designation):'<span class="muted">—</span>')+'</td>'+
+   '<td>'+(u.roles||[]).map(r=>'<span class="pill '+(ROLE_CLS[r]||'')+'">'+esc(r)+'</span>').join(' ')+'</td>'+
+   '<td class="mono small">'+esc((u.scopes||[]).join(', '))+'</td>'+
+   '<td class="small">'+esc(u.email||'')+'</td>'+
+   '<td>'+(off?'<span class="pill">disabled</span>':'<span class="pill good">active</span>')+'</td>'+
+   '<td>'+(u.subject==='admin'?'<span class="muted small">—</span>':
+     '<button class="btn sm edit-user" data-s="'+esc(u.subject)+'">Edit</button> '+
+     '<button class="btn sm '+(off?'':'')+' toggle-user" data-s="'+esc(u.subject)+'" data-a="'+(off?'enable':'disable')+'">'+(off?'Enable':'Disable')+'</button> '+
+     '<button class="btn sm reset-user" data-s="'+esc(u.subject)+'">Reset budget</button> '+
+     '<button class="btn sm danger del-user" data-s="'+esc(u.subject)+'">Remove</button>')+'</td></tr>'}).join('')||'<tr><td colspan="7" class="empty">no users</td></tr>';
+ KF.$$('#users-rows .del-user').forEach(b=>b.onclick=()=>delUser(b.dataset.s));
+ KF.$$('#users-rows .toggle-user').forEach(b=>b.onclick=()=>userAction(b.dataset.s,b.dataset.a));
+ KF.$$('#users-rows .reset-user').forEach(b=>b.onclick=()=>userAction(b.dataset.s,'reset_budget'));
+ KF.$$('#users-rows .edit-user').forEach(b=>b.onclick=()=>editUser(b.dataset.s));
+ renderAccessMatrix(USERS)}
+// The access matrix: how many users hold each role × scope.
+function renderAccessMatrix(users){const scopes=['public','restricted'];const roles=['asker','curator','admin','agent'];
+ const cell={};roles.forEach(r=>{cell[r]={};scopes.forEach(s=>cell[r][s]=0)});
+ (users||[]).forEach(u=>(u.roles||[]).forEach(r=>{if(cell[r])(u.scopes||[]).forEach(s=>{if(cell[r][s]!=null)cell[r][s]++})}));
+ $('#access-matrix').innerHTML='<thead><tr><th>Role</th>'+scopes.map(s=>'<th>'+esc(s)+'</th>').join('')+'</tr></thead><tbody>'+
+  roles.map(r=>'<tr><td><span class="pill '+(ROLE_CLS[r]||'')+'">'+esc(r)+'</span></td>'+scopes.map(s=>'<td class="mono">'+cell[r][s]+'</td>').join('')+'</tr>').join('')+'</tbody>'}
 async function loadUsers(){try{const d=await api('/admin/users');renderUsers(d.users)}catch(e){}}
-async function addUser(){const subject=$('#nu-subject').value.trim();if(!subject){toast('Enter a user id','warn');return}
- const role=$('#nu-role').value;const scopes=($('#nu-restricted').checked||role!=='asker')?['public','restricted']:['public'];
- const designation=$('#nu-designation').value.trim();
- try{const d=await api('/admin/users',{method:'POST',body:{subject,roles:[role],scopes,designation}});renderUsers(d.users);
-  $('#nu-subject').value='';$('#nu-designation').value='';toast('Added '+subject,'good');loadAudit()}catch(e){toast(e.message,'bad')}}
+function userBody(){const subject=$('#nu-subject').value.trim();const role=$('#nu-role').value;
+ const scopes=($('#nu-restricted').checked||role!=='asker')?['public','restricted']:['public'];
+ const cap=$('#nu-cap').value;
+ return {subject,roles:[role],scopes,designation:$('#nu-designation').value,email:$('#nu-email').value.trim(),
+  department:$('#nu-department').value.trim(),team:$('#nu-team').value.trim(),daily_cap:cap===''?null:Number(cap)};}
+function clearUserForm(){['nu-subject','nu-email','nu-department','nu-team','nu-cap'].forEach(id=>$('#'+id).value='');
+ $('#nu-designation').value='';$('#nu-role').value='asker';$('#nu-restricted').checked=false}
+async function addUser(){const b=userBody();if(!b.subject){toast('Enter a user id','warn');return}
+ try{const d=await api('/admin/users',{method:'POST',body:b});renderUsers(d.users);
+  clearUserForm();toast('Saved '+b.subject,'good');loadAudit()}catch(e){toast(e.message,'bad')}}
+function editUser(subject){const u=USERS.find(x=>x.subject===subject);if(!u)return;
+ $('#nu-subject').value=u.subject;$('#nu-email').value=u.email||'';$('#nu-role').value=(u.roles||['asker'])[0];
+ $('#nu-designation').value=u.designation||'';$('#nu-department').value=u.department||'';$('#nu-team').value=u.team||'';
+ $('#nu-cap').value=u.daily_cap!=null?u.daily_cap:'';$('#nu-restricted').checked=(u.scopes||[]).indexOf('restricted')>=0;
+ $('#nu-subject').focus();toast('Editing '+subject+' — Save to apply','info')}
+async function userAction(subject,action){
+ try{const d=await api('/admin/users',{method:'POST',body:{subject,action}});renderUsers(d.users);
+  toast(subject+' · '+action.replace('_',' '),'good');loadAudit()}catch(e){toast(e.message,'bad')}}
 async function delUser(subject){if(!confirm('Remove user '+subject+'?'))return;
  try{const d=await api('/admin/users',{method:'POST',body:{subject,action:'delete'}});renderUsers(d.users);
   toast('Removed '+subject,'good');loadAudit()}catch(e){toast(e.message,'bad')}}
+// CSV import: subject,designation,role,email,department,team,daily_cap — validated preview, then upsert each.
+let CSV_ROWS=[];
+const CSV_ROLES=['asker','curator','admin','agent'];
+function parseUserCsv(text){const out=[];(text||'').split(/\r?\n/).forEach(line=>{line=line.trim();if(!line)return;
+  const c=line.split(',').map(s=>s.trim());const subject=c[0]||'';const designation=c[1]||'';const role=(c[2]||'asker').toLowerCase();
+  const errs=[];if(!subject)errs.push('missing id');if(CSV_ROLES.indexOf(role)<0)errs.push('bad role');
+  out.push({subject,designation,role,email:c[3]||'',department:c[4]||'',team:c[5]||'',daily_cap:c[6]?Number(c[6]):null,errs})});
+ return out}
+function previewCsv(){CSV_ROWS=parseUserCsv($('#nu-csv').value);const ok=CSV_ROWS.filter(r=>!r.errs.length).length;
+ $('#nu-csv-rows').innerHTML=CSV_ROWS.length?'<div class="tablewrap" style="margin-top:6px"><table><thead><tr><th>Subject</th><th>Designation</th><th>Role</th><th>Valid</th></tr></thead><tbody>'+
+  CSV_ROWS.map(r=>'<tr><td>'+esc(r.subject||'—')+'</td><td class="small">'+esc(r.designation||'')+'</td><td class="small">'+esc(r.role)+'</td><td>'+(r.errs.length?'<span class="pill bad">'+esc(r.errs.join(', '))+'</span>':'<span class="pill good">ok</span>')+'</td></tr>').join('')+'</tbody></table></div>':'<div class="muted small">nothing to import</div>';
+ $('#nu-csv-status').textContent=ok+' of '+CSV_ROWS.length+' valid';$('#nu-csv-import').disabled=!ok}
+async function importCsv(){const good=CSV_ROWS.filter(r=>!r.errs.length);if(!good.length)return;
+ $('#nu-csv-import').disabled=true;let d=null;
+ for(const r of good){const scopes=r.role!=='asker'?['public','restricted']:['public'];
+  try{d=await api('/admin/users',{method:'POST',body:{subject:r.subject,roles:[r.role],scopes,designation:r.designation,email:r.email,department:r.department,team:r.team,daily_cap:r.daily_cap}})}catch(e){}}
+ if(d)renderUsers(d.users);toast('Imported '+good.length+' user(s)','good');$('#nu-csv').value='';$('#nu-csv-rows').innerHTML='';$('#nu-csv-status').textContent='';loadAudit()}
 async function loadAuthority(){try{const d=await api('/admin/authority');
  $('#authority-ranks').innerHTML=(d.ranks||[]).map(r=>'<span class="pill '+(r.rank===1?'good':'')+'" title="weight '+esc(r.weight)+'">'+esc(r.source)+' · rank '+esc(r.rank)+(r.overridden?' *':'')+'</span>').join('')}catch(e){}}
 async function setAuthority(){try{await api('/admin/authority',{method:'POST',body:{source:$('#authority-source').value,rank:+$('#authority-rank').value}});toast('Authority rank saved','good');await Promise.all([loadAuthority(),loadAudit()])}catch(e){toast(e.message,'bad')}}
@@ -422,6 +475,7 @@ $('#upload-files').onchange=e=>{addFilesToBatch(Array.from(e.target.files||[]));
 wireDropzone('admin-dz','admin-dz-files','admin-dz-acl');  // T144 — Sources drop zone
 $('#budget-btn').onclick=setBudget;$('#authority-btn').onclick=setAuthority;$('#audit-refresh').onclick=loadAudit;$('#doctor-btn').onclick=doctor;$('#models-refresh').onclick=loadModels;$('#models-days').onchange=loadModels;
 $('#add-user-btn').onclick=addUser;
+$('#nu-csv-preview').onclick=previewCsv;$('#nu-csv-import').onclick=importCsv;  // T160 — CSV import
 $('#roi-save').onclick=saveSettings;
 // T134 — a change anywhere (this tab or another) recomputes every panel live.
 if(KF.onChange)KF.onChange(()=>{if(KF.session)loadAll()});
