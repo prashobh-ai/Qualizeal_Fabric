@@ -290,7 +290,7 @@ _GOLDEN = card(
     "curator to load golden answers.</td></tr></tbody></table></div>"
     '<form id="golden-form" class="col" style="margin-top:10px">'
     '<input id="gold-q" placeholder="Question, e.g. what is our Knowledge Fabric" '
-    'required>'
+    "required>"
     '<textarea id="gold-a" placeholder="The verified answer readers should get." '
     "required></textarea>"
     '<div class="row"><input id="gold-cites" placeholder="citations '
