@@ -103,6 +103,15 @@ async function run() {
   const usage = await req("GET", "/api/usage");
   out.usage_saved_7d = (((usage.windows || {})["7d"]) || {}).cost_saved || 0;
 
+  // A live count ("facts") answer must NEVER be cached — it has to recompute so it
+  // reflects the current corpus. Ask one twice; the second must not be a cache hit.
+  const F = "how many repositories are there";
+  const f1 = await req("POST", "/ask", { question: F });
+  const f2 = await req("POST", "/ask", { question: F });
+  out.facts_level = (f1.why && f1.why.level_name) || "";
+  out.facts_second_cache_hit = !!f2.cache_hit;
+  out.facts_second_level = (f2.why && f2.why.level_name) || "";
+
   // toggle a source off → fingerprint changes → the next ask must miss the cache.
   await req("POST", "/admin/connectors", { source: "github", enabled: false });
   const a3 = await req("POST", "/ask", { question: Q });

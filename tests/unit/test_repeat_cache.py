@@ -77,6 +77,13 @@ class TestRepeatCache(unittest.TestCase):
         # after github is switched off the fingerprint changes → no longer a hit.
         self.assertFalse(self.r["after_toggle_cache_hit"])
 
+    def test_live_count_answers_are_never_cached(self):
+        # a facts/count answer must recompute (it reflects the current corpus), so a
+        # repeat is NOT a cache hit and keeps its facts level — never level "cache".
+        self.assertEqual(self.r["facts_level"], "facts")
+        self.assertFalse(self.r["facts_second_cache_hit"])
+        self.assertEqual(self.r["facts_second_level"], "facts")
+
 
 if __name__ == "__main__":
     unittest.main()

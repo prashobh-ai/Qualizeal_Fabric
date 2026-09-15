@@ -1340,14 +1340,27 @@
       .map(function (c) { return (c.source || "").toLowerCase(); })
       .sort()
       .join(",");
-    return on + "|" + selectedProvider();
+    // Fold in the per-visitor document state too — a deactivated doc or a fresh
+    // upload changes what retrieval sees, so a cached answer must not survive it.
+    var docsOff = Object.keys(deactivatedDocs()).sort().join(",");
+    var nUp = loadUploads().length;
+    return on + "|" + selectedProvider() + "|" + docsOff + "|u" + nUp;
   }
   var QCACHE = {};
   function qcacheKey(rq) { return norm(rq) + "||" + activeFingerprint(); }
+  // A live count/inventory ("facts") answer must NEVER be cached: its whole value is
+  // that it reflects the current corpus (it changes as sources/docs are added or
+  // removed), so it always recomputes. Clarifies, gaps and cache hits are not stored.
+  function cacheable(a) {
+    if (!a || a.kind !== "answer" || a.cache_hit) return false;
+    var lv = (a.why && a.why.level_name) || "";
+    if (lv === "facts") return false;
+    return true;
+  }
   // Store the finalized answer plus the tokens it spent, so a later hit can book
-  // the top-tier cost it avoided. Clarifies, gaps and cache hits are never stored.
+  // the top-tier cost it avoided.
   function qcachePut(rq, a) {
-    if (!a || a.kind !== "answer" || a.cache_hit) return;
+    if (!cacheable(a)) return;
     QCACHE[qcacheKey(rq)] = { answer: clone(a), tin: a.tokens_in || 0, tout: a.tokens_out || 0 };
   }
   function qcacheGet(rq) {
