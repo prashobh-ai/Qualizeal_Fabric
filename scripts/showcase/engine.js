@@ -2044,6 +2044,69 @@
   }
 
   // ---- GET dispatch -----------------------------------------------------
+  // T159 — the Curator's curation-mode switch, review-queue decisions and the
+  // known-question registry are REAL, persisted-per-visitor mutations (like the
+  // connectors), not no-op acks. The four GETs are baked; these overlays apply the
+  // visitor's changes on top so the panels reflect them on the next load.
+  function curationOverlay() {
+    try { return JSON.parse(localStorage.getItem("kf.curation") || "{}") || {}; } catch (e) { return {}; }
+  }
+  function saveCurationOverlay(st) { try { localStorage.setItem("kf.curation", JSON.stringify(st)); } catch (e) {} }
+  function registryOverlay() {
+    try { return JSON.parse(localStorage.getItem("kf.registry") || "{}") || {}; } catch (e) { return {}; }
+  }
+  function saveRegistryOverlay(st) { try { localStorage.setItem("kf.registry", JSON.stringify(st)); } catch (e) {} }
+  function mergeCurationModes(baked) {
+    var out = clone(baked || {}), ov = curationOverlay().modes || {};
+    out.sources = out.sources || {};
+    Object.keys(ov).forEach(function (s) {
+      if (s === "*" || s === "default") out.default = ov[s];
+      else out.sources[s] = ov[s];
+    });
+    return out;
+  }
+  function mergeReview(baked) {
+    var out = clone(baked || {}), decided = curationOverlay().decided || {};
+    out.items = (out.items || []).filter(function (it) { return !decided[it.review_id]; });
+    return out;
+  }
+  function mergeRegistry(baked) {
+    var out = clone(baked || {}), ov = registryOverlay(), toggles = ov.toggles || {}, ups = ov.upserts || {};
+    function withOverlay(e) {
+      var c = ups[e.id] ? clone(ups[e.id]) : clone(e);
+      if (toggles[c.id] !== undefined) c.enabled = toggles[c.id];
+      return c;
+    }
+    var entries = (out.entries || []).map(withOverlay), have = {};
+    entries.forEach(function (e) { have[e.id] = 1; });
+    Object.keys(ups).forEach(function (id) { if (!have[id]) entries.push(withOverlay(ups[id])); });
+    out.entries = entries;
+    return out;
+  }
+  function setCurationMode(source, mode) {
+    var st = curationOverlay(); st.modes = st.modes || {};
+    st.modes[source === "*" || source === "default" ? "*" : source] = mode;
+    saveCurationOverlay(st);
+    return { ok: true, source: source, mode: mode };
+  }
+  function decideReview(reviewId, action) {
+    var st = curationOverlay(); st.decided = st.decided || {};
+    st.decided[reviewId] = action; saveCurationOverlay(st);
+    return { ok: true, review_id: reviewId, action: action };
+  }
+  function mutateRegistry(body) {
+    var st = registryOverlay(); st.toggles = st.toggles || {}; st.upserts = st.upserts || {};
+    var act = body.action || "";
+    if (act === "upsert" && body.entry && body.entry.id) {
+      var e = clone(body.entry); if (e.enabled === undefined) e.enabled = true;
+      st.upserts[e.id] = e; saveRegistryOverlay(st); return { ok: true, entry: e };
+    }
+    if ((act === "enable" || act === "disable") && body.id) {
+      st.toggles[body.id] = act === "enable"; saveRegistryOverlay(st);
+      return { ok: true, id: body.id, enabled: act === "enable" };
+    }
+    return { ok: true };
+  }
   function pickGet(subject, path, q) {
     var bucket = bucketOf(subject);
     var map = STATE.get[bucket] || {};
@@ -2196,6 +2259,28 @@
         evAppend("curation", { action: "delete-document", document_id: du.document_id || "", actor: subject });
         return respond(du);
       }
+      // T159 — the Curator's three mutations REALLY persist per visitor (not a
+      // no-op ack): the curation-mode switch, a review-queue accept/reject, and the
+      // known-question registry enable/disable/upsert. Each mutates the overlay the
+      // matching GET reads, so the panel reflects it on reload, and ledgers an event.
+      if (path === "/curator/curation-mode") {
+        var cmr = setCurationMode((body || {}).source || "*", (body || {}).mode || "automated");
+        evAppend("curation", { action: "curation-mode", document_id: (body || {}).source || "",
+          reason: (body || {}).mode || "", actor: subject, mode: (body || {}).mode || "" });
+        return respond(cmr);
+      }
+      if (path === "/curator/review-decision") {
+        var rvr = decideReview((body || {}).review_id || "", (body || {}).action || "");
+        evAppend("curation", { action: "review-" + ((body || {}).action || ""),
+          document_id: (body || {}).review_id || "", actor: subject });
+        return respond(rvr);
+      }
+      if (path === "/curator/registry") {
+        var rgr = mutateRegistry(body || {});
+        evAppend("curation", { action: "registry-" + ((body || {}).action || ""),
+          document_id: rgr.id || (rgr.entry && rgr.entry.id) || "", actor: subject });
+        return respond(rgr);
+      }
       // bulk-delete / budget / authority — demo success
       return respond({ ok: true, note: "showcase — action acknowledged (no server-side state on Pages)" });
     }
@@ -2262,6 +2347,10 @@
     if (path === "/curator/quality") { var qy = pickGet(subject, path, q); if (qy !== undefined) return respond(mergeQuality(qy)); }
     if (path === "/curator/gaps") { var gp = pickGet(subject, path, q); if (gp !== undefined) return respond(mergeGaps(gp)); }
     if (path === "/curator/timeline") { var tl = pickGet(subject, path, q); if (tl !== undefined) return respond(mergeTimeline(tl)); }
+    // T159 — overlay the visitor's persisted curator mutations onto the baked GETs.
+    if (path === "/curator/curation-modes") { var cm = pickGet(subject, path, q); if (cm !== undefined) return respond(mergeCurationModes(cm)); }
+    if (path === "/curator/review") { var rvw = pickGet(subject, path, q); if (rvw !== undefined) return respond(mergeReview(rvw)); }
+    if (path === "/curator/registry") { var reg = pickGet(subject, path, q); if (reg !== undefined) return respond(mergeRegistry(reg)); }
     if (path === "/admin/settings") return respond(effectiveSettings());  // T133 — live ROI knobs
     var data = pickGet(subject, path, q);
     if (data !== undefined) return respond(data);
