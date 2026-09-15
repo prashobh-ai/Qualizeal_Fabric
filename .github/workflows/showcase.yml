@@ -40,6 +40,16 @@ jobs:
       KF_FABRIC_ROOT: ${{ github.workspace }}/fabric-data
       KF_DATA_ROOT: ${{ github.workspace }}/fabric-data/data
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # T148 — source secrets for the (optional) build-time preflight + ingest. When
+      # none is set the ingest steps skip entirely and the stdlib-only demo build is
+      # unchanged; when set, they fill the Repositories / Jira / Confluence tiles.
+      KF_GITHUB_TOKEN: ${{ secrets.KF_GITHUB_TOKEN }}
+      JIRA_URL: ${{ secrets.JIRA_URL }}
+      JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+      JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+      CONFLUENCE_URL: ${{ secrets.CONFLUENCE_URL }}
+      CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+      CONFLUENCE_TOKEN: ${{ secrets.CONFLUENCE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -80,6 +90,27 @@ jobs:
               echo "⚠️ Provider check failed — showcase built extractively from baked data so the demo stays live. Rotate \`ANTHROPIC_API_KEY\` in Actions → Secrets to restore real-model baking."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      # T148 — build-time source preflight + ingest. Both are SECRET-GATED (they run
+      # only when a source secret is present) and NON-FATAL, so with no secrets the
+      # fast, stdlib-only demo build is unchanged and always ships. When a secret is
+      # set, preflight_sources writes data/preflight.json (surfaced onto the Admin
+      # Sources cards) and ingest fills the Repositories / Jira / Confluence facts.
+      # A 403 (GitHub org not approved) is recorded on the card — an org-admin action,
+      # not a code one — and never fails the deploy.
+      - name: Preflight the live sources (T124a)
+        id: preflight
+        if: env.KF_GITHUB_TOKEN != '' || env.JIRA_URL != '' || env.CONFLUENCE_URL != ''
+        continue-on-error: true
+        run: |
+          python -m pip install -e ".[connectors]" >/dev/null 2>&1 || python -m pip install -e . >/dev/null 2>&1 || true
+          python scripts/preflight_sources.py
+      - name: Ingest the live sources for the showcase (T121)
+        if: env.KF_GITHUB_TOKEN != '' || env.JIRA_URL != '' || env.CONFLUENCE_URL != ''
+        continue-on-error: true
+        run: |
+          python -m pip install -e ".[connectors,documents]" >/dev/null 2>&1 || python -m pip install -e . >/dev/null 2>&1 || true
+          python scripts/ingest.py --all || true
 
       - name: Build the interactive showcase (seed + bake + emit surfaces)
         # Model mode is chosen by the provider check above: the real model when

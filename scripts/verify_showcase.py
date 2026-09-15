@@ -58,6 +58,46 @@ def _authentic_corpus_errors(snap: dict) -> list[str]:
     return errs
 
 
+def _provider_bake_errors(d: str, snap: dict) -> list[str]:
+    """T147 — a provider the manifest marks AVAILABLE must have a baked answer set on
+    disk (answers/<provider>/*.json). A provider that was not baked this build
+    (available:false) is expected to be empty — the demo ships without it, so it is
+    never an error. This is the honest interpretation of "fails if the set is empty
+    when the key is present": it bites only when the provider actually verified."""
+    errs: list[str] = []
+    for p in (snap.get("providers") or {}).get("providers") or []:
+        if not p.get("available"):
+            continue
+        pdir = os.path.join(d, "answers", p.get("key", ""))
+        n = len([x for x in os.listdir(pdir)] if os.path.isdir(pdir) else [])
+        if n == 0:
+            errs.append(
+                f"provider {p.get('key')!r} is available but its answer set is empty (T147)"
+            )
+    return errs
+
+
+def _source_ingest_errors(snap: dict) -> list[str]:
+    """T148 — a source whose build-time preflight VERIFIED (ok, not skipped) must have
+    produced its facts. A skipped source (no secret) or a failed one (e.g. 403 org
+    approval pending) is recorded on the card and never fails the deploy — that is an
+    account/org action, not a code one."""
+    errs: list[str] = []
+    pf = snap.get("preflight") or {}
+    if pf.get("absent"):
+        return errs
+    facts = snap.get("facts") or {}
+    for r in pf.get("results") or []:
+        if r.get("skipped") or not r.get("ok"):
+            continue
+        key = (r.get("key") or "").lower()
+        if "github" in key and not (facts.get("repositories")):
+            errs.append(f"{key}: preflight verified but 0 repositories in facts (T148)")
+        if "jira" in key and not (facts.get("jira") or facts.get("jira_projects")):
+            errs.append(f"{key}: preflight verified but no Jira facts (T148)")
+    return errs
+
+
 def verify(directory: str) -> list[str]:
     errors: list[str] = []
     d = os.path.abspath(directory)
@@ -85,7 +125,11 @@ def verify(directory: str) -> list[str]:
             # model-free state.
             if not snap.get("provider_status"):
                 errors.append("snapshot.json has no provider_status (T147)")
+            if not snap.get("providers"):
+                errors.append("snapshot.json has no providers manifest (T147)")
             errors.extend(_authentic_corpus_errors(snap))
+            errors.extend(_provider_bake_errors(d, snap))
+            errors.extend(_source_ingest_errors(snap))
         except Exception as e:  # noqa: BLE001
             errors.append(f"snapshot.json is not valid JSON: {e}")
     for root, _dirs, names in os.walk(d):

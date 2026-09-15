@@ -878,6 +878,11 @@ def _bake(client, p=None) -> dict:
         # data/provider_status.json only on success; when it did not, reflect the real
         # build mode so the card never reads as model-free by accident.
         snap["provider_status"] = _provider_status_for_snapshot()
+        # T147 — the provider radio manifest (which providers are baked/available).
+        snap["providers"] = _providers_manifest(_current_provider_key())
+        # T148 — the build-time source preflight, so the Admin Sources cards show
+        # each source's honest state (verified · N / not configured / failed · 403).
+        snap["preflight"] = _preflight_for_snapshot()
         # The whole-fabric galaxy (Curator graph) needs curate scope.
         curator_tok = tokens.get("curator")
         if curator_tok:
@@ -1063,12 +1068,17 @@ def build(out_dir: str) -> None:
     # T44/T45 — baked answers from the fabric-data checkout ship as static
     # files: the engine fetches answers/<hash>.json before retrieving.
     baked = _copy_answers(out)
+    # T147 — also write the current provider's set under answers/<provider>/, so the
+    # provider radio can serve a per-provider baked answer (Claude/OpenAI light up
+    # here once a funded key runs the build in that mode).
+    prov_baked = _bake_provider_answers(snap, out)
 
     entries = ", ".join(sorted(os.listdir(out)))
+    _cur = (snap.get("providers") or {}).get("current")
     print(
         f"showcase built at {out}\n  {entries}\n"
         f"  answers={len(snap['answers'])} galaxies={len(snap['galaxy'])} bank={len(snap['bank'])} "
-        f"baked_files={baked}"
+        f"baked_files={baked} provider_baked={prov_baked} ({_cur})"
     )
 
 
@@ -1097,6 +1107,94 @@ def _provider_status_for_snapshot() -> dict:
         }
     st["mode"] = mode
     return st
+
+
+def _preflight_for_snapshot() -> dict:
+    """T148 — the build-time source preflight (data/preflight.json, written by
+    preflight_sources.py in the workflow). Absent when no source secret is set at
+    build — record an honest empty result so the Admin Sources cards can say
+    'not configured' rather than show nothing."""
+    from knowledge_fabric.adapters import model as _m
+
+    path = os.path.join(_m.data_root(), "preflight.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+            data.setdefault("absent", False)
+            return data
+    except (OSError, ValueError):
+        return {"results": [], "reachable": 0, "total": 0, "failed": [], "absent": True}
+
+
+# T147 — the three providers the demo can present. The build runs in ONE mode, so
+# it bakes the answer set for the CURRENT provider; the others are marked
+# unavailable with an honest reason. When a funded key (or OPENAI_API_KEY) runs the
+# build in that mode, its set is baked and the radio switches to it with no further
+# code. Model ids stay at the repo's pinned ceiling (T35).
+_PROVIDER_CARDS = {
+    "open-source": {
+        "label": "Open-source LLM · Extractive-NLG",
+        "dot": "#12B886",
+        "model": "extractive-core",
+    },
+    "anthropic": {"label": "Claude Sonnet 4.6", "dot": "#7048E8", "model": "claude-sonnet-4-6"},
+    "openai": {"label": "OpenAI gpt-4o-mini", "dot": "#0CA678", "model": "gpt-4o-mini"},
+}
+
+
+def _current_provider_key() -> str:
+    """Which provider this build actually ran as, from KF_MODEL_MODE."""
+    mode = (os.environ.get("KF_MODEL_MODE") or "").lower()
+    if mode == "anthropic":
+        return "anthropic"
+    if mode in ("openai", "hosted"):
+        return "openai"
+    return "open-source"  # extractive / oss / off / mock / auto-without-key
+
+
+def _providers_manifest(current_key: str) -> dict:
+    """The provider radio's data: the current (baked) provider is available; the
+    others carry the honest reason they were not baked this build."""
+    providers = []
+    for key, card in _PROVIDER_CARDS.items():
+        entry = {"key": key, "label": card["label"], "dot": card["dot"], "model": card["model"]}
+        if key == current_key:
+            entry["available"] = True
+        else:
+            entry["available"] = False
+            if key == "anthropic":
+                entry["reason"] = "Claude not baked — fund ANTHROPIC_API_KEY and re-run the build"
+            elif key == "openai":
+                entry["reason"] = "OpenAI not baked — set OPENAI_API_KEY and re-run the build"
+            else:
+                entry["reason"] = "not baked this build"
+        providers.append(entry)
+    return {"current": current_key, "providers": providers}
+
+
+def _bake_provider_answers(snap: dict, out: str) -> int:
+    """T147 — write the current provider's driven answers to answers/<provider>/<hash>.json,
+    so the engine can serve a per-provider baked set and the radio can switch. The set
+    is exactly this build's answers (real usage/cost carried on each). Returns the count."""
+    import hashlib
+
+    key = (snap.get("providers") or {}).get("current") or _current_provider_key()
+    dst = os.path.join(out, "answers", key)
+    os.makedirs(dst, exist_ok=True)
+    n = 0
+    for nq, a in (snap.get("answers") or {}).items():
+        h = hashlib.sha256(nq.encode("utf-8")).hexdigest()[:16]
+        rec = dict(a)
+        rec.setdefault("question", nq)
+        rec.setdefault(
+            "model", (a.get("model_name") or _PROVIDER_CARDS.get(key, {}).get("model") or "")
+        )
+        rec.setdefault("cost_usd", a.get("cost") or 0)
+        rec.setdefault("source", "bake:" + key)
+        with open(os.path.join(dst, h + ".json"), "w", encoding="utf-8") as fh:
+            json.dump(rec, fh, separators=(",", ":"), default=str)
+        n += 1
+    return n
 
 
 def _copy_answers(out: str) -> int:

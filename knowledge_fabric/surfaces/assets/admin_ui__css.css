@@ -11,6 +11,12 @@
 .dropzone .dz-msg{font-size:14px}
 .dropzone select,.dropzone button{cursor:pointer}
 .dropzone .stages{justify-content:center;margin-top:10px}
+/* T147 — provider radio (Open-source / Claude / OpenAI) */
+.provider-radio{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px}
+.provider-radio .prov{display:inline-flex;align-items:center;gap:6px}
+.provider-radio .prov .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.provider-radio .prov.on{border-color:var(--qz-blue);color:var(--qz-blue);font-weight:600}
+.provider-radio .prov[disabled]{opacity:.55;cursor:not-allowed}
 .conn-card h4{margin:0;font-size:15px;display:flex;align-items:center;gap:8px}
 .conn-card .hl{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:12px;margin:10px 0}
 .conn-card .hl span:nth-child(odd){color:var(--mut)}
