@@ -148,7 +148,8 @@
       provider: provider, model: a.model_name || "",
       tokens_in: a.tokens_in || 0, tokens_out: a.tokens_out || 0,
       cache_read: a.cache_read || 0, cost: a.cost || 0, cost_saved: a.cost_saved || 0,
-      latency_ms: a.latency_ms || a._ms || 0, trust: a.grounding_score || 0,
+      cache_hit: !!a.cache_hit, saved_bucket: a.saved_bucket || "", complexity: a.complexity || "",
+      lang: a.lang || "en", latency_ms: a.latency_ms || a._ms || 0, trust: a.grounding_score || 0,
       citations_n: (a.citations || []).length, sources: answerSources(a),
       path: a.tier === "agent" || a.reasoning ? "agent" : "fast",
       session_id: currentSessionId(), trace_id: a.trajectory_id || "", understood_as: a.understood_as || ""
@@ -1326,6 +1327,81 @@
     );
   }
 
+  // ---- T158: repeat cache + token cost saved -----------------------------
+  // A per-visitor answer cache keyed on (normalised question, active-source
+  // fingerprint). A repeat question within the SAME active set is served from the
+  // cache at Level 0, $0, as a cache hit — no retrieval, no model call. The
+  // fingerprint folds in every enabled source and the selected provider, so
+  // toggling or deleting a cited source changes the key and invalidates the entry.
+  function activeFingerprint() {
+    var off = disabledSources();
+    var on = connList()
+      .filter(function (c) { return !off[(c.source || "").toLowerCase()]; })
+      .map(function (c) { return (c.source || "").toLowerCase(); })
+      .sort()
+      .join(",");
+    // Fold in the per-visitor document state too — a deactivated doc or a fresh
+    // upload changes what retrieval sees, so a cached answer must not survive it.
+    var docsOff = Object.keys(deactivatedDocs()).sort().join(",");
+    var nUp = loadUploads().length;
+    return on + "|" + selectedProvider() + "|" + docsOff + "|u" + nUp;
+  }
+  var QCACHE = {};
+  function qcacheKey(rq) { return norm(rq) + "||" + activeFingerprint(); }
+  // A live count/inventory ("facts") answer must NEVER be cached: its whole value is
+  // that it reflects the current corpus (it changes as sources/docs are added or
+  // removed), so it always recomputes. Clarifies, gaps and cache hits are not stored.
+  function cacheable(a) {
+    if (!a || a.kind !== "answer" || a.cache_hit) return false;
+    var lv = (a.why && a.why.level_name) || "";
+    if (lv === "facts") return false;
+    return true;
+  }
+  // Store the finalized answer plus the tokens it spent, so a later hit can book
+  // the top-tier cost it avoided.
+  function qcachePut(rq, a) {
+    if (!cacheable(a)) return;
+    QCACHE[qcacheKey(rq)] = { answer: clone(a), tin: a.tokens_in || 0, tout: a.tokens_out || 0 };
+  }
+  function qcacheGet(rq) {
+    var hit = QCACHE[qcacheKey(rq)];
+    if (!hit) return null;
+    var a = clone(hit.answer);
+    a.cache_hit = true;
+    a.cost = 0;
+    a.tokens_in = 0;
+    a.tokens_out = 0;
+    a.tokens = 0;
+    a.cache_read = 0;
+    a.latency_ms = 0;
+    a.model_name = "cache";
+    a.provider = "cache";
+    a.level = 0;
+    a.why = a.why || {};
+    a.why.level = 0;
+    a.why.level_name = "cache";
+    // The whole top-tier cost of re-answering is what caching avoided.
+    a.cost_saved = r6(priceOf(KF_MODELS.top, hit.tin, hit.tout));
+    a.saved_bucket = "repeat-cache";
+    return a;
+  }
+  // The savings ledger. Every delivered answer books cost_saved = what the top tier
+  // (Sonnet 5) would have cost for the same tokens − what was actually spent, tagged
+  // by bucket so Admin can break it down: repeat-cache, golden, or level-selection
+  // (answering at a cheaper tier / extractively instead of at the top). A cache or
+  // golden hit already set its own bucket + saved above; leave those untouched.
+  function bookSaved(a) {
+    if (!a || a.kind !== "answer") return;
+    if (a.cache_hit || a.saved_bucket) return;
+    var tin = a.tokens_in || 0, tout = a.tokens_out || 0;
+    if (!tin && !tout) return;
+    var saved = priceOf(KF_MODELS.top, tin, tout) - (a.cost || 0);
+    if (saved > 0) {
+      a.cost_saved = r6((a.cost_saved || 0) + saved);
+      a.saved_bucket = "level-selection";
+    }
+  }
+
   // T126 — the facts / inventory tier, mirroring the server's aggregate path. A
   // count question ("how many repos / Jira issues / Confluence pages / documents")
   // is answered from the baked facts summary BEFORE BM25 retrieval, so it returns
@@ -1548,6 +1624,18 @@
       return Promise.resolve(c);
     }
     var rq = res.question;  // the (possibly rewritten) question to retrieve on
+    // T158 — a repeat of the same question within the same active source set is
+    // served straight from the per-visitor cache: Level 0, $0, a cache hit, and the
+    // top-tier cost it avoided is booked as saved. No retrieval, no model call.
+    var cached = qcacheGet(rq);
+    if (cached) {
+      cached.role_view = roleView(cached, designation);
+      answerFirst(cached, designation);
+      bumpUsage(subject, cached);
+      bumpMeter(cached);
+      evAnswer(subject, designation, question, cached);
+      return Promise.resolve(cached);
+    }
     // T129 — when the admin has deactivated a source, the baked-answer cache and
     // the fuzzy lookup are bypassed (they don't know a source is off), so the
     // question is answered by LIVE retrieval, which excludes the disabled source.
@@ -1573,11 +1661,13 @@
       // model when a browser key is present; keyless it passes through extractive.
       return maybeCompose(a, rq).then(function (a) {
         if (res.understood_as) a.understood_as = res.understood_as;  // shown under the bubble
+        bookSaved(a);  // T158 — book the top-tier cost avoided by answering cheaply
         a.role_view = roleView(a, designation);  // T27 — the designation/persona lens
         answerFirst(a, designation);  // T81/T84/T85 — result + Explain offers + governance line
         bumpUsage(subject, a);
         bumpMeter(a);  // T130 — live tokens/cost meter (per browser)
         evAnswer(subject, designation, question, a);  // T132 — row + model-call ledger
+        qcachePut(rq, a);  // T158 — cache the finalized answer for a repeat within this set
         return a;
       });
     });
@@ -1744,6 +1834,94 @@
       tel.totals.cost_usd = r6((tel.totals.cost_usd || 0) + m.cost_usd);
     }
     return payload;
+  }
+  // ---- T156: live analytics — the dashboard charts grow as the visitor asks ----
+  // The baked /api/analytics is a build-time snapshot; the visitor's own questions
+  // live only in the kf.events ledger (disjoint from the baked server spans, so the
+  // fold is purely additive). We add those in-window answer events onto the baked
+  // totals, the routing/savings/per-user rollups, the latency + cache-hit rates, and
+  // append them as a rising tail on the timeseries (with per-bucket latency and
+  // complexity, which T156 charts over time). Windows: 24h hourly, 7d/all daily.
+  function pctOf(arr, p) {
+    if (!arr.length) return 0;
+    var s = arr.slice().sort(function (a, b) { return a - b; });
+    return Number(s[Math.min(s.length - 1, Math.floor(s.length * p))].toFixed(1));
+  }
+  function mergeAnalytics(baked, window) {
+    var out = clone(baked) || {};
+    var horizon = { "24h": 86400000, "7d": 7 * 86400000, all: 1e15 }[window] || 7 * 86400000;
+    var bucketMs = window === "24h" ? 3600000 : 86400000;
+    var now = Date.now(), floor = now - horizon;
+    var live = events().filter(function (e) {
+      return e.kind === "answer" && (e.ts || 0) >= floor;
+    });
+    if (!live.length) return out;
+    // ---- aggregate totals ----
+    var addAns = live.length;
+    var addTin = 0, addTout = 0, addCost = 0, addSaved = 0, hits = 0, lats = [];
+    var byLevel = clone(out.routing_by_level) || {};
+    var byComplexity = clone(out.routing_by_complexity) || {};
+    var savings = clone(out.savings_by_technique) || {};
+    var perUser = clone(out.per_user) || {};
+    var byLang = clone(out.by_language) || {};
+    var models = clone(out.models_used) || {};
+    live.forEach(function (e) {
+      addTin += e.tokens_in || 0; addTout += e.tokens_out || 0;
+      addCost += e.cost || 0; addSaved += e.cost_saved || 0;
+      if (e.cache_hit) hits += 1;
+      if (e.latency_ms) lats.push(e.latency_ms);
+      var lv = e.level_name || "?"; byLevel[lv] = (byLevel[lv] || 0) + 1;
+      var cx = e.complexity || "n/a"; byComplexity[cx] = (byComplexity[cx] || 0) + 1;
+      var mdl = e.model || "none (extractive)"; models[mdl] = (models[mdl] || 0) + 1;
+      byLang[e.lang || "en"] = (byLang[e.lang || "en"] || 0) + 1;
+      if (e.cost_saved) {
+        var tech = e.saved_bucket || "other";
+        savings[tech] = r6((savings[tech] || 0) + (e.cost_saved || 0));
+      }
+      var u = e.subject || "?";
+      perUser[u] = perUser[u] || { answers: 0, cost: 0, tokens: 0 };
+      perUser[u].answers += 1; perUser[u].cost = r6(perUser[u].cost + (e.cost || 0));
+      perUser[u].tokens += (e.tokens_in || 0) + (e.tokens_out || 0);
+    });
+    var bakedAns = out.answers || 0, bakedHitRate = out.cache_hit_rate || 0;
+    out.answers = bakedAns + addAns;
+    out.tokens_in = (out.tokens_in || 0) + addTin;
+    out.tokens_out = (out.tokens_out || 0) + addTout;
+    out.total_cost = r6((out.total_cost || 0) + addCost);
+    out.total_cost_saved = r6((out.total_cost_saved || 0) + addSaved);
+    out.cache_hit_rate = out.answers ? Number(((bakedHitRate * bakedAns + hits) / out.answers).toFixed(4)) : 0;
+    out.routing_by_level = byLevel;
+    out.routing_by_complexity = byComplexity;
+    out.savings_by_technique = savings;
+    out.per_user = perUser;
+    out.by_language = byLang;
+    out.models_used = models;
+    // Live latency percentiles blend onto the baked scalars (keep baked when no live).
+    if (lats.length) { out.latency_p50_ms = pctOf(lats, 0.5); out.latency_p95_ms = pctOf(lats, 0.95); }
+    // ---- timeseries: append the live activity as a rising tail ----
+    var series = (out.timeseries || []).slice();
+    var lastB = series.length ? (series[series.length - 1].bucket || 0) : -1;
+    var firstTs = live[0].ts || now;
+    var lb = {};
+    live.forEach(function (e) {
+      var idx = Math.floor(((e.ts || now) - firstTs) / bucketMs);
+      var b = lb[idx] || (lb[idx] = { bucket: lastB + 1 + idx, answers: 0, cost: 0, tokens_in: 0,
+        tokens_out: 0, cost_saved: 0, _latsum: 0, _latn: 0, complexity: {} });
+      b.answers += 1; b.cost = r6(b.cost + (e.cost || 0));
+      b.tokens_in += e.tokens_in || 0; b.tokens_out += e.tokens_out || 0;
+      b.cost_saved = r6(b.cost_saved + (e.cost_saved || 0));
+      if (e.latency_ms) { b._latsum += e.latency_ms; b._latn += 1; }
+      var cx = e.complexity || "n/a"; b.complexity[cx] = (b.complexity[cx] || 0) + 1;
+    });
+    Object.keys(lb).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k) {
+      var b = lb[k];
+      b.latency_ms = b._latn ? Math.round(b._latsum / b._latn) : 0;
+      delete b._latsum; delete b._latn;
+      series.push(b);
+    });
+    out.timeseries = series;
+    out.live_merged = true;  // a marker the gate asserts on
+    return out;
   }
   // Merge the live meter into the baked GET /admin/overview payload so the ROI
   // page (value delivered, spend, ratio) recomputes live off real consumption.
@@ -2316,7 +2494,7 @@
     }
     if (path === "/api/provider/status") return respond(SNAP.provider_status || { state: "extractive", provider: "open-source", mode: "extractive", reason: "no provider status baked" });  // T147
     if (path === "/api/preflight") return respond(SNAP.preflight || { results: [], reachable: 0, total: 0, failed: [], absent: true });  // T148 — build-time source preflight
-    if (path === "/api/analytics") { var w = q.get("window") || "7d"; return respond((SNAP.analytics || {})[w] || (SNAP.analytics || {})["7d"] || {}); }
+    if (path === "/api/analytics") { var w = q.get("window") || "7d"; return respond(mergeAnalytics((SNAP.analytics || {})[w] || (SNAP.analytics || {})["7d"] || {}, w)); }
     if (path === "/api/events") return respond({ events: SNAP.events || [] });
     if (path === "/api/trace") return respond({ spans: [] });
     // T93 — a cited passage's paragraph + neighbours, when the build baked them;

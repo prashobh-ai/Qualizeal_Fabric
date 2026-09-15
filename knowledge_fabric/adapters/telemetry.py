@@ -219,7 +219,9 @@ class SqlTelemetry:
                 per_role[role_]["answers"] += 1
                 per_role[role_]["cost"] = round(per_role[role_]["cost"] + r["cost"], 6)
 
-        # volume timeseries: hourly buckets for 24h, daily for 7d/all
+        # volume timeseries: hourly buckets for 24h, daily for 7d/all. Each bucket
+        # also carries an average latency and a per-level split so the dashboard can
+        # chart latency and the complexity mix OVER TIME (T156), not just as totals.
         bucket = 3600 if window == "24h" else 86400
         series = {}
         for r in rows:
@@ -233,6 +235,9 @@ class SqlTelemetry:
                     "tokens_in": 0,
                     "tokens_out": 0,
                     "cost_saved": 0.0,
+                    "latency_ms": 0.0,
+                    "by_level": {},
+                    "_lat_sum": 0.0,
                 },
             )
             series[b]["answers"] += 1
@@ -240,7 +245,14 @@ class SqlTelemetry:
             series[b]["tokens_in"] += r["tokens_in"]
             series[b]["tokens_out"] += r["tokens_out"]
             series[b]["cost_saved"] = round(series[b]["cost_saved"] + (r["cost_saved"] or 0.0), 6)
-        timeseries = [series[k] for k in sorted(series)]
+            series[b]["_lat_sum"] += r["duration_ms"] or 0.0
+            lv = r["level"] or "?"
+            series[b]["by_level"][lv] = series[b]["by_level"].get(lv, 0) + 1
+        timeseries = []
+        for k in sorted(series):
+            s = series[k]
+            s["latency_ms"] = round(s.pop("_lat_sum") / s["answers"], 1) if s["answers"] else 0.0
+            timeseries.append(s)
 
         by_lang = {}
         for r in rows:
