@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -425,7 +426,10 @@ class TestShowcaseSnapshot(unittest.TestCase):
         ):
             self.assertIn(needle, eng, needle)
         self.assertNotIn("http://", eng)
-        self.assertNotIn("https://", eng)
+        # T166 — the only external URL the engine may carry is the Anthropic
+        # Messages endpoint for the live, complexity-routed Claude call.
+        for url in re.findall(r"https://[\w./-]+", eng):
+            self.assertTrue(url.startswith("https://api.anthropic.com/"), url)
 
 
 if __name__ == "__main__":
