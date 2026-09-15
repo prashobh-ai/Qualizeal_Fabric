@@ -280,8 +280,8 @@ _REGISTRY = card(
 _GOLDEN = card(
     "Golden answers",
     '<div class="muted small">Curator-verified answers. A saved golden is served '
-    "first for its question &mdash; before retrieval or any model call &mdash; at "
-    "Level&nbsp;0, $0, cited. Edit by saving the same question again; delete to "
+    "first for its question &mdash; before retrieval or any model call &mdash; "
+    "instantly, at $0, cited. Edit by saving the same question again; delete to "
     "retire it.</div>"
     '<div class="tablewrap" style="margin-top:8px"><table id="golden-table">'
     "<thead><tr><th>Question</th><th>Answer</th><th>Author</th><th>Saved</th>"
