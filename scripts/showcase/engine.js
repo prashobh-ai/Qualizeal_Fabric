@@ -819,7 +819,7 @@
       kind: "clarify", answer_text: "", clarify_back: reason, citations: [], confidence: 0,
       grounding_score: 0, trajectory_id: "traj_demo_clarify", cost: 0, tokens: 0, tier: "none",
       level: 0, lang: "en", cache_hit: false, cost_saved: 0, tokens_in: 0, tokens_out: 0,
-      model_name: "demo model", complexity: "simple", authoritative_source: null,
+      model_name: "none (no model)", complexity: "simple", authoritative_source: null,
       dataset_version: 1, reasoning: null, suggestions: chips || [],
       why: { level_name: "clarify", explain: reason, reasons: [],
              signals: { retrieval: 0, semantic: 0.4, coverage: 0, agreement: 0, resolvable: 1 }, retrieved: 0 }
@@ -837,7 +837,7 @@
       kind: "clarify", answer_text: "", clarify_back: text, citations: [], confidence: 0,
       grounding_score: 0, trajectory_id: "traj_demo_clarify", cost: 0, tokens: 0, tier: "none",
       level: 0, lang: "en", cache_hit: false, cost_saved: 0, tokens_in: 0, tokens_out: 0,
-      model_name: "demo model", complexity: "simple", authoritative_source: null,
+      model_name: "none (no model)", complexity: "simple", authoritative_source: null,
       dataset_version: 1, reasoning: null, suggestions: offer,
       why: { level_name: "clarify", explain: "Recognised the topic (" + disp + "); needs a more specific question.",
              reasons: [], signals: { retrieval: 0, semantic: 0.4, coverage: 0, agreement: 0, resolvable: 1 }, retrieved: 0 }
@@ -1163,9 +1163,16 @@
     }
     var docs = top.filter(function (x) { return x.p.kind !== "code" && x.p.kind !== "test"; });
     if (!docs.length || docs[0].score < 1.0) return null;  // too weak — honest gap
-    var lead = docs.slice(0, Math.max(1, Math.min(cap, 2))), parts = [], cites = [];  // T27 depth
-    lead.forEach(function (x, i) { parts.push(bestSentence(x.p.text, qt) + " [" + (i + 1) + "]"); cites.push(citeFor(x.p)); });
-    return mkAnswer("fast", 2, parts.join(" "), cites, 0.7);
+    var lead = docs.slice(0, Math.max(1, Math.min(cap, 2))), parts = [], cites = [], passages = [];  // T27 depth
+    lead.forEach(function (x, i) { parts.push(bestSentence(x.p.text, qt) + " [" + (i + 1) + "]"); cites.push(citeFor(x.p)); passages.push({ text: x.p.text }); });
+    var ans = mkAnswer("fast", 2, parts.join(" "), cites, 0.7);
+    // T166 — grounded context + complexity signals for the live, model-routed compose.
+    var seen = {}; docs.forEach(function (x) { seen[x.p.doc] = 1; });
+    ans.llm_passages = passages;
+    ans.why.docs_spanned = Object.keys(seen).length;
+    ans.why.comparison = /\b(compare|comparison|vs\.?|versus|difference|differ|better|which is)\b/i.test(question);
+    ans.why.why_how = /\b(why|how (?:does|do|is|are)|explain|walk me through)\b/i.test(question);
+    return ans;
   }
   function pbiasCode(p, emphasis) {
     var isTest = p.kind === "test" || (p.path || "").toLowerCase().indexOf("test") >= 0;
@@ -1180,6 +1187,143 @@
     var scored = bm25(qt);
     if (!scored.length) return null;
     return DISCOVERY.test(question) ? discoveryAnswer(scored) : composeAnswer(question, scored, prof);
+  }
+
+  // T166 — the live, complexity-routed Claude call on top of the existing retrieval.
+  // The key is INJECTED AT BUILD (the deploy step replaces the placeholder from the
+  // ANTHROPIC_BROWSER_KEY secret) and is NEVER committed. With no key, kfLlmKey() is
+  // empty and the extractive core answers unchanged, so the demo always works. When a
+  // key is present, a Level-2/3 answer is re-composed by the model that its complexity
+  // selects — the card then shows the real model id, input/output tokens and cost.
+  var KF_LLM = {
+    key: "__ANTHROPIC_BROWSER_KEY__", // build-injected; empty placeholder in source
+    endpoint: "https://api.anthropic.com/v1/messages",
+    version: "2023-06-01",
+  };
+  // A key that still holds the placeholder token means "no key" → extractive core.
+  function kfLlmKey() {
+    var k = KF_LLM.key || "";
+    return k.indexOf("__ANTHROPIC") === 0 ? "" : k;
+  }
+  // The ONLY models the code may ever request, routed by complexity. All three are
+  // current, verified ids; anything else is refused before the call.
+  var KF_MODELS = { medium: "claude-haiku-4-5", high: "claude-sonnet-4-6", top: "claude-sonnet-5" };
+  var KF_PRICES = {
+    // $ per 1M tokens: [input, output]
+    "claude-haiku-4-5": [1.0, 5.0],
+    "claude-sonnet-4-6": [3.0, 15.0],
+    "claude-sonnet-5": [2.0, 10.0],
+  };
+  function priceOf(model, tin, tout) {
+    var p = KF_PRICES[model];
+    return p ? (tin * p[0] + tout * p[1]) / 1e6 : 0;
+  }
+  // L0/L1 facts & verbatim lookups stay extractive ($0). L2 → Haiku 4.5; a
+  // comparison / why-how / ≥3 relationships → Sonnet 4.6; ≥4 docs, a contradiction
+  // or a cross-source verify → Sonnet 5 (used sparingly so cost stays low).
+  function pickModel(level, why) {
+    why = why || {};
+    var docs = why.docs_spanned || why.retrieved || 0;
+    if (docs >= 4 || why.contradiction || why.cross_source) return KF_MODELS.top;
+    if (level >= 3 || (why.relationships || 0) >= 3 || why.comparison || why.why_how) return KF_MODELS.high;
+    if (level >= 2) return KF_MODELS.medium;
+    return null;
+  }
+  // The direct browser → Anthropic call (per the owner's decision to embed a
+  // build-injected key with a low spend cap set in the Console). Grounded ONLY on the
+  // supplied passages; returns the composed text plus the real usage/cost/latency.
+  function llmCompose(question, passages, model) {
+    var key = kfLlmKey();
+    if (!key) return Promise.reject({ status: 0, message: "no browser key configured" });
+    if (model !== KF_MODELS.medium && model !== KF_MODELS.high && model !== KF_MODELS.top)
+      return Promise.reject({ status: 0, message: "blocked non-allowed model" }); // guard
+    var evidence = (passages || [])
+      .slice(0, 10)
+      .map(function (p, i) { return "[c" + (i + 1) + "] " + (p.text || p); })
+      .join("\n");
+    var sys =
+      "You are the QualiZeal Knowledge Fabric assistant. Answer ONLY from the numbered " +
+      "sources below. Cite each claim as [cN] with the matching source number. If the " +
+      "sources do not cover the question, say so plainly. Be concise and factual.";
+    var now = function () {
+      return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+    };
+    var t0 = now();
+    return fetch(KF_LLM.endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "anthropic-version": KF_LLM.version,
+        "x-api-key": key,
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model: model,
+        max_tokens: 800,
+        system: sys,
+        messages: [{ role: "user", content: "Question: " + question + "\n\nSources:\n" + evidence }],
+      }),
+    })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { r: r, j: j };
+        });
+      })
+      .then(function (o) {
+        if (!o.r.ok) throw { status: o.r.status, message: (o.j.error && o.j.error.message) || "HTTP " + o.r.status };
+        var u = o.j.usage || {},
+          tin = u.input_tokens || 0,
+          tout = u.output_tokens || 0;
+        var text = (o.j.content || []).map(function (b) { return b.text || ""; }).join("").trim();
+        return {
+          text: text,
+          model: model,
+          provider: "anthropic",
+          tokens_in: tin,
+          tokens_out: tout,
+          cache_read: u.cache_read_input_tokens || 0,
+          cost: priceOf(model, tin, tout),
+          latency_ms: Math.round(now() - t0),
+        };
+      });
+  }
+  // Re-compose an eligible retrieval answer with the live model; on any error (no key,
+  // 401/429, network) keep the extractive answer and label the fallback reason, so the
+  // answer always appears. Only fed from the answer's grounded passages, which come
+  // from activePassages() — a switched-off source never reaches the model.
+  function maybeCompose(a, question) {
+    if (!a || a.kind !== "answer") return Promise.resolve(a);
+    if (a.provider === "cache" || a.provider === "golden") return Promise.resolve(a); // future tiers
+    if (!kfLlmKey()) return Promise.resolve(a); // keyless → extractive core, unchanged
+    var model = pickModel(a.level, a.why);
+    if (!model) return Promise.resolve(a); // facts / L0 / L1 → extractive $0
+    var passages =
+      a.llm_passages && a.llm_passages.length
+        ? a.llm_passages
+        : (a.citations || []).map(function (c) { return { text: c.snippet || "" }; });
+    if (!passages.length || !passages.some(function (p) { return (p.text || "").trim(); }))
+      return Promise.resolve(a);
+    return llmCompose(question, passages, model).then(
+      function (res) {
+        if (res.text) a.answer_text = res.text;
+        a.model_name = res.model;
+        a.provider = res.provider;
+        a.tokens_in = res.tokens_in;
+        a.tokens_out = res.tokens_out;
+        a.tokens = res.tokens_in + res.tokens_out;
+        a.cache_read = res.cache_read;
+        a.cost = res.cost;
+        a.latency_ms = res.latency_ms;
+        if (a.why) a.why.model = res.model;
+        return a;
+      },
+      function (err) {
+        var status = err && err.status != null ? err.status : "error";
+        a.model_name = "Open-source LLM · fallback (" + status + ")";
+        a.llm_error = (err && err.message) || "LLM call failed";
+        return a;
+      }
+    );
   }
 
   // T126 — the facts / inventory tier, mirroring the server's aggregate path. A
@@ -1425,13 +1569,17 @@
         // GitHub-issue detour. A baked fluent answer (from the bake workflow) is
         // served above when present; otherwise this composed answer stands as-is.
       }
-      if (res.understood_as) a.understood_as = res.understood_as;  // shown under the bubble
-      a.role_view = roleView(a, designation);  // T27 — the designation/persona lens
-      answerFirst(a, designation);  // T81/T84/T85 — result + Explain offers + governance line
-      bumpUsage(subject, a);
-      bumpMeter(a);  // T130 — live tokens/cost meter (per browser), never a key
-      evAnswer(subject, designation, question, a);  // T132 — row + model-call ledger
-      return a;
+      // T166 — a Level-2/3 retrieval answer is re-composed by the complexity-routed
+      // model when a browser key is present; keyless it passes through extractive.
+      return maybeCompose(a, rq).then(function (a) {
+        if (res.understood_as) a.understood_as = res.understood_as;  // shown under the bubble
+        a.role_view = roleView(a, designation);  // T27 — the designation/persona lens
+        answerFirst(a, designation);  // T81/T84/T85 — result + Explain offers + governance line
+        bumpUsage(subject, a);
+        bumpMeter(a);  // T130 — live tokens/cost meter (per browser)
+        evAnswer(subject, designation, question, a);  // T132 — row + model-call ledger
+        return a;
+      });
     });
   }
   // T84 — the per-persona Explain offers, a verbatim mirror of personas.CONTRACT.
@@ -1463,7 +1611,7 @@
       kind: "gap", answer_text: "No supporting evidence exists in the fabric for that yet.",
       citations: [], confidence: 0, grounding_score: 0, trajectory_id: "traj_demo_gap",
       cost: 0, tokens: 0, tier: "none", level: 0, lang: "en", cache_hit: false, cost_saved: 0,
-      tokens_in: 0, tokens_out: 0, model_name: "demo model", complexity: "simple",
+      tokens_in: 0, tokens_out: 0, model_name: "none (no model)", complexity: "simple",
       authoritative_source: null, dataset_version: 1, reasoning: null, clarify_back: null,
       why: { level_name: "gap", explain: "Below the grounding threshold.", reasons: [],
              signals: { retrieval: 0, semantic: 0, coverage: 0, agreement: 0, resolvable: 0 }, retrieved: 0 }

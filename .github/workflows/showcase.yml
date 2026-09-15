@@ -61,6 +61,12 @@ jobs:
       JIRA_PROJECTS: ${{ vars.JIRA_PROJECTS }}
       CONFLUENCE_SPACES: ${{ vars.CONFLUENCE_SPACES }}
       KF_WEBSITE_URL: ${{ vars.KF_WEBSITE_URL }}
+      # T166 — OPT-IN browser key for the live, complexity-routed Claude call. When
+      # set, it is injected into the BUILT engine.js after the build (never committed);
+      # the deployed Pages app then calls Claude directly. The key is visible in the
+      # served JS, so set a LOW spend cap on it in the Console and rotate it. Unset →
+      # the extractive core answers and the demo is unchanged.
+      ANTHROPIC_BROWSER_KEY: ${{ secrets.ANTHROPIC_BROWSER_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -134,6 +140,23 @@ jobs:
           KF_LEDGER_PURPOSE: answer_bake
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python scripts/build_showcase.py --out dist/showcase
+
+      - name: Inject the browser Anthropic key into the built engine (T166)
+        # OPT-IN + NON-FATAL. Replaces the placeholder in the BUILT engine.js so the
+        # deployed app calls Claude directly. Only ever touches the ephemeral build
+        # artifact — the key is never committed. Skipped when the secret is unset, so
+        # the keyless extractive demo is unchanged. NB: the key is public in the served
+        # JS — keep a LOW spend cap on it in the Console and rotate.
+        if: env.ANTHROPIC_BROWSER_KEY != ''
+        run: |
+          python - <<'PY'
+          import os, pathlib
+          p = pathlib.Path("dist/showcase/engine.js")
+          s = p.read_text(encoding="utf-8")
+          n = s.count("__ANTHROPIC_BROWSER_KEY__")
+          p.write_text(s.replace("__ANTHROPIC_BROWSER_KEY__", os.environ["ANTHROPIC_BROWSER_KEY"]), encoding="utf-8")
+          print(f"Injected browser key into engine.js ({n} placeholder occurrence(s)).")
+          PY
 
       - name: Verify no external URLs and required data files present
         run: python scripts/verify_showcase.py --dir dist/showcase

@@ -91,7 +91,10 @@ class TestShowcaseBuilder(unittest.TestCase):
     def test_engine_has_no_external_urls(self):
         eng = self._read("engine.js")
         self.assertNotIn("http://", eng)
-        self.assertNotIn("https://", eng)
+        # T166 — the only external URL the engine may carry is the Anthropic
+        # Messages endpoint for the live, complexity-routed Claude call.
+        for url in re.findall(r"https://[\w./-]+", eng):
+            self.assertTrue(url.startswith("https://api.anthropic.com/"), url)
 
     def test_verifier_passes_clean_build(self):
         self.assertEqual(verify_showcase.verify(self.out), [])

@@ -141,6 +141,23 @@ def verify(directory: str) -> list[str]:
                 text = fh.read()
             for m in _EXTERNAL.finditer(text):
                 errors.append(f"{os.path.relpath(path, d)}: external URL {m.group(1)}")
+    # T166 — the live, complexity-routed Claude call must be wired into the served
+    # engine: the Anthropic endpoint, the three allowed model ids, the pickModel
+    # router, and no "demo model" label left on any answer path.
+    eng_path = os.path.join(d, "engine.js")
+    if os.path.isfile(eng_path):
+        eng = open(eng_path, encoding="utf-8").read()
+        if "api.anthropic.com/v1/messages" not in eng:
+            errors.append("engine.js: Anthropic messages endpoint missing (T166)")
+        for mid in ("claude-haiku-4-5", "claude-sonnet-4-6", "claude-sonnet-5"):
+            if mid not in eng:
+                errors.append(f"engine.js: model id {mid} missing (T166)")
+        if "function pickModel(" not in eng:
+            errors.append("engine.js: pickModel router missing (T166)")
+        if "demo model" in eng:
+            errors.append('engine.js: an answer path still emits "demo model" (T166)')
+    else:
+        errors.append("engine.js missing at site root")
     return errors
 
 
