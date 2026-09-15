@@ -51,14 +51,18 @@ _MODULES = {
 
 
 def load_corpus(platform, tenant: str = TENANT, out=print) -> dict:
-    """The vendored corpus through the real pipeline (idempotent by hash)."""
+    """The vendored corpus through the real pipeline (idempotent by hash).
+
+    Mirrors ``build_showcase._seed``: the authentic QualiZeal briefs
+    (``_load_corpus``) plus any documents committed under ``corpus/uploads/``
+    via the Admin upload path (``_load_uploads``). The self-ingested code and
+    org-filler loaders were removed in T141, so they are no longer called."""
     from scripts import build_showcase as _b
 
     n_docs = _b._load_corpus(platform) if tenant == _b.TENANT else 0
-    n_code = _b._load_code(platform) if tenant == _b.TENANT else 0
-    n_org = _b._load_org(platform) if tenant == _b.TENANT else 0
-    res = {"docs": n_docs, "code": n_code, "org": n_org}
-    out(f"corpus: {n_docs} briefs · {n_code} code files · {n_org} handbook pages")
+    n_uploads = _b._load_uploads(platform) if tenant == _b.TENANT else 0
+    res = {"docs": n_docs, "uploads": n_uploads}
+    out(f"corpus: {n_docs} briefs · {n_uploads} uploaded files")
     return res
 
 

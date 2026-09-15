@@ -926,11 +926,16 @@ def sync(platform, tenant: str, transport=None, runner=None) -> dict:
     # T118 — the token is OPTIONAL: without it, public repos of the pasted
     # user/org still ingest (rate-limited); with an org-scoped token, private
     # org repos too. Only a missing scope (no org / no repo) skips.
+    # KF_-prefixed aliases exist because GitHub Actions restricts setting env
+    # vars that start with GITHUB_ from repository variables; KF_GITHUB_ORG /
+    # KF_GITHUB_REPOS let the Pages build target a real org once it is approved.
     scope = (
         cfg.get("org")
         or os.environ.get("GITHUB_ORG")
+        or os.environ.get("KF_GITHUB_ORG")
         or cfg.get("repos")
         or os.environ.get("GITHUB_EXTRA_REPOS")
+        or os.environ.get("KF_GITHUB_REPOS")
     )
     if not scope:
         return {"status": "skipped", "reason": "no GitHub org/user or repo connected (paste a URL)"}
