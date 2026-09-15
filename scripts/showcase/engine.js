@@ -612,7 +612,10 @@
     var promoted = (STATE.users && STATE.users.users || []).filter(function (u) {
       return (u.subject || "").toLowerCase() === subject;
     })[0];
-    if (promoted) return { login: mint(subject, promoted.roles || ["asker"], promoted.scopes || ["public"], promoted.designation || "") };
+    if (promoted) {
+      if (promoted.status === "disabled") return { code: 403 };  // T160 — disabled users cannot sign in
+      return { login: mint(subject, promoted.roles || ["asker"], promoted.scopes || ["public"], promoted.designation || "") };
+    }
     if (subject.slice(-SSO_DOMAIN.length) === SSO_DOMAIN) {
       var local = subject.slice(0, subject.length - SSO_DOMAIN.length);
       return { login: mint(subject, ["asker"], ["public"], DEMO_DESIGNATIONS[local] || "") };
@@ -2013,18 +2016,37 @@
       docs.documents = docs.documents.filter(function (d) { return d.document_id !== body.document_id && d.id !== body.document_id; });
     }
   }
+  // T160 — the admin's Users & Access mutations: add/upsert (capturing the
+  // designation that conditions answers per T27, plus email / department / team /
+  // daily cap), edit (upsert the same subject), disable / enable, reset the budget,
+  // and delete. Persisted per visitor (kf.users) so a promoted user can sign in.
   function userMutation(body) {
     var box = STATE.users || (STATE.users = { users: [] });
     box.users = box.users || [];
+    var subj = (body.subject || "").trim();
+    function find() { return box.users.filter(function (u) { return u.subject === subj; })[0]; }
     if (body.action === "delete") {
-      box.users = box.users.filter(function (u) { return u.subject !== body.subject; });
-    } else { // add / default
+      box.users = box.users.filter(function (u) { return u.subject !== subj; });
+    } else if (body.action === "disable" || body.action === "enable") {
+      var tu = find(); if (tu) tu.status = body.action === "enable" ? "active" : "disabled";
+    } else if (body.action === "reset_budget") {
+      var ru = find(); if (ru) { ru.spent_usd = 0; ru.questions_today = 0; }
+    } else if (subj) { // add / upsert (edit is saving the same subject again)
       var roles = body.roles || ["asker"];
-      var scopes = body.scopes || (roles.indexOf("admin") >= 0 || roles.indexOf("curator") >= 0 ? ["public", "restricted"] : ["public"]);
-      if (body.subject && !box.users.some(function (u) { return u.subject === body.subject; })) {
-        box.users.push({ subject: body.subject, roles: roles, scopes: scopes,
-                         department: body.department || "", team: body.team || "", status: "active" });
-      }
+      var scopes = body.scopes ||
+        (roles.indexOf("admin") >= 0 || roles.indexOf("curator") >= 0 ? ["public", "restricted"] : ["public"]);
+      var ex = find() || {};
+      var row = {
+        subject: subj, roles: roles, scopes: scopes,
+        designation: body.designation != null ? body.designation : (ex.designation || ""),
+        email: body.email != null ? body.email : (ex.email || ""),
+        department: body.department != null ? body.department : (ex.department || ""),
+        team: body.team != null ? body.team : (ex.team || ""),
+        daily_cap: body.daily_cap != null ? body.daily_cap : (ex.daily_cap != null ? ex.daily_cap : null),
+        status: ex.status || "active"
+      };
+      if (find()) { Object.keys(row).forEach(function (k) { ex[k] = row[k]; }); }
+      else box.users.push(row);
     }
     // keep the admin GET bucket pointing at the mutated list, and persist so a
     // promoted admin/curator can sign back in after a reload (per browser).
