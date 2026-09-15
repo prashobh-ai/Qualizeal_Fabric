@@ -157,6 +157,13 @@ _AWS = card(
 
 _MODELS = card(
     "Models — provider &amp; API consumption",
+    # T147 — the provider radio: switch the answering model (Open-source / Claude /
+    # OpenAI). A provider not baked at build shows why; switching re-serves answers
+    # from that provider's baked set. Persisted per visitor.
+    '<div class="section-title">Answering model'
+    '<span class="muted small">switch the provider that answers</span></div>'
+    '<div id="provider-radio" class="provider-radio">'
+    '<span class="muted small">loading…</span></div>'
     '<div id="provider-card" class="row"><span class="muted small">Run the provider check '
     "(doctor --require anthropic) to pin the models and prove the key.</span></div>"
     '<div class="row" style="margin:8px 0"><label class="muted small">Window</label>'

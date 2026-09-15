@@ -1310,16 +1310,45 @@
   }
   function questionHash(q) { return sha256hex(norm(q)).then(function (h) { return h.slice(0, 16); }); }
   function answersPath(h) { return "answers/" + h + ".json"; }
-  // 1) a baked answer file (bake at ingest, or the queue) — real network fetch.
+  // T147 — the selected provider (Open-source / Claude / OpenAI), persisted per
+  // visitor. Defaults to the provider this build baked (providers.current).
+  function providerManifest() { return SNAP.providers || { current: "open-source", providers: [] }; }
+  function selectedProvider() {
+    var m = providerManifest();
+    var sel;
+    try { sel = localStorage.getItem("kf.provider"); } catch (e) { sel = null; }
+    var known = (m.providers || []).some(function (p) { return p.key === sel; });
+    return known ? sel : (m.current || "open-source");
+  }
+  function providerEntry(key) {
+    var list = (providerManifest().providers) || [];
+    for (var i = 0; i < list.length; i++) if (list[i].key === key) return list[i];
+    return null;
+  }
+  function setProvider(key) {
+    try { localStorage.setItem("kf.provider", key); } catch (e) {}
+    ridxDirty();
+    return { status: "ok", provider: key };
+  }
+  // T147 — a per-provider baked answer: answers/<provider>/<hash>.json, falling back
+  // to the root answers/<hash>.json when the selected provider has no baked set (so a
+  // provider that was not baked this build still answers — from the baked baseline).
   function bakedAnswer(question) {
     return questionHash(question).then(function (h) {
       if (!h) return { hash: "", answer: null };
-      return realFetch(base + "/" + answersPath(h)).then(function (r) {
-        if (!r || !r.ok) return { hash: h, answer: null };
-        return r.json().then(function (j) {
-          return { hash: h, answer: (j && j.kind) ? fromBaked(j) : null };
-        }).catch(function () { return { hash: h, answer: null }; });
-      }).catch(function () { return { hash: h, answer: null }; });
+      var prov = selectedProvider();
+      var tryPath = function (p) {
+        return realFetch(base + "/" + p).then(function (r) {
+          if (!r || !r.ok) return null;
+          return r.json().then(function (j) { return (j && j.kind) ? j : null; }).catch(function () { return null; });
+        }).catch(function () { return null; });
+      };
+      return tryPath("answers/" + prov + "/" + h + ".json").then(function (j) {
+        if (j) return { hash: h, answer: fromBaked(j) };
+        return tryPath(answersPath(h)).then(function (j2) {
+          return { hash: h, answer: j2 ? fromBaked(j2) : null };
+        });
+      });
     });
   }
   // A baked file is Answer.to_dict() + {question, asked_at, model, cost_usd,
@@ -1988,6 +2017,9 @@
         evAppend("source_toggle", { source: (body || {}).source || "", active: true, actor: subject });
         return respond(acn);
       }
+      if (path === "/api/provider") {  // T147 — switch the active provider (persisted per visitor)
+        return respond(setProvider((body || {}).provider || "open-source"));
+      }
       // T131 — uploads are REAL in-browser: the file is added to the Files source
       // at once (answerable immediately) and, when a commit endpoint is configured,
       // POSTed there to land in the repo. Delete removes it from both.
@@ -2028,8 +2060,17 @@
     if (path === "/api/galaxy") { var t = q.get("trace_id"); return respond((SNAP.galaxy || {})[t] || { trace_id: t, nodes: [], edges: [], activated_ids: [], halo_ids: [], stats: {} }); }
     if (path === "/api/galaxy/node") { var nid = q.get("id"); var nd = (SNAP.galaxy_nodes || {})[nid]; return nd ? respond(nd) : respond({ error: "unknown node" }, 404); }
     if (path === "/api/galaxy/full") return respond(SNAP.galaxy_full || { nodes: [], edges: [], activated_ids: [], halo_ids: [], stats: {} });
-    if (path === "/api/provider") return respond(SNAP.provider || { provider: "Extractive", model: "core", dot: "#5A6B7C", label: "Extractive core" });
+    if (path === "/api/provider") {  // T147 — the ACTIVE provider (the visitor's radio choice), not just the baked default
+      var pe = providerEntry(selectedProvider());
+      if (pe) return respond({ provider: pe.key, model: pe.model || "", dot: pe.dot || "#5A6B7C", label: pe.label || pe.key, available: pe.available !== false, reason: pe.reason || "" });
+      return respond(SNAP.provider || { provider: "Extractive", model: "core", dot: "#5A6B7C", label: "Extractive core" });
+    }
+    if (path === "/api/providers") {  // T147 — the radio manifest + the current selection
+      var m = providerManifest();
+      return respond({ current: m.current || "open-source", selected: selectedProvider(), providers: m.providers || [] });
+    }
     if (path === "/api/provider/status") return respond(SNAP.provider_status || { state: "extractive", provider: "open-source", mode: "extractive", reason: "no provider status baked" });  // T147
+    if (path === "/api/preflight") return respond(SNAP.preflight || { results: [], reachable: 0, total: 0, failed: [], absent: true });  // T148 — build-time source preflight
     if (path === "/api/analytics") { var w = q.get("window") || "7d"; return respond((SNAP.analytics || {})[w] || (SNAP.analytics || {})["7d"] || {}); }
     if (path === "/api/events") return respond({ events: SNAP.events || [] });
     if (path === "/api/trace") return respond({ spans: [] });

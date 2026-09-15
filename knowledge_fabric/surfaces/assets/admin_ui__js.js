@@ -271,6 +271,19 @@ function renderModelsTelemetry(tel){const box=$('#models-telemetry');if(!box)ret
  if(burn.cost_per_hour!=null)chips.push('<span class="pill">burn '+usd(burn.cost_per_hour)+'/h · ~'+usd(burn.projected_per_day)+'/day</span>');
  phases.forEach(p=>chips.push('<span class="pill" title="'+esc(p.calls||0)+' calls · '+esc(p.tokens||0)+' tokens">'+esc(p.phase)+' '+usd(p.cost_usd)+'</span>'));
  box.innerHTML=renderTokenClasses(tel.token_classes,defs)+'<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px">'+(chips.join(' ')||'<span class="muted small">no model activity in this window</span>')+'</div>'}
+// T147 — the provider radio: Open-source / Claude / OpenAI. The current build's
+// provider is available; the others show why they were not baked. Switching posts
+// /api/provider, which re-serves answers from that provider's baked set.
+async function loadProviderRadio(){const box=$('#provider-radio');if(!box)return;
+ try{const m=await api('/api/providers');const sel=m.selected||m.current;
+  box.innerHTML=(m.providers||[]).map(p=>{const on=p.key===sel;const dis=p.available===false;
+   return '<button class="btn sm prov'+(on?' on':'')+'" data-prov="'+esc(p.key)+'"'+(dis&&!on?' disabled title="'+esc(p.reason||'not baked this build')+'"':'')+'>'+
+    '<span class="dot" style="background:'+esc(p.dot||'#5A6B7C')+'"></span>'+esc(p.label)+(dis?' <span class="muted small">· not baked</span>':'')+'</button>'}).join('');
+  KF.$$('#provider-radio [data-prov]').forEach(b=>{if(!b.disabled)b.onclick=()=>switchProvider(b.dataset.prov)});}
+ catch(e){box.innerHTML='<span class="muted small">provider list unavailable</span>'}}
+async function switchProvider(key){try{await api('/api/provider',{method:'POST',body:{provider:key}});
+  toast('Answering model → '+key,'good');await loadProviderRadio();
+  if(KF.event)KF.event('provider_switch',{provider:key});}catch(e){toast(e.message,'bad')}}
 async function loadModels(){try{const days=$('#models-days')?$('#models-days').value:'7';const d=await api('/admin/models?days='+encodeURIComponent(days));
  const p=d.provider||{};const c=d.consumption||{};const t=c.totals||{};
  const prov=p.provider?('<span class="pill good">'+esc(p.provider)+'</span> <span class="pill">key …'+esc(String(p.key_fingerprint||'').slice(-4))+'</span> <span class="pill">small '+esc(p.model_small)+'</span> <span class="pill">large '+esc(p.model_large)+'</span> <span class="muted small">verified '+esc(p.verified_at||'')+' · ping '+esc(((p.ping_usage||{}).input_tokens||0)+'/'+((p.ping_usage||{}).output_tokens||0))+' tokens</span>')
@@ -292,14 +305,23 @@ const SRC_COUNTS={github:['repositories','commits','prs','issues'],jira:['projec
 function srcStatus(s){const st=String(s.last_status||'');if(st.startsWith('error'))return '<span class="pill bad" title="'+esc(st)+'">error</span>';
  if(st.startsWith('skipped'))return '<span class="pill warn">'+esc(st)+'</span>';
  if(s.last_run)return '<span class="pill good">'+esc(st||'ok')+'</span>';return '<span class="pill">never run</span>'}
-function srcCard(name,s){s=s||{};const counts=s.counts||{};
- return '<div class="conn-card'+(s.enabled?'':' off')+'" data-source="'+esc(name)+'"><h4>'+esc(SRC_LABEL[name]||name)+'<span style="margin-left:auto">'+srcStatus(s)+'</span></h4>'+
+// T148 — the build-time preflight state for this source, from data/preflight.json.
+// verified · reachable / not configured (no secret) / failed · <reason> (e.g. a
+// GitHub 403 org-approval — an org-admin action, not a code one).
+function preflightPill(pf){if(!pf)return '';
+ if(pf.skipped)return ' <span class="pill" title="no secret set at build">not configured</span>';
+ if(pf.ok)return ' <span class="pill good" title="reachable at build">verified</span>';
+ return ' <span class="pill bad" title="'+esc(pf.detail||pf.reason||'preflight failed')+'">failed · '+esc((pf.detail||pf.reason||'').slice(0,60))+'</span>'}
+function srcCard(name,s,pf){s=s||{};const counts=s.counts||{};
+ return '<div class="conn-card'+(s.enabled?'':' off')+'" data-source="'+esc(name)+'"><h4>'+esc(SRC_LABEL[name]||name)+'<span style="margin-left:auto">'+preflightPill(pf)+' '+srcStatus(s)+'</span></h4>'+
   '<div class="hl"><span>last run</span><span class="mono">'+(s.last_run?esc(ago(s.last_run)):'—')+'</span>'+
   '<span>next run</span><span class="mono">'+(s.next_run?esc(when(s.next_run)):'not scheduled')+'</span>'+
   (SRC_COUNTS[name]||Object.keys(counts)).map(k=>'<span>'+esc(k)+'</span><span class="mono">'+num(counts[k])+'</span>').join('')+
   (name==='github'?'<span>rate limit remaining</span><span class="mono">'+(s.rate_limit_remaining==null?'unknown — live connector not attached':num(s.rate_limit_remaining))+'</span>':'')+
   '<span>facts as of</span><span class="mono">'+esc(s.as_of||'—')+'</span></div></div>'}
-async function loadSources(){try{const d=await api('/admin/sources');$('#sources-cards').innerHTML=['github','jira','confluence'].map(n=>srcCard(n,d[n])).join('')}
+async function loadSources(){try{const d=await api('/admin/sources');
+  let PF={};try{const pf=await api('/api/preflight');(pf.results||[]).forEach(r=>{const k=String(r.key||'').toLowerCase();['github','jira','confluence'].forEach(n=>{if(k.indexOf(n)>=0&&!PF[n])PF[n]=r})})}catch(e){}
+  $('#sources-cards').innerHTML=['github','jira','confluence'].map(n=>srcCard(n,d[n],PF[n])).join('')}
  catch(e){$('#sources-cards').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
 
 // ---------------------------------------------------------------- T83 coverage matrix
@@ -390,7 +412,7 @@ async function loadAll(){
  // T116 — every admin panel loads INDEPENDENTLY: one loader failing (e.g. a
  // transient error on /admin/connectors) must never blank the others. Each
  // loader catches and shows its own empty state; allSettled never short-circuits.
- await Promise.allSettled([loadConnectors(),loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadSources(),loadCoverage(),loadSLA(),loadOverview(),loadObservability(),refreshUploads()]);
+ await Promise.allSettled([loadConnectors(),loadRuns(),loadUsers(),loadAuthority(),loadAudit(),loadModels(),loadProviderRadio(),loadSources(),loadCoverage(),loadSLA(),loadOverview(),loadObservability(),refreshUploads()]);
  try{if(await loadRuns())schedulePoll()}catch(e){}}
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{$('#connectors').innerHTML='';gate({status:401,message:''},'admin')}};
 KF.initBar({preferRole:'admin'});
