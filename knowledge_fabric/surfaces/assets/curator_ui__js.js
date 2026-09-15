@@ -75,7 +75,7 @@ function renderFeedback(rows){const fb=rows||[];
 async function loadFeedback(){try{const d=await api('/curator/feedback');renderFeedback(d.feedback)}catch(e){}}
 async function loadAll(){try{
  const [q,g,d]=await Promise.all([api('/curator/quality'),api('/curator/gaps'),api('/curator/documents')]);gate(null);
- renderQuality(q);renderQueues(g);DOCS=d.documents||[];DATASET=d.dataset_version||0;renderDocs();renderAuthority(d.authority);loadFeedback();loadFabricViews();loadGovernance();loadTimeline();loadGraph();loadRegistry()}
+ renderQuality(q);renderQueues(g);DOCS=d.documents||[];DATASET=d.dataset_version||0;renderDocs();renderAuthority(d.authority);loadFeedback();loadFabricViews();loadGovernance();loadTimeline();loadGraph();loadRegistry();loadGolden()}
  catch(e){gate(e,'curator');if(e.status!==401&&e.status!==403)toast(e.message,'bad')}}
 
 async function decide(doc_id,decision,extra){const doc=DOCS.find(x=>x.document_id===doc_id)||{title:doc_id};
@@ -321,6 +321,38 @@ async function addKnown(ev){ev.preventDefault();
  catch(e){$('#reg-status').textContent=e.message;toast(e.message,'bad')}
  finally{$('#reg-add-btn').disabled=false}}
 
+// ===================== T157 — golden answers =====================
+function renderGolden(d){const items=(d&&d.items)||[];$('#golden-count').textContent=items.length+' golden';
+ const rows=$('#golden-rows');
+ rows.innerHTML=items.length?items.map(g=>{
+  const cites=(g.citations||[]).map(c=>'<span class="pill">'+esc(typeof c==='string'?c:(c.title||c.n||''))+'</span>').join(' ');
+  return '<tr><td>'+esc(g.question||'')+(cites?'<div class="muted small" style="margin-top:3px">'+cites+'</div>':'')+'</td>'+
+   '<td>'+esc((g.answer||'').slice(0,180))+((g.answer||'').length>180?'…':'')+'</td>'+
+   '<td class="small">'+esc(g.author||'')+'</td>'+
+   '<td class="mono small">'+(g.ts?ago(g.ts):'')+'</td>'+
+   '<td><button class="btn sm" data-edit="'+esc(g.id)+'" data-q="'+esc(g.question||'')+'">Edit</button> '+
+   '<button class="btn sm" data-del="'+esc(g.id)+'">Delete</button></td></tr>'}).join('')
+  :'<tr><td colspan="5" class="empty">No golden answers yet — save one below, or from a &#128077; on an answer.</td></tr>';
+ KF.$$('#golden-rows button[data-del]').forEach(b=>b.onclick=()=>delGolden(b.dataset.del));
+ KF.$$('#golden-rows button[data-edit]').forEach(b=>b.onclick=()=>{
+  const g=items.find(x=>x.id===b.dataset.edit)||{};
+  $('#gold-q').value=g.question||'';$('#gold-a').value=g.answer||'';
+  $('#gold-cites').value=(g.citations||[]).map(c=>typeof c==='string'?c:(c.title||'')).join(', ');
+  $('#gold-q').focus();});}
+async function loadGolden(){try{renderGolden(await api('/curator/golden'))}catch(e){if(e.status!==404)toast(e.message,'bad')}}
+async function delGolden(id){try{await api('/curator/golden',{method:'POST',body:{action:'delete',id}});toast('Golden answer retired','good');await loadGolden()}catch(e){toast(e.message,'bad')}}
+async function saveGolden(ev){ev.preventDefault();
+ const question=$('#gold-q').value.trim(),answer=$('#gold-a').value.trim();
+ if(!question||!answer){toast('question and answer are required','bad');return}
+ const citations=$('#gold-cites').value.split(',').map(s=>s.trim()).filter(Boolean);
+ $('#gold-add-btn').disabled=true;$('#gold-status').textContent='saving…';
+ try{const out=await api('/curator/golden',{method:'POST',body:{question,answer,citations}});
+  if(out&&out.ok===false){throw new Error(out.error||'could not save')}
+  $('#gold-status').textContent='saved · served instantly for this question';toast('Golden answer saved','good');
+  $('#gold-q').value='';$('#gold-a').value='';$('#gold-cites').value='';await loadGolden()}
+ catch(e){$('#gold-status').textContent=e.message;toast(e.message,'bad')}
+ finally{$('#gold-add-btn').disabled=false}}
+
 window.KF_ON_SESSION=s=>{if(s)loadAll();else{DOCS=[];renderDocs();gate({status:401,message:''},'curator')}};
 KF.initBar({preferRole:'curator'});
 $('#doc-filter').addEventListener('change',renderDocs);$('#doc-search').addEventListener('input',renderDocs);
@@ -329,6 +361,7 @@ $('#add-doc-form').addEventListener('submit',addDoc);
 wireCurDropzone();  // T144 — Curator upload drop zone
 $('#repo-refresh').onclick=loadFabricViews;$('#repo-close').onclick=()=>$('#repo-panel').classList.add('hidden');$('#tq-run').onclick=runTableQuery;
 $('#registry-form').addEventListener('submit',addKnown);
+$('#golden-form').addEventListener('submit',saveGolden);
 // T134 — recompute the readiness rings, gaps and timeline live on any change.
 if(KF.onChange)KF.onChange(()=>{if(KF.session)loadAll()});
 if(KF.session)loadAll();else gate({status:401,message:''},'curator');

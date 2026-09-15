@@ -273,6 +273,37 @@ _REGISTRY = card(
     right='<span class="pill" id="registry-count"></span>',
 )
 
+# T157 — golden answers: a curator saves a verified {question, answer, citations}
+# that the fabric serves FIRST for that question (exact or ≥ 0.9 similarity), at
+# Level 0, $0, model "golden". List, add and delete below; readers can also propose
+# one with "Save as golden" on a thumbs-up in the Workspace.
+_GOLDEN = card(
+    "Golden answers",
+    '<div class="muted small">Curator-verified answers. A saved golden is served '
+    "first for its question &mdash; before retrieval or any model call &mdash; "
+    "instantly, at $0, cited. Edit by saving the same question again; delete to "
+    "retire it.</div>"
+    '<div class="tablewrap" style="margin-top:8px"><table id="golden-table">'
+    "<thead><tr><th>Question</th><th>Answer</th><th>Author</th><th>Saved</th>"
+    "<th>Actions</th></tr></thead>"
+    '<tbody id="golden-rows"><tr><td colspan="5" class="empty">Sign in as a '
+    "curator to load golden answers.</td></tr></tbody></table></div>"
+    '<form id="golden-form" class="col" style="margin-top:10px">'
+    '<input id="gold-q" placeholder="Question, e.g. what is our Knowledge Fabric" '
+    "required>"
+    '<textarea id="gold-a" placeholder="The verified answer readers should get." '
+    "required></textarea>"
+    '<div class="row"><input id="gold-cites" placeholder="citations '
+    '(comma-separated titles/URLs, optional)" style="flex:2">'
+    '<button class="btn primary" id="gold-add-btn" type="submit">Save golden '
+    "answer</button></div>"
+    '<span class="muted small" id="gold-status">Persisted to the governed golden '
+    "store and served instantly for its question.</span>"
+    "</form>",
+    "golden-card",
+    right='<span class="pill" id="golden-count"></span>',
+)
+
 _DRAWER = _read_asset("curator_ui__drawer.html")
 
 _FEEDBACK = card(
@@ -351,6 +382,7 @@ _BODY = (
     f'<div style="margin-top:14px">{_QUEUES}</div>'
     f'<div style="margin-top:14px">{_CURATION}</div>'
     f'<div style="margin-top:14px">{_REGISTRY}</div>'
+    f'<div style="margin-top:14px">{_GOLDEN}</div>'
     f'<div style="margin-top:14px">{_TIMELINE}</div>'
     f'<div style="margin-top:14px">{_GRAPH}</div>'
     f'<div style="margin-top:14px">{_FEEDBACK}</div>'
