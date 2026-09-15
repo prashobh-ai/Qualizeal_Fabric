@@ -1519,6 +1519,83 @@
                        signals: {}, retrieved: (a.citations || []).length };
     return a;
   }
+  // ---- T157: curator-authored golden answers ----------------------------
+  // A curator can save a verified {question, answer, citations} as a "golden"
+  // answer. Every question checks golden FIRST — an exact normalised match or a
+  // ≥ 0.9 token-similarity match is served at Level 0, $0, model "golden", cited,
+  // before any retrieval or model call. Persisted per visitor in localStorage
+  // (kf.golden); on a live deployment this is the governed store. Overlay shape:
+  // { items: [ {id, question, answer, citations[], author, ts} ], removed: {id:1} }.
+  function goldenOverlay() {
+    try { return JSON.parse(localStorage.getItem("kf.golden") || "{}") || {}; } catch (e) { return {}; }
+  }
+  function saveGoldenOverlay(st) { try { localStorage.setItem("kf.golden", JSON.stringify(st)); } catch (e) {} }
+  function goldenItems() {
+    var baked = (SNAP.golden && SNAP.golden.items) || [];
+    var ov = goldenOverlay(), removed = ov.removed || {};
+    var out = baked.filter(function (g) { return !removed[g.id]; }).map(clone);
+    (ov.items || []).forEach(function (g) {
+      var i = -1;
+      out.some(function (x, k) { if (x.id === g.id) { i = k; return true; } return false; });
+      if (i >= 0) out[i] = clone(g); else out.push(clone(g));
+    });
+    return out;
+  }
+  // Token Jaccard on the normalised text — the same "≥ 0.9 similarity" the spec asks
+  // for, so a lightly reworded repeat of a curated question still resolves to golden.
+  function goldenSim(a, b) {
+    var A = norm(a).split(" ").filter(Boolean), B = norm(b).split(" ").filter(Boolean);
+    if (!A.length || !B.length) return 0;
+    var inB = {}; B.forEach(function (t) { inB[t] = 1; });
+    var inter = 0, seen = {};
+    A.forEach(function (t) { if (inB[t] && !seen[t]) { inter += 1; seen[t] = 1; } });
+    var uniq = {}; A.concat(B).forEach(function (t) { uniq[t] = 1; });
+    return inter / Object.keys(uniq).length;
+  }
+  function goldenLookup(question) {
+    var nq = norm(question); if (!nq) return null;
+    var best = null, bestS = 0;
+    goldenItems().forEach(function (g) {
+      var s = norm(g.question) === nq ? 1 : goldenSim(question, g.question);
+      if (s > bestS) { bestS = s; best = g; }
+    });
+    if (!best || bestS < 0.9) return null;
+    var cites = (best.citations || []).map(function (c, i) {
+      return typeof c === "string" ? { n: i + 1, title: c, snippet: "" } : c;
+    });
+    var a = mkAnswer("golden", 0, best.answer || "", cites, 0.99);
+    a.model_name = "golden"; a.provider = "golden";
+    a.cost = 0; a.tokens_in = 0; a.tokens_out = 0; a.tokens = 0; a.cost_saved = 0;
+    a.saved_bucket = "golden";
+    a.golden = { id: best.id, author: best.author || "", ts: best.ts || 0, similarity: Number(bestS.toFixed(3)) };
+    a.why.level_name = "golden";
+    a.why.explain = "Answered from a curated golden answer.";
+    a.why.reasons = [{ code: "golden", detail: "Curator-verified answer for this question." }];
+    return a;
+  }
+  function upsertGolden(body) {
+    body = body || {};
+    var q = String(body.question || "").trim(), ans = String(body.answer || "").trim();
+    if (!q || !ans) return { ok: false, error: "question and answer are both required" };
+    var id = body.id || ("g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
+    var entry = { id: id, question: q, answer: ans, citations: body.citations || [],
+      author: body.author || "", ts: Date.now() };
+    var st = goldenOverlay();
+    st.items = (st.items || []).filter(function (g) { return g.id !== id; });
+    st.items.push(entry);
+    if (st.removed) delete st.removed[id];
+    saveGoldenOverlay(st);
+    return { ok: true, entry: entry };
+  }
+  function deleteGolden(id) {
+    var st = goldenOverlay();
+    st.items = (st.items || []).filter(function (g) { return g.id !== id; });
+    st.removed = st.removed || {}; st.removed[id] = 1;  // also hides a baked golden
+    saveGoldenOverlay(st);
+    return { ok: true, id: id };
+  }
+  function goldenPayload() { return { items: goldenItems() }; }
+
   function answerFor(subject, question, context) {
     var designation = designationOf(subject);  // the signed-in identity's org title
     // Rich two-turn context from the client, else a legacy history of strings.
@@ -1527,6 +1604,18 @@
         return { question: q, subject: "", answer_docs: [], kind: "answer", options: [] };
       });
     var prof = PERSONA_PROFILE[personaFor(designation)];  // T27 depth + emphasis
+    // T157 — a curator-verified golden answer wins over everything: checked FIRST,
+    // before the list/facts/retrieval tiers and any model call, and served at Level 0,
+    // $0, model "golden", with the curator's text and citations.
+    var gold = goldenLookup(question);
+    if (gold) {
+      gold.role_view = roleView(gold, designation);
+      answerFirst(gold, designation);
+      bumpUsage(subject, gold);
+      bumpMeter(gold);
+      evAnswer(subject, designation, question, gold);
+      return Promise.resolve(gold);
+    }
     // T142 — a "what all services/products" question is a Level-0 document list. It
     // is resolved before coreference/clarify and before the baked cache, so it can
     // never be turned into a clarify-back or a single-document baked answer.
@@ -2100,6 +2189,13 @@
   }
   function handle(method, path, q, body, token) {
     var subject = subjectOf(token);
+    // T157 — REST delete of a golden answer: DELETE /curator/golden/{id}.
+    if (method === "DELETE" && path.indexOf("/curator/golden/") === 0) {
+      var gidD = decodeURIComponent(path.slice("/curator/golden/".length));
+      var gdD = deleteGolden(gidD);
+      evAppend("curation", { action: "golden-delete", document_id: gidD, actor: subject });
+      return respond(gdD);
+    }
     if (method === "POST") {
       if (path === "/login") {
         var r = resolveLogin(body.subject, body.password);
@@ -2196,10 +2292,23 @@
         evAppend("curation", { action: "delete-document", document_id: du.document_id || "", actor: subject });
         return respond(du);
       }
+      // T157 — save (or delete) a curator golden answer; persisted per visitor.
+      if (path === "/curator/golden") {
+        if ((body || {}).action === "delete" && (body || {}).id) {
+          var gdel = deleteGolden(body.id);
+          evAppend("curation", { action: "golden-delete", document_id: body.id, actor: subject });
+          return respond(gdel);
+        }
+        var gup = upsertGolden(Object.assign({ author: subject }, body || {}));
+        if (gup.ok) evAppend("curation", { action: "golden-save",
+          document_id: (gup.entry && gup.entry.id) || "", actor: subject });
+        return respond(gup, gup.ok ? 200 : 400);
+      }
       // bulk-delete / budget / authority — demo success
       return respond({ ok: true, note: "showcase — action acknowledged (no server-side state on Pages)" });
     }
     // GET
+    if (path === "/curator/golden") return respond(goldenPayload());  // T157
     // T117 — the static build always runs in dev-login mode (no OIDC on Pages),
     // so the sign-in page keeps its email+password form and the dev picker.
     if (path === "/api/auth/config") return respond({ mode: "password", sso: { enabled: false, label: "SSO" }, dev_login: true });

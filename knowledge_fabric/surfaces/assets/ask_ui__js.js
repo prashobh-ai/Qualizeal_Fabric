@@ -69,9 +69,14 @@ function aiBlock(a,i){const lw=levelWord((a.why||{}).level_name);
    '<div class="clarify-chips">'+a.suggestions.map(s=>'<span class="chip" data-cq="'+esc(s)+'">'+esc(s)+'</span>').join('')+'</div>':'';
   body='<div class="decline">'+esc(a.kind==='clarify'?(a.clarify_back||DECLINE):DECLINE)+
    (reason&&a.kind!=='clarify'?'<div class="why">'+esc(reason)+'</div>':'')+sugg+'</div>';}
+ // T157 — a curator viewing an answer can promote it to a golden answer, served
+ // first for that question thereafter. Only shown for a curator on a real answer.
+ const canGold=a.kind==='answer'&&(a.role_view||{}).lens==='curation';
+ const goldBtn=canGold?'<button class="fbbtn gold" title="Save as a curated golden answer">&#9733; Save as golden</button>':'';
  const fb='<div class="fbbar" data-i="'+i+'"><span class="muted small">Was this helpful?</span>'+
   '<button class="fbbtn up" title="Helpful">&#128077;</button>'+
   '<button class="fbbtn down" title="Not helpful — flag for the curators">&#128078;</button>'+
+  goldBtn+
   '<span class="fbmsg muted small"></span></div>';
  const baked=a.baked?'<span class="pill info" title="'+esc(a.baked.asked_at||'')+'">'+(a.baked.source==='queue'?'full answer':'baked')+'</span>':'';
  const gov=a.kind==='answer'?govLine(a):'';
@@ -218,7 +223,14 @@ function wireFeedback(){const t=curThread();if(!t)return;
    bar.querySelectorAll('.fbbtn').forEach(b=>b.disabled=true)};
   bar.querySelector('.up').onclick=e=>{e.stopPropagation();done('up')};
   bar.querySelector('.down').onclick=e=>{e.stopPropagation();
-   api('/feedback',{method:'POST',body:feedbackBody(t,+bar.dataset.i)}).catch(()=>{});done('down')}})}
+   api('/feedback',{method:'POST',body:feedbackBody(t,+bar.dataset.i)}).catch(()=>{});done('down')};
+  // T157 — promote this answer to a curated golden answer (curators only).
+  const g=bar.querySelector('.gold');
+  if(g)g.onclick=e=>{e.stopPropagation();const a=turn.a||{};
+   const cites=(a.citations||[]).map(c=>c.document_title||c.title).filter(Boolean);
+   api('/curator/golden',{method:'POST',body:{question:turn.q,answer:a.result||a.answer_text||'',citations:cites}})
+    .then(()=>{bar.querySelector('.fbmsg').textContent='Saved as a golden answer.';g.disabled=true;})
+    .catch(err=>{bar.querySelector('.fbmsg').textContent=(err&&err.message)||'Could not save.'})}})}
 // Capture the FULL context of the flagged turn so a curator can see what
 // happened in the chat: the exact question, what the AI actually answered, the
 // sources it cited, the persona/level it used, and the couple of turns before

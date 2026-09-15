@@ -68,6 +68,7 @@ main{max-width:none;padding:0;display:flex;flex-direction:column}
 .fbbar{display:flex;align-items:center;gap:6px;margin-top:10px}
 .fbbtn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:2px 8px;cursor:pointer;font-size:13px}
 .fbbtn:hover{border-color:var(--qz-blue)}.fbbtn:disabled{opacity:.45;cursor:default}
+.fbbtn.gold{color:#8a6d0b;border-color:#e8c766}.fbbtn.gold:hover{background:#fff7e0;border-color:#d9a400}
 .fbmsg{margin-left:4px}
 
 /* ---- composer ---- */
