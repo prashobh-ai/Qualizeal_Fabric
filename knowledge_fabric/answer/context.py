@@ -67,15 +67,19 @@ _STOP = {
     "my",
 }
 # pronoun / possessive with no entity of its own
+# NB: existential/expletive "there" ("is there any code", "how many … are
+# there") is NOT anaphora — it is deliberately excluded so it never trips a
+# coreference clarify ahead of retrieval.
 _PRONOUN = re.compile(
-    r"\b(it'?s?|its|they|them|their|theirs|the same|there|"
+    r"\b(it'?s?|its|they|them|their|theirs|the same|"
     r"this|that|these|those|one|the (?:product|tool|platform|service|solution|offering))\b",
     re.I,
 )
 _ORDINAL = {"first": 0, "1st": 0, "second": 1, "2nd": 1, "third": 2, "3rd": 2, "last": -1}
-_INTENT_NO_ENTITY = re.compile(
-    r"\b(compare|comparison|difference|differ|integrate|migrate)\b", re.I
-)
+# Only genuine "compare two things" intents ask "which two?" — an integrate/migrate
+# question ("integrate with Jira", "migrate to X") names its own target and is
+# answered by retrieval, so those words are deliberately not here.
+_INTENT_NO_ENTITY = re.compile(r"\b(compare|comparison|difference|differ)\b", re.I)
 _HAS_VERB = re.compile(
     r"\b(is|are|was|were|do|does|did|has|have|can|will|should|use|uses|work|works|"
     r"cost|costs|support|supports|provide|provides|run|runs|make|made|help|helps|"
@@ -219,10 +223,16 @@ def resolve(question: str, turns: list[Turn], subjects: dict, bank_subjects=None
                 tail = re.sub(r"^(and|what about|how about)\b", "", q, flags=re.I).strip(" ?")
                 rewritten = f"{subject} {tail}".strip()
             return Resolution(rewritten, understood_as=rewritten)
-        # pronoun with nothing to resolve to → ask back
-        chips = _recent_subjects(turns, subjects) or (bank_subjects or [])[:3]
-        if chips:
-            return Resolution(q, clarify={"chips": chips[:3], "reason": "Which one do you mean?"})
+        # A bare reference with nothing to resolve to asks back; a question that
+        # carries its own content (>= 2 tokens) falls through to retrieval, so an
+        # existential/expletive phrasing is not turned into a clarify before it is
+        # ever tried.
+        if len(_content(q)) < 2:
+            chips = _recent_subjects(turns, subjects) or (bank_subjects or [])[:3]
+            if chips:
+                return Resolution(
+                    q, clarify={"chips": chips[:3], "reason": "Which one do you mean?"}
+                )
 
     # intent with no entity ("compare", "difference") and no subject → ask back.
     if _INTENT_NO_ENTITY.search(q) and not subject:

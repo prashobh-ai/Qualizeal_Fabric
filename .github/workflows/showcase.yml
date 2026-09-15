@@ -50,6 +50,17 @@ jobs:
       CONFLUENCE_URL: ${{ secrets.CONFLUENCE_URL }}
       CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
       CONFLUENCE_TOKEN: ${{ secrets.CONFLUENCE_TOKEN }}
+      # T150 — the ingest SCOPE (which org / repos / projects / spaces / site to
+      # pull). A source secret authenticates; these say WHAT to fetch, and without
+      # them the ingest correctly skips (the token alone has no target). They come
+      # from repo Variables (Settings → Secrets and variables → Actions → Variables),
+      # not secrets — an org name is not a secret — and are empty by default, so the
+      # stdlib-only demo build is unchanged until an org is approved and set here.
+      KF_GITHUB_ORG: ${{ vars.KF_GITHUB_ORG }}
+      KF_GITHUB_REPOS: ${{ vars.KF_GITHUB_REPOS }}
+      JIRA_PROJECTS: ${{ vars.JIRA_PROJECTS }}
+      CONFLUENCE_SPACES: ${{ vars.CONFLUENCE_SPACES }}
+      KF_WEBSITE_URL: ${{ vars.KF_WEBSITE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

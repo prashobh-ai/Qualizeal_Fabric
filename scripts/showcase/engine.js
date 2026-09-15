@@ -686,9 +686,14 @@
   var CX_STOP = { the:1,a:1,an:1,of:1,to:1,"in":1,on:1,"for":1,and:1,or:1,is:1,are:1,
     what:1,which:1,how:1,who:1,when:1,where:1,does:1,do:1,did:1,was:1,with:1,that:1,
     "this":1,it:1,as:1,by:1,at:1,from:1,about:1,me:1,my:1 };
-  var PRONOUN = /\b(it'?s?|its|they|them|their|theirs|the same|there|this|that|these|those|one|the (?:product|tool|platform|service|solution|offering))\b/i;
+  // NB: existential/expletive "there" ("is there any code", "how many … are
+  // there") is NOT anaphora — it is deliberately excluded so it never trips a
+  // coreference clarify ahead of retrieval.
+  var PRONOUN = /\b(it'?s?|its|they|them|their|theirs|the same|this|that|these|those|one|the (?:product|tool|platform|service|solution|offering))\b/i;
   var CX_ORDINAL = { first:0,"1st":0,second:1,"2nd":1,third:2,"3rd":2,last:-1 };
-  var CX_INTENT_NO_ENTITY = /\b(compare|comparison|difference|differ|integrate|migrate)\b/i;
+  // Only genuine "compare two things" intents ask "which two?" — an
+  // integrate/migrate question names its own target and is answered by retrieval.
+  var CX_INTENT_NO_ENTITY = /\b(compare|comparison|difference|differ)\b/i;
   var CX_HAS_VERB = /\b(is|are|was|were|do|does|did|has|have|can|will|should|use|uses|work|works|cost|costs|support|supports|provide|provides|run|runs|make|made|help|helps|handle|handles|mean|means|need|needs)\b/i;
   function cxToks(s) { return (String(s || "").toLowerCase().match(CX_TOKEN) || []); }
   function cxContent(s) { return cxToks(s).filter(function (t) { return !CX_STOP[t]; }); }
@@ -787,9 +792,16 @@
         }
         return { question: rwp, understood_as: rwp, clarify: null };
       }
-      var chips = cxRecent(turns); if (!chips.length) chips = bank.slice(0, 3);
-      if (chips.length)
-        return { question: q, understood_as: null, clarify: { chips: chips.slice(0, 3), reason: "Which one do you mean?" } };
+      // A bare reference with nothing to resolve to asks back; but a question
+      // that carries its own content (≥ 2 content tokens) falls through to live
+      // retrieval, which answers it or reports an honest gap. This keeps an
+      // existential/expletive phrasing ("is it possible to…", "are these…")
+      // from being turned into a product-chip clarify before it is ever tried.
+      if (cxContent(q).length < 2) {
+        var chips = cxRecent(turns); if (!chips.length) chips = bank.slice(0, 3);
+        if (chips.length)
+          return { question: q, understood_as: null, clarify: { chips: chips.slice(0, 3), reason: "Which one do you mean?" } };
+      }
     }
 
     // intent with no entity ("compare", "difference") and no subject → ask back.
