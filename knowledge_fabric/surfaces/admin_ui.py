@@ -107,20 +107,55 @@ _BUDGET = card(
     "budget",
 )
 
+_DESIGNATIONS = (
+    "Developer",
+    "Tester",
+    "Architect",
+    "Delivery Manager",
+    "Delivery Head",
+    "Sales",
+    "HR",
+    "Executive",
+)
+_DESIGNATION_OPTS = "".join(f"<option>{d}</option>" for d in _DESIGNATIONS)
+
 _USERS = card(
     "Users &amp; access",
-    '<div class="row" id="add-user-form" style="margin-bottom:10px;gap:6px">'
-    '<input id="nu-subject" placeholder="user id (e.g. analyst.jo)" style="flex:1;min-width:130px">'
-    '<input id="nu-designation" placeholder="designation (e.g. Developer, CTO)" '
-    'title="The user&#39;s org title — conditions how answers are framed (T27)" '
-    'style="flex:1;min-width:150px">'
-    '<select id="nu-role"><option value="asker">Asker</option>'
-    '<option value="curator">Curator</option><option value="admin">Admin</option></select>'
-    '<label class="small muted"><input type="checkbox" id="nu-restricted"> restricted</label>'
-    '<button class="btn primary sm" id="add-user-btn">Add user</button></div>'
+    '<div class="grid" id="add-user-form" '
+    'style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px;margin-bottom:10px">'
+    '<input id="nu-subject" placeholder="user id (e.g. analyst.jo)">'
+    '<input id="nu-email" placeholder="email (optional)">'
+    '<select id="nu-role" title="Access role">'
+    '<option value="asker">Asker</option><option value="curator">Curator</option>'
+    '<option value="admin">Admin</option><option value="agent">Agent</option></select>'
+    '<select id="nu-designation" title="Org title — conditions how answers are framed (T27)">'
+    '<option value="">designation…</option>' + _DESIGNATION_OPTS + "</select>"
+    '<input id="nu-department" placeholder="department (optional)">'
+    '<input id="nu-team" placeholder="team (optional)">'
+    '<input id="nu-cap" type="number" min="0" placeholder="daily cap $" '
+    'title="Daily spend cap (USD)">'
+    '<label class="small muted" style="display:flex;align-items:center;gap:4px">'
+    '<input type="checkbox" id="nu-restricted"> restricted</label>'
+    '<button class="btn primary sm" id="add-user-btn">Add / update user</button></div>'
+    '<details class="paste-add" style="margin-bottom:10px"><summary>Import users from CSV</summary>'
+    '<div class="muted small" style="margin:6px 0">One user per line: '
+    "<code>subject,designation,role,email,department,team,daily_cap</code>. "
+    "Preview validates each row before import.</div>"
+    '<textarea id="nu-csv" placeholder="analyst.jo,Tester,asker,jo@acme.com,QA,Payments,5" '
+    'style="width:100%;min-height:70px"></textarea>'
+    '<div class="row" style="margin-top:6px">'
+    '<button class="btn sm" id="nu-csv-preview">Preview</button>'
+    '<button class="btn sm primary" id="nu-csv-import" disabled>Import</button>'
+    '<span class="muted small" id="nu-csv-status"></span></div>'
+    '<div id="nu-csv-rows"></div></details>'
     '<div class="tablewrap"><table id="users-table">'
-    "<thead><tr><th>Subject</th><th>Designation</th><th>Roles</th><th>Scopes</th><th></th></tr></thead>"
-    '<tbody id="users-rows"><tr><td colspan="5" class="empty">—</td></tr></tbody></table></div>',
+    "<thead><tr><th>Subject</th><th>Designation</th><th>Roles</th><th>Scopes</th>"
+    "<th>Email</th><th>Status</th><th>Actions</th></tr></thead>"
+    '<tbody id="users-rows"><tr><td colspan="7" class="empty">—</td></tr></tbody></table></div>'
+    '<div class="section-title" style="margin-top:12px">Access matrix '
+    '<span class="muted small">users per role &times; scope</span></div>'
+    '<div class="tablewrap"><table id="access-matrix">'
+    '<tbody><tr><td class="empty">—</td></tr></tbody></table></div>',
     "users",
 )
 
